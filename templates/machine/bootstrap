@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# Забрать stackyard, на котором работает эта машина.
+#
+# Единственный файл, который обязан работать ДО того, как платформа появилась,
+# поэтому он самодостаточен: чистый bash, ничего из platform/ не подключает.
+# Он же единственный, что здесь коммитится из платформенной части — сама
+# платформа в git машины не лежит.
+#
+#   git clone <репозиторий машины> && cd <машина> && ./bootstrap
+#
+# Закрепление — по КОММИТУ, а не по хешу архива. Автоматические архивы GitHub
+# (/archive/refs/tags/*.tar.gz) байт-стабильными не гарантированы: их формат
+# уже менялся, ломая чек-суммы. Коммит неизменен по определению.
+#
+# Для разработки платформы: STACKYARD_SOURCE=/путь/к/локальному/stackyard ./bootstrap
+# берёт локальный каталог вместо сети. Это же режим установки без интернета.
+
+set -euo pipefail
+
+ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+LOCK="$ROOT/stackyard.lock"
+DEST="$ROOT/.stackyard"
+
+[ -f "$LOCK" ] || { echo "Ошибка: нет $LOCK — неизвестно, какой stackyard нужен" >&2; exit 2; }
+
+val() { grep -E "^$1=" "$LOCK" | tail -n 1 | cut -d= -f2- | tr -d '"'"'"; }
+REPO="$(val repo)"; VERSION="$(val version)"; COMMIT="$(val commit)"
+
+[ -n "$COMMIT" ] || { echo "Ошибка: в $LOCK не задан commit" >&2; exit 2; }
+
+# Уже то, что нужно — выходим молча. bootstrap зовут и из юнитов, и руками,
+# и он обязан быть дешёвым при повторном запуске.
+if [ -f "$DEST/.commit" ] && [ "$(cat "$DEST/.commit")" = "$COMMIT" ]; then
+  echo "stackyard $VERSION ($COMMIT) уже на месте"
+else
+  rm -rf "$DEST.tmp" "$DEST"
+  if [ -n "${STACKYARD_SOURCE:-}" ]; then
+    echo "stackyard из локального каталога: $STACKYARD_SOURCE"
+    [ -d "$STACKYARD_SOURCE" ] || { echo "Ошибка: нет $STACKYARD_SOURCE" >&2; exit 2; }
+    mkdir -p "$DEST.tmp"
+    # Через git archive, а не cp: в копию не должны попасть ни .git, ни чужие
+    # незакоммиченные правки — иначе «локальный режим» тихо отличался бы от того,
+    # что получит машина из сети.
+    ( cd "$STACKYARD_SOURCE" && git archive HEAD ) | tar -x -C "$DEST.tmp"
+    ( cd "$STACKYARD_SOURCE" && git rev-parse HEAD ) > "$DEST.tmp/.commit"
+  else
+    echo "stackyard $VERSION: получаю $REPO"
+    command -v git >/dev/null || { echo "Ошибка: нужен git" >&2; exit 2; }
+    git clone --quiet --depth 1 --branch "$VERSION" "$REPO" "$DEST.tmp"
+    got="$( cd "$DEST.tmp" && git rev-parse HEAD )"
+    # Тег мог быть передвинут после того, как машину закрепили. Отказ, а не
+    # предупреждение: дальше поедет код, которого никто не утверждал.
+    if [ "$got" != "$COMMIT" ]; then
+      echo "ОТКАЗ: тег $VERSION указывает на $got, а в stackyard.lock записан $COMMIT." >&2
+      echo "  Тег передвинули. Проверьте, что именно изменилось, и обновите lock осознанно." >&2
+      rm -rf "$DEST.tmp"; exit 1
+    fi
+    printf '%s\n' "$got" > "$DEST.tmp/.commit"
+    rm -rf "$DEST.tmp/.git"
+  fi
+  mv "$DEST.tmp" "$DEST"
+  echo "stackyard $VERSION ($COMMIT) установлен в .stackyard/"
+fi
+
+# Слои подключаются симлинками внутрь машины: compose и обёртки обращаются к
+# ./platform и ./profile, и им не должно быть важно, откуда те взялись.
+ln -sfn .stackyard/platform "$ROOT/platform"
+ln -sfn .stackyard/profiles "$ROOT/profile"
+
+echo "Готово. Дальше: sudo ./host-setup --check"
