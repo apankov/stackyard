@@ -712,7 +712,7 @@ verb_sync() {
 
 verb_check() {
   local s line fn up pair missing include_file awk_svc cfg_svc decl_problems_before
-  local db_file perm init_state init_svc
+  local db_file perm init_state init_svc img_problem zone_problem
 
   step "Манифест"
   if [ -f "$MANIFEST" ]; then
@@ -758,6 +758,20 @@ verb_check() {
   done < <(stacks_enabled 2>/dev/null)
   if [ "$PROBLEMS" -eq "$decl_problems_before" ]; then
     ok "домены, пути, имена юнитов и зависимости в порядке"
+  fi
+
+  step "Образ nginx"
+  # До всего остального, что касается nginx: с несовместимым образом он не
+  # стартует вовсе, и все прочие находки про него бессмысленны.
+  img_problem="$(check_nginx_image)"
+  if [ -n "$img_problem" ]; then bad "$img_problem"; else ok "образ поддерживает директивы платформы"; fi
+
+  zone_problem="$(check_limit_zones)"
+  if [ -n "$zone_problem" ]; then
+    printf '%s\n' "$zone_problem" | while IFS= read -r l; do [ -n "$l" ] && bad "$l"; done
+    PROBLEMS=$((PROBLEMS + 1))
+  else
+    ok "все зоны лимитов, на которые ссылаются vhost'ы, определены"
   fi
 
   step "Статика nginx"

@@ -32,8 +32,8 @@ NAME="$(basename "$DEST")"
 VERSION="v$(cat "$ROOT/platform/VERSION")"
 COMMIT="$( cd "$ROOT" && git rev-parse HEAD )"
 
-mkdir -p "$DEST"/{stacks,state/htpasswd,state/certs,dumps,gpg}
-touch "$DEST/state/.keepit" "$DEST/dumps/.keepit" "$DEST/gpg/.keepit"
+mkdir -p "$DEST"/{stacks,state/htpasswd,state/certs,dumps,gpg,nginx}
+touch "$DEST/state/.keepit" "$DEST/dumps/.keepit" "$DEST/gpg/.keepit" "$DEST/nginx/.keepit"
 
 # Образцы бэкапа и оповещений. Файлы отдельные от .env намеренно: они НЕ входят
 # в список --env-file docker-compose.sh, и лишний обязательный env-файл был бы

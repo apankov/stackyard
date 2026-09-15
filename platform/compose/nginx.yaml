@@ -22,6 +22,9 @@ services:
       # исключительно через include'ы из 00-enabled.conf — в этом и состоит
       # механизм выключения стека. Монтирования постоянные и от набора
       # включённых стеков не зависят.
+      # http-конфиг самой машины: её зоны лимитов и карты. Включается из
+      # генерируемого 10-enabled.conf первой строкой, до любого server-блока.
+      - ${Platform_Deploy_Dir:?}/nginx:/etc/nginx/machine:ro
       - ${Platform_Deploy_Dir:?}/stacks:/etc/nginx/stacks:ro
       - ${Platform_Deploy_Dir:?}/profile/stacks:/etc/nginx/profile-stacks:ro
       # Файлы basic-auth. В state/, а не в platform/: платформа общая и

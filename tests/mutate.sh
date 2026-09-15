@@ -48,6 +48,8 @@ MUTATIONS=(
   'заглушки: профильный стек не сканируется (A4)@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n  grep -rhE@@  done < <(stacks_enabled 2>/dev/null | grep -v .)\n  grep -rhE'
   'include: читатель ищет не ту строку (A6)@@platform/lib/lib-stacks.sh@@  want="include $(stack_dir_in_container "$1")/nginx/*.conf;"@@  want="conf.d/$1/*.conf"'
   'health: библиотека по пути devbox6 (A9)@@profiles/stacks/mysql/scripts/health.sh@@. "$ROOT_DIR/platform/lib/lib-env.sh"@@. "$ROOT_DIR/scripts/lib-env.sh"'
+  'include: файл снова сортируется раньше зон (A15)@@platform/lib/lib-stacks.sh@@state/nginx-vhosts/10-enabled.conf@@state/nginx-vhosts/00-enabled.conf'
+  'http2: проверка образа всегда молчит (A16)@@platform/lib/lib-stacks.sh@@        printf '"'"'образ %s старее 1.25.1@@        true \&\& printf '"'"'' # '"'"'образ %s старее 1.25.1'
   'статика: собирается по включённым@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n\n  cat <<@@  done < <(stacks_enabled)\n\n  cat <<'
 )
 

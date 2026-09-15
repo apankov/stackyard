@@ -104,7 +104,13 @@ stack_dir_in_container() {
 # vhost'ами платформы; префикс 00- задаёт предсказуемый порядок чтения, но на
 # выбор сервера по умолчанию не влияет: default_server проставлен явно в
 # default.conf.
-stacks_include_file() { printf '%s/state/nginx-vhosts/00-enabled.conf' "$(stacks_root)"; }
+# Префикс 10-, а не 00-: файлы conf.d читаются по алфавиту, и 00-enabled.conf
+# оказывался ПЕРЕД 00-limits.conf. nginx разрешает имя зоны в момент разбора
+# server-блока, поэтому vhost'ы стеков ссылались на зоны, которых ещё не
+# существует, — "unknown limit_req_zone" и отказ старта, то есть краш-луп по
+# restart: always. Ни один vhost фикстур этого не показывал, потому что nginx
+# на машине разработчика не запускается вовсе.
+stacks_include_file() { printf '%s/state/nginx-vhosts/10-enabled.conf' "$(stacks_root)"; }
 
 # Генерируемый файл с томами статики стеков. Тоже в git не лежит: описывает
 # конкретную машину и выводится из Static= в stacks/*/stack.conf.
@@ -874,6 +880,11 @@ stack_vhost_enabled() {
 }
 
 # Содержимое 00-enabled.conf для текущего манифеста.
+# Каталог машины с её собственным http-конфигом (зоны лимитов, карты).
+# Монтирование постоянное; пустой каталог законен — include по маске, которая
+# ничего не нашла, для nginx не ошибка.
+MACHINE_CONF_DIR_IN_CONTAINER="/etc/nginx/machine"
+
 stacks_include_content() {
   cat <<'HDR'
 # СГЕНЕРИРОВАННЫЙ ФАЙЛ — правки будут перезаписаны.
@@ -884,6 +895,11 @@ stacks_include_content() {
 # они ТОЛЬКО через include ниже, поэтому стек без строки здесь для nginx не
 # существует.
 HDR
+  # Своё у машины — ПЕРВЫМ: там определения зон и карт, а nginx разрешает их
+  # имена в момент разбора server-блока. Политика, зависящая от конкретной
+  # машины (какой URI считать логином, какие частоты терпимы её сайтам), в
+  # платформе жить не может: она уехала бы на все остальные машины.
+  printf 'include %s/*.conf;\n' "$MACHINE_CONF_DIR_IN_CONTAINER"
   stacks_include_lines
 }
 
@@ -998,6 +1014,60 @@ _cell() {
   len=$(_vislen "$text")
   printf '%s' "$text"
   while [ "$len" -lt "$width" ]; do printf ' '; len=$((len + 1)); done
+}
+
+# Зоны лимитов, на которые ссылаются vhost'ы включённых стеков, но которых
+# никто не определяет.
+#
+# nginx разрешает имя зоны в момент разбора server-блока: неизвестное имя —
+# "unknown limit_req_zone", отказ старта и краш-луп по restart: always. Ровно
+# это ждало любую машину, чьи vhost'ы писались под другой набор зон: платформа
+# несла зоны одного девбокса, а vhost'ы других просили свои.
+#
+# Ищем и в платформе, и в nginx/ машины: политика, зависящая от машины, живёт
+# там, и зона, объявленная ею, законна не меньше платформенной.
+check_limit_zones() {
+  local defined used z
+  defined=$( { cat "$(stacks_root)/platform/nginx-vhosts"/*.conf 2>/dev/null
+               cat "$(stacks_root)/nginx"/*.conf 2>/dev/null; } \
+             | grep -oE 'zone=[A-Za-z0-9_]+' | sed 's/zone=//' | sort -u )
+  used=$( while IFS= read -r st; do
+            d="$(stack_vhost_dir "$st")"; [ -d "$d" ] || continue
+            grep -rhoE '(limit_req[[:space:]]+zone=[A-Za-z0-9_]+|limit_conn[[:space:]]+[A-Za-z0-9_]+)' "$d" 2>/dev/null
+          done < <(stacks_enabled 2>/dev/null) \
+          | sed -E 's/.*zone=//; s/limit_conn[[:space:]]+//' | sort -u )
+  for z in $used; do
+    printf '%s\n' "$defined" | grep -qx "$z" \
+      || printf 'vhost ссылается на зону лимита %s, которой никто не определяет — nginx не стартует\n' "$z"
+  done
+  return 0
+}
+
+# Поддерживает ли закреплённый образ nginx директиву `http2 on`.
+#
+# Она появилась в 1.25.1 и стоит в platform/nginx-snippets/ssl-params.conf.
+# Машина, закрепившая образ старее, получает неизвестную директиву — nginx не
+# стартует, и с restart: always это краш-луп, уносящий все сайты. Отказ виден
+# только в логах контейнера: снаружи машина просто не отвечает.
+#
+# Печатает строку на проблему, молчит когда её нет.
+check_nginx_image() {
+  local img tag major minor patch
+  img="$(env_get Platform_Nginx_Image "nginx:1.30-alpine")"
+  tag="${img##*:}"; tag="${tag%%-*}"
+  case "$tag" in
+    [0-9]*.[0-9]*)
+      major="${tag%%.*}"
+      minor="${tag#*.}"
+      case "$minor" in *.*) patch="${minor#*.}"; minor="${minor%%.*}" ;; *) patch=0 ;; esac
+      if [ "$major" -lt 1 ] \
+         || { [ "$major" -eq 1 ] && [ "$minor" -lt 25 ]; } \
+         || { [ "$major" -eq 1 ] && [ "$minor" -eq 25 ] && [ "$patch" -lt 1 ]; }; then
+        printf 'образ %s старее 1.25.1, а ssl-params.conf содержит `http2 on` — nginx не стартует\n' "$img"
+      fi
+      ;;
+    *) printf 'не разобрать версию образа nginx (%s) — проверьте вручную, что он не старее 1.25.1\n' "$img" ;;
+  esac
 }
 
 # -------------------------------------------- живой nginx против спеки

@@ -731,6 +731,34 @@ names=$(grep -rniE 'devbox6|devbox-asstnt|12devs|my-new-site|pankov\.me|filinn|p
         | grep -vE ':[0-9]+:[[:space:]]*#' || true)
 check "имён машин и клиентов в платформе нет" "$names" ""
 
+echo "== порядок и зоны лимитов"
+
+# Файлы conf.d читаются по алфавиту, а nginx разрешает имя зоны в момент
+# разбора server-блока. Генерируемый файл, попавший ПЕРЕД определениями зон,
+# означает "unknown limit_req_zone" и отказ старта — то есть краш-луп по
+# restart: always. На машине разработчика nginx не запускается вовсе, поэтому
+# заметить это можно только так.
+inc_name="$(basename "$(stacks_include_file)")"
+first=$( { printf '%s\n' "$inc_name"
+           ls -1 "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | sed 's:.*/::'; } | sort | head -n 1)
+check "определения зон читаются раньше vhost'ов стеков" \
+  "$([ "$first" = "$inc_name" ] && echo "СНАЧАЛА vhost'ы" || echo ok)" "ok"
+
+# Платформа несёт только общие зоны. Политика конкретной машины — какой URI
+# считать логином — уехав в общий слой, попала бы на все машины сразу.
+# Комментарии пропускаем — как и в остальных гигиенических проверках:
+# объяснение прошлого дефекта неизбежно содержит то, что он ловит.
+check "в платформенных зонах нет машинной политики" \
+  "$(grep -vE '^[[:space:]]*#' "$REPO_DIR"/platform/nginx-vhosts/00-limits.conf \
+     | grep -cE 'map |user/login' || true)" "0"
+
+# Совместимость образа с директивами платформы.
+ENV_VARS=(); ENV_VARS[Platform_Nginx_Image]='nginx:1.19-alpine'
+check "старый образ nginx назван" "$(check_nginx_image | grep -c 'старее 1.25.1')" "1"
+ENV_VARS[Platform_Nginx_Image]='nginx:1.25.1-alpine'
+check "1.25.1 претензий не вызывает" "$(check_nginx_image)" ""
+ENV_VARS=()
+
 echo "== include: генератор против читателя"
 
 # Формула строки include пишется в одном месте и читается в другом. Разъезд
