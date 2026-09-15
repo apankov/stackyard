@@ -11,19 +11,27 @@ set -uo pipefail
 
 C=mysqld
 
-pw() {
+# Пароль читается ЛЕНИВО, только когда он действительно нужен.
+#
+# ext и detect — чистые функции: первая отвечает строкой, вторая смотрит на
+# магию файла. Читая пароль при старте, скрипт падал бы на них на машине без
+# настроенного .env — то есть проверка, которой credentials не нужны, требовала
+# бы credentials.
+PW=""
+need_pw() {
+  [ -n "$PW" ] && return 0
   # shellcheck source=../../../../platform/lib/lib-env.sh
   . "${ROOT_DIR:?}/platform/lib/lib-env.sh"
-  ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "${STACK_DIR:-$ROOT_DIR/profile/stacks/mysql}/.env" "$ROOT_DIR/stacks/mysql/.env"
-  env_get Mysql_Root_Password
+  ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ROOT_DIR/stacks/mysql/.env"
+  PW="$(env_get Mysql_Root_Password)"
+  [ -n "$PW" ] || { echo "в stacks/mysql/.env нет Mysql_Root_Password" >&2; exit 2; }
 }
-PW="$(pw)"
-[ -n "$PW" ] || { echo "в stacks/mysql/.env нет Mysql_Root_Password" >&2; exit 2; }
 
-q() { docker exec -e MYSQL_PWD="$PW" "$C" mysql -uroot -N -B -e "$1" 2>/dev/null; }
+q() { need_pw; docker exec -e MYSQL_PWD="$PW" "$C" mysql -uroot -N -B -e "$1" 2>/dev/null; }
 
 case "${1:-}" in
   check)
+    need_pw
     docker exec -e MYSQL_PWD="$PW" "$C" mysqladmin ping -uroot --silent >/dev/null 2>&1 \
       || { echo "контейнер $C не отвечает на mysqladmin ping" >&2; exit 1; }
     ;;
@@ -38,6 +46,7 @@ case "${1:-}" in
     ;;
 
   dump)
+    need_pw
     # --single-transaction: снимок без блокировки таблиц, InnoDB это умеет.
     # Без него дамп боевой базы останавливает запись на всё время дампа.
     # --routines и --events: иначе процедуры и планировщик молча не уедут.
@@ -78,6 +87,7 @@ case "${1:-}" in
     ;;
 
   restore)
+    need_pw
     fmt="${2:?}"; target="${3:?}"; file="${4:?}"; clean="${5:-0}"
     # Базу не создаём: её заводит инициализатор из databases.yaml, и создание
     # здесь означало бы второе место, решающее про кодировку и владельца.

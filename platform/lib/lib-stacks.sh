@@ -369,11 +369,24 @@ check_domains_match() {
 check_paths_absolute() {
   local s="$1"
   awk -v s="$s" '
-    match($0, /^[[:space:]]*-[[:space:]]+/) {
+    # Выход из блока: первая непустая строка с отступом не глубже самого
+    # volumes:. Комментарии и пустые строки внутри блока его не закрывают.
+    in_vol && !/^[[:space:]]*-[[:space:]]/ {
+      match($0, /^[[:space:]]*/)
+      if ($0 ~ /[^[:space:]]/ && RLENGTH <= vol_indent) in_vol = 0
+    }
+    /^[[:space:]]+volumes:[[:space:]]*(#.*)?$/ {
+      match($0, /^[[:space:]]*/); vol_indent = RLENGTH; in_vol = 1; next
+    }
+    in_vol && match($0, /^[[:space:]]*-[[:space:]]+/) {
       v = substr($0, RLENGTH + 1)
       sub(/[[:space:]]*(#.*)?$/, "", v)
       gsub(/^["'"'"']|["'"'"']$/, "", v)
-      if (v ~ /^\.{1,2}\//) print "стек " s ": относительный host-путь в томе: " v
+      if (v ~ /^\.{1,2}\//) {
+        print "стек " s ": относительный host-путь в томе: " v
+      } else if (v ~ /^\// && v !~ /\$/) {
+        print "стек " s ": захардкоженный host-путь в томе (нужна переменная): " v
+      }
     }
   ' "$(stack_compose_file "$s")" 2>/dev/null
 }
@@ -500,6 +513,125 @@ stacks_upstreams() {
 #
 # Живо ли то, что слушает на хосте, отсюда не видно вовсе. Это забота стека:
 # см. scripts/health.sh.
+
+# ------------------------------------------------------- реестры образов
+#
+# Перенесено из devbox-asstnt как есть. Смысл: стек запускается от DIGEST'а, а
+# не от подвижного тега. `:master` означает, что `up -d` берёт то, что уже лежит
+# локально, молча расходится с реестром, и откатиться некуда — предыдущего тега
+# не существует.
+
+
+# Согласованность того, чем стек тянет образ, с тем, что он объявляет.
+#
+# Вопрос ровно один: как стек выбирает версию образа. Digest (`repo@${ПЕРЕМЕННАЯ}`)
+# отвечает «что сейчас запущено» и хранится в .env стека, `Image_Tag=` в
+# stack.conf — «за каким подвижным тегом следим», и это работа scripts/registry.sh.
+# Половина этой пары бесполезна: тег без digest'а некуда записать, digest без
+# тега неоткуда обновить. Разъезжается такое молча — pin просто перестаёт
+# делать то, зачем его зовут.
+check_image_decl() {
+  local s="$1" img tag has_reg=0 digest=0
+  tag="$(stack_image_tag "$s")"
+  while IFS= read -r img; do
+    [ -n "$img" ] || continue
+    has_reg=1
+    case "$img" in *@\$\{*) digest=1 ;; esac
+  done < <(stack_registry_images "$s")
+
+  if [ -n "$tag" ] && [ "$has_reg" -eq 0 ]; then
+    printf 'стек %s: объявлен Image_Tag=%s, но ни один образ не тянется из внешнего реестра\n' "$s" "$tag"
+  fi
+  if [ -n "$tag" ] && [ "$has_reg" -eq 1 ] && [ "$digest" -eq 0 ]; then
+    printf 'стек %s: Image_Tag=%s объявлен, а образ задан не через digest — пинить нечего\n' "$s" "$tag"
+  fi
+  if [ -z "$tag" ] && [ "$digest" -eq 1 ]; then
+    printf 'стек %s: образ пинится digest'"'"'ом, но Image_Tag= не объявлен — обновлять его нечем\n' "$s"
+  fi
+}
+
+
+# --------------------------------------------------------------- реестры
+
+# Хост реестра у ссылки на образ, либо пусто для Docker Hub.
+#
+# Правило докера, а не эвристика: реестром считается первый сегмент пути, если
+# в нём есть точка или двоеточие (либо это localhost). Без этого `sanya/app`
+# (образ Hub'а) и `реестр.example/app` неразличимы.
+image_registry() {
+  local v="${1%%/*}"
+  [ "$v" = "$1" ] && return 0
+  case "$v" in
+    localhost|localhost:*|*.*|*:*) printf '%s' "$v" ;;
+  esac
+}
+
+
+# Ссылки на образы стека, лежащие во ВНЕШНЕМ реестре (не Docker Hub).
+#
+# Значения с ${...} внутри возвращаются дословно: подстановку разворачивает
+# compose, а имя хоста и репозитория стоит в compose-файле литералом именно
+# затем, чтобы его можно было прочитать отсюда — у выключенного стека .env на
+# машине нет вовсе (см. stack_conf_get).
+stack_registry_images() {
+  local img
+  while IFS= read -r img; do
+    [ -n "$img" ] || continue
+    if [ -n "$(image_registry "$img")" ]; then printf '%s\n' "$img"; fi
+  done < <(stack_images "$1")
+}
+
+
+# stacks_registries [<стек>...]
+#
+# Хосты внешних реестров, которые упоминают перечисленные стеки; без аргументов
+# — все стеки в stacks/. Логин нужен только тем реестрам, откуда сейчас могут
+# тянуть, поэтому scripts/registry.sh передаёт сюда включённые; вопрос «ходит
+# ли эта машина в реестры вообще» задаётся без аргументов.
+stacks_registries() {
+  local s img
+  { if [ $# -gt 0 ]; then printf '%s\n' "$@"; else stacks_available; fi; } | {
+    while IFS= read -r s; do
+      [ -n "$s" ] || continue
+      while IFS= read -r img; do
+        if [ -n "$img" ]; then image_registry "$img"; printf '\n'; fi
+      done < <(stack_registry_images "$s")
+    done
+  } | sed '/^$/d' | sort -u
+}
+
+
+# Подвижный тег, за которым стек следит в реестре (`Image_Tag=` в stack.conf).
+#
+# Нужен только scripts/registry.sh: он резолвит этот тег в digest, а запускается
+# стек всегда от digest'а. Тег и digest — разные вопросы и живут врозь: тег
+# отвечает «за чем следим» и одинаков на всех машинах, поэтому лежит в
+# декларации; digest отвечает «что сейчас запущено», меняется каждым деплоем и
+# поэтому лежит в .env стека, рядом с остальным серверным состоянием.
+stack_image_tag() { stack_conf_get "$1" Image_Tag; }
+
+# ------------------------------------------------------------------ nginx
+
+# Строки include для включённых стеков, у которых есть непустой каталог
+# vhost'ов.
+#
+# Порядок — по наименьшему имени файла внутри каталога, а не по алфавиту имён
+# стеков. Причина конкретная: в default.conf нет `default_server`, поэтому
+# сервером по умолчанию nginx считает ПЕРВЫЙ прочитанный vhost (сегодня это
+# 01-webhooks). Алфавит по стекам поменял бы это молча.
+stacks_include_lines() {
+  local s dir first
+  while IFS= read -r s; do
+    dir="$(stack_vhost_dir "$s")"
+    [ -d "$dir" ] || continue
+    first=$(ls -1 "$dir"/*.conf 2>/dev/null | sed 's:.*/::' | sort | head -n 1)
+    [ -n "$first" ] || continue
+    printf '%s\t%s\n' "$first" "$s"
+  done < <(stacks_enabled) | sort | while IFS=$'\t' read -r _ s; do
+    printf 'include %s/%s/nginx/*.conf;\n' "$STACKS_DIR_IN_CONTAINER" "$s"
+  done
+}
+
 
 # --------------------------------------------------------------- systemd
 
@@ -630,7 +762,15 @@ stack_volumes() { _stacks_yaml_keys "$(stack_compose_file "$1")" volumes; }
 stack_images() {
   local f="$(stack_compose_file "$1")"
   [ -f "$f" ] || return 0
-  awk '/^[[:space:]]+image:[[:space:]]*[^[:space:]]/ { print $2 }' "$f" | tr -d '"'"'" | sort -u
+  awk '
+    /^[[:space:]]+image:[[:space:]]*[^[:space:]]/ {
+      v = $0
+      sub(/^[[:space:]]*image:[[:space:]]*/, "", v)
+      sub(/[[:space:]]+#.*$/, "", v)
+      sub(/[[:space:]]*$/, "", v)
+      print v
+    }
+  ' "$f" | tr -d '"'"'" | sort -u
 }
 
 # ------------------------------------------------------------------ nginx
