@@ -75,11 +75,16 @@ done < <(find "$ROOT/platform" "$ROOT/profiles" \
 step "Значения, общие у нескольких машин"
 
 # Ключи, совпадение которых по любым двум машинам — это отказ, а не совпадение.
+#
+# Backup_S3_Bucket здесь НЕТ намеренно: один бакет на несколько машин — законная
+# и частая конфигурация. Разделяет их Backup_S3_Prefix, и вот он совпадать не
+# смеет: одинаковый префикс в одном бакете означает, что машины пишут друг
+# поверх друга, а check-backups у обеих при этом зелёный.
 # Список поимённый, а не «всё, что похоже на секрет»: у Platform_Vhosts_Mount
 # значение обязано совпадать (это путь ВНУТРИ контейнера), и ловить его здесь
 # значило бы приучить читать отчёт по диагонали.
 MUST_DIFFER="Platform_Network Platform_Deploy_Dir
-Backup_S3_Bucket Backup_S3_Prefix Backup_GPG_Recipient
+Backup_S3_Prefix Backup_GPG_Recipient
 Backup_AWS_Access_Key_Id Backup_AWS_Secret_Access_Key
 Notify_Telegram_Token Notify_Telegram_Chat_Id"
 

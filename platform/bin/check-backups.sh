@@ -39,11 +39,11 @@ env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
 
 S3_BUCKET=$(env_get Backup_S3_Bucket)
 [ -n "$S3_BUCKET" ] || { echo "Ошибка: Backup_S3_Bucket не задан" >&2; exit 2; }
-S3_PREFIX=$(env_get Backup_S3_Prefix devbox-asstnt)
+S3_PREFIX=$(backup_s3_prefix)
 AWS_REGION=$(env_get Backup_AWS_Region us-east-1)
 AWS_KEY=$(env_get Backup_AWS_Access_Key_Id)
 AWS_SECRET=$(env_get Backup_AWS_Secret_Access_Key)
-DB_PREFIX=$(env_get Backup_DB_Prefix "$(stacks_db_provider)")
+DB_PREFIX=$(backup_db_prefix)
 MAX_AGE_HOURS=$(env_get Backup_Max_Age_Hours 26)
 MIN_OBJ_BYTES=$(env_get Backup_Min_Object_Bytes 1024)
 

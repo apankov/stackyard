@@ -89,7 +89,7 @@ ENV_BACKUP="$ROOT_DIR/.env-backup"
 env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
 
 S3_BUCKET=$(env_require Backup_S3_Bucket "имя бакета без s3:// и без слэшей") || exit 2
-S3_PREFIX=$(env_get Backup_S3_Prefix devbox-asstnt)
+S3_PREFIX=$(backup_s3_prefix)
 AWS_REGION=$(env_get Backup_AWS_Region us-east-1)
 AWS_KEY=$(env_get Backup_AWS_Access_Key_Id)
 AWS_SECRET=$(env_get Backup_AWS_Secret_Access_Key)
@@ -120,7 +120,7 @@ DB_PROVIDER="$(stacks_db_provider)"
 # новые дампы уезжают в другое место, а check-backups.sh смотрит туда же и
 # докладывает «бэкапов нет» при исправном бэкапе. Машине, которая уже пишет в
 # postgres/, достаточно оставить Backup_DB_Prefix=postgres.
-DB_PREFIX=$(env_get Backup_DB_Prefix "${DB_PROVIDER:-db}")
+DB_PREFIX=$(backup_db_prefix)
 
 # Временный каталог — рядом с каталогом поколений, НА ТОМ ЖЕ разделе. Иначе
 # завершающий `mv` из /tmp был бы копированием, и пик по диску удвоился бы

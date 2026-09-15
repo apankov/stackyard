@@ -83,7 +83,7 @@ ENV_BACKUP="$ROOT_DIR/.env-backup"
 env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
 
 S3_BUCKET=$(env_get Backup_S3_Bucket)
-S3_PREFIX=$(env_get Backup_S3_Prefix devbox-asstnt)
+S3_PREFIX=$(backup_s3_prefix)
 AWS_REGION=$(env_get Backup_AWS_Region us-east-1)
 AWS_KEY=$(env_get Backup_AWS_Access_Key_Id)
 AWS_SECRET=$(env_get Backup_AWS_Secret_Access_Key)
