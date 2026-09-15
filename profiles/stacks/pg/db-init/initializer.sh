@@ -35,7 +35,11 @@ while read -r row; do
     DB_NAME=$(echo "$row" | yq e '.db' -)
     DB_USER=$(echo "$row" | yq e '.user' -)
     DB_PASS=$(echo "$row" | yq e '.password' -)
-    DUMP_FILE=$(echo "$row" | yq e '.dump_file // ""' -)
+    # Ключ 'dump', а не 'dump_file': генератор пишет имя ключа в нижнем регистре
+    # без префикса (Mysql_Dump -> dump), и второе написание здесь означало бы,
+    # что seed молча не накатывается — база заведена, схема пуста, приложение
+    # стартует на ней и падает уже в рантайме.
+    DUMP_FILE=$(echo "$row" | yq e '.dump // ""' -)
 
     # 1. Пользователь.
     USER_EXISTS=$(psql -h postgres -U "$POSTGRES_USER" -d postgres -tAc \

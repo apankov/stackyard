@@ -706,6 +706,39 @@ names=$(grep -rniE 'devbox6|devbox-asstnt|12devs|my-new-site|pankov\.me|filinn|p
         | grep -v '^Binary' | grep -v 'selftest\.sh:[0-9]*:names=' || true)
 check "имён машин и клиентов в платформе нет" "$names" ""
 
+echo "== распознавание дампа"
+
+# Прошлая версия объявляла SQLite'ом ЛЮБОЙ gzip. А gzip'ом сжаты и дамп MySQL
+# (.sql.gz), и tar источников files:/volume:. В аварийный день дамп базы шёл не
+# той веткой восстановления, и в базу не попадало ничего — молча, потому что
+# `gunzip -c > цель` отрабатывал успешно.
+#
+# Проверяем на НАСТОЯЩИХ файлах: распознавание по магии нельзя проверить
+# фикстурой из строк.
+bkd="$WORK/bk"; mkdir -p "$bkd/dir"
+printf 'SQLite format 3\000' > "$bkd/plain.db"
+gzip -c "$bkd/plain.db" > "$bkd/base.db.gz"
+printf -- '-- dump\nCREATE TABLE t;\n' | gzip -c > "$bkd/mysql.sql.gz"
+echo x > "$bkd/dir/f"; tar -czf "$bkd/files.tar.gz" -C "$bkd" dir
+printf 'PGDMP\000\000\000\000\000\000\000\000\000\000\000' > "$bkd/pg.dump"
+
+check "SQLite без сжатия"            "$(backup_file_kind "$bkd/plain.db")"     "sqlite_plain"
+check "SQLite под gzip"              "$(backup_file_kind "$bkd/base.db.gz")"   "sqlite_gz"
+check "дамп SQL под gzip — НЕ SQLite" "$(backup_file_kind "$bkd/mysql.sql.gz")" "unknown"
+check "tar под gzip — НЕ SQLite"      "$(backup_file_kind "$bkd/files.tar.gz")" "tar_gz"
+check "формат поставщика платформе неизвестен" "$(backup_file_kind "$bkd/pg.dump")" "unknown"
+
+# Ключ seed'а: генератор пишет имя в нижнем регистре без префикса, и второе
+# написание в инициализаторе означало бы, что seed молча не накатывается —
+# база заведена, схема пуста, приложение падает уже в рантайме.
+gen_key=$(printf '%s' "$DB_KEYS_OPTIONAL" | tr 'A-Z ' 'a-z\n' | grep -x dump)
+check "генератор пишет ключ seed'а как 'dump'" "$gen_key" "dump"
+for init in "$REPO_DIR"/profiles/stacks/*/db-init/initializer.sh; do
+  [ -f "$init" ] || continue
+  check "$(basename "$(dirname "$(dirname "$init")")"): инициализатор читает тот же ключ" \
+    "$(grep -c "yq e '\.dump //" "$init")" "1"
+done
+
 echo "== пути в S3"
 
 # Формула пути обязана быть ОДНА на всех потребителей. Разъезд означает, что

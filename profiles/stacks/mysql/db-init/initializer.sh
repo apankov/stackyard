@@ -92,7 +92,11 @@ while read -r row; do
     DB_USER=$(echo "$row"   | yq e '.user' -)
     DB_PASS=$(echo "$row"   | yq e '.password' -)
     DB_GRANTS=$(echo "$row" | yq e '.grants // "SELECT,INSERT,UPDATE,DELETE"' -)
-    DUMP_FILE=$(echo "$row" | yq e '.dump_file // ""' -)
+    # Ключ 'dump', а не 'dump_file': генератор пишет имя ключа в нижнем регистре
+    # без префикса (Mysql_Dump -> dump), и второе написание здесь означало бы,
+    # что seed молча не накатывается — база заведена, схема пуста, приложение
+    # стартует на ней и падает уже в рантайме.
+    DUMP_FILE=$(echo "$row" | yq e '.dump // ""' -)
 
     if ! valid_ident "$DB_NAME" || ! valid_ident "$DB_USER"; then
         echo "--> [ОШИБКА] имя базы '$DB_NAME' или пользователя '$DB_USER' содержит недопустимые символы." >&2
