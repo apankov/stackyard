@@ -1,0 +1,120 @@
+# Copy to the root of the devbox deployment repo, beside docker-compose.sh —
+# not into a subdirectory. `docker-compose.sh` names it in a fixed list of
+# `-f` flags, so its filename and location are part of that script's contract.
+#
+# The left-hand names below (SAGE_*) are what the application reads
+# (apps/api/src/core/config.ts). The right-hand ones (Sage_*) come from
+# stacks/sage/.env and follow the devbox's own naming convention. The two are
+# deliberately different: the SAGE_* side is the app's contract and must not
+# be renamed, the Sage_* side is local to this deployment.
+services:
+  sage-api:
+    build:
+      # The build context is a checkout of the sage repo on the devbox, given
+      # by Sage_Host_Home_Dir. The Dockerfile's COPY paths
+      # (pnpm-workspace.yaml, apps/api/...) are relative to the repo root, so
+      # the context has to be that root and not this file's own directory.
+      context: ${Sage_Host_Home_Dir}
+      dockerfile: apps/api/Dockerfile
+    container_name: sage-api
+    environment:
+      SAGE_NODE_ENV: $Sage_Node_Env
+      SAGE_API_PORT: $Sage_API_Port
+      SAGE_PUBLIC_URL: $Sage_Public_URL
+      SAGE_WEBAPP_ORIGINS: $Sage_WebApp_Origins
+      SAGE_DB_HOST: $Sage_DB_Host
+      SAGE_DB_PORT: $Sage_DB_Port
+      SAGE_DB_NAME: $Sage_DB_Name
+      SAGE_DB_USER: $Sage_DB_User
+      SAGE_DB_PASSWORD: $Sage_DB_Password
+      SAGE_JWT_SECRET: $Sage_JWT_Secret
+      SAGE_APPLE_BUNDLE_ID: $Sage_Apple_Bundle_Id
+      SAGE_SENTRY_DSN: $Sage_Sentry_DSN
+      SAGE_MAIL_SENDER: $Sage_Mail_Sender
+      SAGE_LOG_LEVEL: $Sage_Log_Level
+      SAGE_WORKER_INLINE: $Sage_Worker_Inline
+      SAGE_WORKER_CONCURRENCY: $Sage_Worker_Concurrency
+      SAGE_WORKER_POLL_MS: $Sage_Worker_Poll_Ms
+      SAGE_WORKER_STALE_AFTER_MS: $Sage_Worker_Stale_After_Ms
+      SAGE_LLM_PROVIDER: $Sage_LLM_Provider
+      SAGE_CLAUDE_CLI_PATH: $Sage_Claude_CLI_Path
+      SAGE_LLM_MODEL: $Sage_LLM_Model
+      SAGE_LLM_TIMEOUT_MS: $Sage_LLM_Timeout_Ms
+      CLAUDE_CODE_OAUTH_TOKEN: $Sage_Claude_Code_OAuth_Token
+      SAGE_AUTONOMY_TASK: $Sage_Autonomy_Task
+      SAGE_AUTONOMY_COMMITMENT: $Sage_Autonomy_Commitment
+      SAGE_AUTONOMY_TENSION: $Sage_Autonomy_Tension
+      SAGE_AUTONOMY_NOTE: $Sage_Autonomy_Note
+      SAGE_TELEGRAM_BOT_TOKEN: $Sage_Telegram_Bot_Token
+      SAGE_TELEGRAM_BOT_USERNAME: $Sage_Telegram_Bot_Username
+      SAGE_TELEGRAM_WEBHOOK_SECRET: $Sage_Telegram_Webhook_Secret
+      SAGE_LANGFUSE_PUBLIC_KEY: $Sage_Langfuse_Public_Key
+      SAGE_LANGFUSE_SECRET_KEY: $Sage_Langfuse_Secret_Key
+      SAGE_LANGFUSE_BASE_URL: $Sage_Langfuse_Base_Url
+      SAGE_OBJECT_STORE: $Sage_Object_Store
+      SAGE_R2_ACCOUNT_ID: $Sage_R2_Account_ID
+      SAGE_R2_BUCKET: $Sage_R2_Bucket
+      SAGE_R2_ACCESS_KEY_ID: $Sage_R2_Access_Key_ID
+      SAGE_R2_SECRET_ACCESS_KEY: $Sage_R2_Secret_Access_Key
+      SAGE_AUDIO_RETENTION_DAYS: $Sage_Audio_Retention_Days
+      SAGE_STT_PROVIDER: $Sage_STT_Provider
+      SAGE_OPENAI_API_KEY: $Sage_OpenAI_API_Key
+      SAGE_STT_MODEL: $Sage_STT_Model
+      SAGE_STT_LANGUAGE: $Sage_STT_Language
+      SAGE_STT_MIN_CONFIDENCE: $Sage_STT_Min_Confidence
+      # Dev switch (#115): makes the next transcription after a restart fail as a
+      # provider refusal, which is the only way to reach `transcription_failed`
+      # with real audio. Set it, restart, send one voice message, unset it.
+      #
+      # Значение по умолчанию — потому что нормальное состояние переменной
+      # «не задана»: в .env её нет ни на машине, ни в образце. Без `:-` каждая
+      # compose-команда печатала предупреждение о ней, а предупреждение, которое
+      # видно всегда, перестают читать — включая соседние, настоящие.
+      SAGE_STT_FORCE_REJECT_ONCE: ${Sage_STT_Force_Reject_Once:-}
+      SAGE_CALENDAR_PROVIDERS: $Sage_Calendar_Providers
+      SAGE_GOOGLE_CLIENT_ID: $Sage_Google_Client_Id
+      SAGE_GOOGLE_CLIENT_SECRET: $Sage_Google_Client_Secret
+      SAGE_MS_CLIENT_ID: $Sage_MS_Client_Id
+      SAGE_MS_CLIENT_SECRET: $Sage_MS_Client_Secret
+      SAGE_MS_TENANT_ID: $Sage_MS_Tenant_Id
+      SAGE_TOKEN_ENCRYPTION_KEY: $Sage_Token_Encryption_Key
+      SAGE_CALENDAR_SYNC_INTERVAL_MINUTES: $Sage_Calendar_Sync_Interval_Minutes
+      SAGE_CALENDAR_WINDOW_PAST_DAYS: $Sage_Calendar_Window_Past_Days
+      SAGE_CALENDAR_WINDOW_FUTURE_DAYS: $Sage_Calendar_Window_Future_Days
+      SAGE_DAY_WINDOW_START: $Sage_Day_Window_Start
+      SAGE_DAY_WINDOW_END: $Sage_Day_Window_End
+    restart: unless-stopped
+    networks:
+      - shared_network
+
+  # The Telegram Mini App probe (#62). Built inside its own image and served
+  # by its own nginx, so the devbox needs neither node nor pnpm — the same
+  # shape as sage-api. The box's shared nginx proxies to it by container name.
+  sage-tgwebapp:
+    build:
+      context: ${Sage_Host_Home_Dir}
+      dockerfile: apps/tgwebapp/Dockerfile
+      args:
+        # Vite inlines this at COMPILE time, so it is a build arg and not an
+        # environment variable: a container restart cannot change it.
+        VITE_SAGE_API_BASE_URL: $Sage_Public_URL
+    container_name: sage-tgwebapp
+    restart: unless-stopped
+    networks:
+      - shared_network
+
+  # Статика sage раздаётся общим nginx, но том объявлен НЕ здесь, а в
+  # platform/compose/nginx-static.generated.yaml, который подключается всегда. Причина:
+  # пока том жил в этом файле, выключение стека sage меняло спеку nginx и
+  # следующий `up -d` пересоздавал nginx — со всеми последствиями из
+  # CLAUDE.md §3.1. Подробности и переменная — в том файле.
+
+# No `ports:` block — nginx reaches the container by name on the shared
+# network, and nothing about Sage is exposed on the host.
+#
+# No top-level `networks:` block either. An earlier revision of this file
+# declared `shared_network` itself, on the assumption that the file might be
+# invoked standalone. It is not: `docker-compose.sh` merges nine compose files
+# in one `docker compose` invocation, `shared_network` is declared in the root
+# docker-compose.yaml, and that script creates the network if it is missing.
+# Declaring it again here would be redundant.

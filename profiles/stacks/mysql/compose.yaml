@@ -1,0 +1,55 @@
+services:
+
+  mysqld:
+    image: devilbox/mysql:mysql-5.5
+    container_name: mysqld
+    restart: always
+    ports:
+      - "3306:3306"
+    networks:
+      - shared_network
+    volumes:
+      # Боевые данные машины. Ни одна команда платформы их не удаляет:
+      # `stack.sh purge` трогает только именованные тома, а это bind-mount.
+      - ${Mysql_Data_Dir:?задайте Mysql_Data_Dir в stacks/mysql/.env}:/var/lib/mysql
+      # sql_mode и кодировки — файлом, а не `SET GLOBAL` после старта.
+      # `SET GLOBAL` живёт до первого перезапуска контейнера, то есть настройка
+      # тихо исчезает ровно тогда, когда контейнер пересоздали.
+      - ${Mysql_Stack_Dir:-${Platform_Deploy_Dir}/profile/stacks/mysql}/conf:/etc/mysql/conf.d:ro
+    environment:
+      # Слева — контракт образа: это имя читает сам mysqld внутри контейнера,
+      # переименовать его нельзя. Справа — наше локальное имя.
+      - MYSQL_ROOT_PASSWORD=${Mysql_Root_Password:?задайте Mysql_Root_Password в stacks/mysql/.env}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mysql-initializer:
+    image: alpine:3.19
+    container_name: mysql-initializer
+    networks:
+      - shared_network
+    volumes:
+      - ${Mysql_Stack_Dir:-${Platform_Deploy_Dir}/profile/stacks/mysql}/db-init/initializer.sh:/initializer.sh:ro
+      # Список баз генерирует платформа, и лежит он в машинном state/, а не
+      # рядом со скриптом: писать внутрь profile/ нельзя — следующее обновление
+      # профиля затрёт файл, а git профиля увидит пароли всех баз машины.
+      - ${Platform_Deploy_Dir:?}/state/mysql/databases.yaml:/config/databases.yaml:ro
+      - ${Platform_Deploy_Dir:?}/dumps:/dumps:ro
+    environment:
+      - MYSQL_ROOT_PASSWORD=${Mysql_Root_Password:?задайте Mysql_Root_Password в stacks/mysql/.env}
+    # Клиент MariaDB общается с MySQL 5.5 штатно (mysql_native_password).
+    # yq — чтобы разбирать databases.yaml: самодельный парсер обрезал бы пароль
+    # на первом же спецсимволе и дал пользователя, под которым не подключиться.
+    entrypoint: >
+      sh -c "apk add --no-cache mariadb-client yq bash >/dev/null && bash /initializer.sh"
+    depends_on:
+      mysqld:
+        condition: service_healthy
+
+networks:
+  shared_network:
+    external: true
+    name: ${Platform_Network:?}

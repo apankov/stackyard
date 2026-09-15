@@ -1,0 +1,12 @@
+[Unit]
+Description=Проверять конвейер знаний раз в час
+
+[Timer]
+OnCalendar=hourly
+# Разброс, чтобы не совпадать с остальными таймерами на тесной машине.
+RandomizedDelaySec=5m
+# Пропущенный из-за выключенной машины запуск отработает после загрузки.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

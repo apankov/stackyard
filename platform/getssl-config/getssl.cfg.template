@@ -1,0 +1,37 @@
+# vim: filetype=sh
+#
+# СГЕНЕРИРОВАННЫЙ ФАЙЛ — правки будут перезаписаны scripts/certs.sh.
+# Шаблон: platform/getssl-config/getssl.cfg.template
+#
+# CA здесь БОЕВОЙ и задан явно. Общий getssl-config/getssl.cfg указывает на
+# staging, и каждый per-host конфиг обязан его перебить: хост без этой строки
+# молча получает сертификат, которому не верит ни один браузер, и заметно это
+# только из браузера. Поэтому строка живёт в шаблоне, а не в инструкции
+# для человека.
+
+DOMAIN=@DOMAIN@
+
+CA="https://acme-v02.api.letsencrypt.org"
+
+# Дополнительные имена в том же сертификате. Подставляются из формы
+# `домен+алиас` в Domains= стека; пусто — значит алиасов нет.
+SANS="@SANS@"
+
+PREFIX='@DEPLOY_DIR@'
+
+ACL=(${PREFIX}'/platform/acme/.well-known/acme-challenge')
+USE_SINGLE_ACL="true"
+
+DOMAIN_CERT_LOCATION="${PREFIX}/state/certs/${DOMAIN}.crt"
+DOMAIN_KEY_LOCATION="${PREFIX}/state/certs/${DOMAIN}.key"
+DOMAIN_CHAIN_LOCATION="${PREFIX}/state/certs/${DOMAIN}-fullchain.crt"
+
+# Перезагрузка, а не пересоздание: каталог сертификатов смонтирован с хоста, и
+# пересоздание nginx при опущенном upstream'е уносит все сайты машины.
+# Без членства владельца репозитория в группе docker команда молча не
+# срабатывает, и nginx остаётся со старым сертификатом в памяти — худший вид
+# отказа, тихий и частичный.
+RELOAD_CMD="docker exec nginx nginx -s reload"
+
+CHECK_REMOTE="true"
+CHECK_REMOTE_WAIT="2"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Подготовка хоста. См. комментарий в ./stack.
+ROOT_DIR="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export ROOT_DIR
+exec "$ROOT_DIR/platform/bin/host-setup.sh" "$@"

@@ -1,0 +1,103 @@
+services:
+
+  ingester:
+    build:
+      # Чекаут приложения на девбоксе, путь из .env стека.
+      context: ${Ingester_Host_Home_Dir:?задайте в stacks/ingester/.env}
+      dockerfile: Dockerfile
+    image: ingester:latest
+    container_name: ingester
+    restart: unless-stopped
+    networks:
+      - shared_network
+
+    # Воркер и планировщик одним процессом: отдельный процесс Node — это ещё
+    # ~70 МБ, а на этой машине свободно около двухсот.
+    command: ["node", "src/worker.js", "--with-scheduler"]
+
+    # Жёсткий потолок: соседи по машине важнее нашей пропускной способности.
+    #
+    # Здесь стек работает СБОРЩИКОМ — принимает сырьё, нормализует, склеивает
+    # дубли и атрибутирует по правилам, то есть без единого вызова модели.
+    # Арифметика простая: вызов модели это отдельный процесс, и его пик
+    # складывается с памятью воркера. Измерено на нагрузке 85 КБ, по три прогона:
+    # `claude -p` ~245 МБ, `codex exec` ~100 МБ, воркер ~80 МБ. Спавн на 245 МБ
+    # там, где свободно двести, унёс бы не нас, а случайного соседа.
+    #
+    # Полный режим — см. README, «Снять режим сборщика».
+    mem_limit: 200m
+    memswap_limit: 200m
+
+    # Контейнер пишет в волты, и в те же каталоги по SSH пушит ветку мак.
+    # Поэтому работает под тем же пользователем, что владеет путями;
+    # иначе push упрётся в права.
+    user: "${Ingester_Run_As:?задайте в stacks/ingester/.env}"
+
+    environment:
+      DATABASE_URL: postgres://${Ingester_DB_User:?задайте в stacks/ingester/.env}:${Ingester_DB_Password:?задайте в stacks/ingester/.env}@postgres:5432/${Ingester_DB_Name:?задайте в stacks/ingester/.env}
+      CONFIG_PATH: /app/config/ingester.yaml
+
+      # Режим сборщика: моделей не звать, работы за S5 не брать.
+      # Дефолты — полный режим: убрать строку из .env значит включить обратно.
+      MODELS_ENABLED: ${Ingester_Models_Enabled:-true}
+      WORKER_DEFERRED_KINDS: ${Ingester_Deferred_Kinds:-}
+      WORKER_CONCURRENCY: "1"
+
+      # Подписка Claude Code. В контейнере связки ключей macOS нет, поэтому
+      # нужен долгоживущий токен (`claude setup-token` на маке).
+      # Пока стек сборщик — не используется.
+      CLAUDE_CODE_OAUTH_TOKEN: ${Ingester_Claude_Code_OAuth_Token:-}
+      CODEX_HOME: /state/codex
+
+      # Источники. Включаются здесь, а не правкой config/ingester.yaml:
+      # конфиг приезжает из гита, и правка его на сервере заводила бы
+      # расхождение с репозиторием.
+      #
+      # Приём моделей не требует, поэтому работает и в режиме сборщика --
+      # это первое, что имеет смысл включить: у Fathom транскрипты
+      # хранятся не вечно.
+      FATHOM_ENABLED: ${Ingester_Fathom_Enabled:-false}
+      GDRIVE_ENABLED: ${Ingester_GDrive_Enabled:-false}
+      # Аккаунт без ключа пропускается с предупреждением, а не роняет конфиг.
+      FATHOM_API_KEY__ANDREY_SHIPTIFY: ${Ingester_Fathom_Key_Shiptify:-}
+      FATHOM_API_KEY__ANDREY_GMAIL: ${Ingester_Fathom_Key_Gmail:-}
+      FATHOM_API_KEY__ANDREY_TWD: ${Ingester_Fathom_Key_TWD:-}
+
+      # Мост с маком: ветка `mac` в репозитории машинного волта.
+      SYNC_ENABLED: "true"
+
+      RAW_VAULT_PATH: /vaults/raw
+      MACHINE_VAULT_PATH: /vaults/machine
+      INBOX_PATH: /vaults/inbox
+      DERIVED_PATH: /state/derived
+
+      TELEGRAM_BOT_TOKEN: ${Ingester_Telegram_Bot_Token:-}
+      TELEGRAM_CHAT_ID: ${Ingester_Telegram_Chat_Id:-}
+
+      TZ: ${Ingester_TZ:-Europe/Minsk}
+      LOG_LEVEL: ${Ingester_Log_Level:-info}
+      LOG_FORMAT: json
+      NODE_OPTIONS: --max-old-space-size=160
+      # Домашнего каталога хостового пользователя внутри нет, а git при коммите
+      # хочет куда-то писать.
+      HOME: /tmp
+
+    # Обязательные переменные объявлены через `:?`: незаданный host-путь
+    # bind-mount'а схлопнулся бы в пустоту, и docker завёл бы каталог от root.
+    volumes:
+      # Конфиг лежит в чекауте; он не секретный, все машинно-зависимые значения
+      # приходят переменными выше.
+      - ${Ingester_Host_Home_Dir:?задайте в stacks/ingester/.env}/config:/app/config:ro
+      - ${Ingester_Data_Dir:?задайте в stacks/ingester/.env}/raw:/vaults/raw
+      - ${Ingester_Data_Dir:?задайте в stacks/ingester/.env}/machine:/vaults/machine
+      - ${Ingester_Data_Dir:?задайте в stacks/ingester/.env}/inbox:/vaults/inbox
+      - ${Ingester_Data_Dir:?задайте в stacks/ingester/.env}/derived:/state/derived
+      - ${Ingester_Data_Dir:?задайте в stacks/ingester/.env}/codex:/state/codex
+
+    # У большинства стеков json-file растёт без границ, и диск на этой машине
+    # уже подходил к нулю. Здесь — сразу с потолком.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

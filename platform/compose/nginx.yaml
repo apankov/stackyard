@@ -1,0 +1,37 @@
+services:
+  nginx:
+    image: ${Platform_Nginx_Image:-nginx:1.30-alpine}
+    container_name: nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${Platform_Deploy_Dir:?}/platform/nginx-snippets:/etc/nginx/snippets:ro
+      # Статические платформенные vhost'ы: default.conf (сервер по умолчанию) и
+      # 00-limits.conf (зоны лимитов, обязаны быть в http-контексте).
+      - ${Platform_Deploy_Dir:?}/platform/nginx-vhosts:/etc/nginx/conf.d:ro
+      # Генерируемый список include'ов — ОДНИМ ФАЙЛОМ поверх conf.d. Каталог
+      # conf.d у nginx один, а источников два: неизменяемая платформа и
+      # состояние машины. Класть генерируемое внутрь platform/ нельзя — это
+      # симлинк на общий каталог (в рабочем пространстве) или вендоренная копия
+      # (на машине), и запись туда либо ломает соседнюю машину, либо пропадает
+      # при следующем обновлении платформы.
+      - ${Platform_Deploy_Dir:?}/state/nginx-vhosts/00-enabled.conf:/etc/nginx/conf.d/00-enabled.conf:ro
+      # Оба корня стеков целиком, только на чтение: vhost'ы читаются
+      # исключительно через include'ы из 00-enabled.conf — в этом и состоит
+      # механизм выключения стека. Монтирования постоянные и от набора
+      # включённых стеков не зависят.
+      - ${Platform_Deploy_Dir:?}/stacks:/etc/nginx/stacks:ro
+      - ${Platform_Deploy_Dir:?}/profile/stacks:/etc/nginx/profile-stacks:ro
+      - ${Platform_Deploy_Dir:?}/platform/acme:/var/www/acme
+      - ${Platform_Deploy_Dir:?}/state/certs:/etc/nginx/certs
+      - ${Platform_Vhosts_Dir:?}:${Platform_Vhosts_Mount:?}
+      - /var/log/nginx:/var/log/nginx
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    external: true
+    name: ${Platform_Network:?}

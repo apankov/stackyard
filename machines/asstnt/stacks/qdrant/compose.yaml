@@ -1,0 +1,41 @@
+# Qdrant (vector DB for mem0 semantic memory):
+#   Accessible at http://localhost:6333
+#   Data persisted in qdrant-data named volume.
+
+services:
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: sanya-qdrant
+    restart: unless-stopped
+    networks:
+      - shared_network
+    ports:
+      # Петля, а не 0.0.0.0. Docker вставляет свои правила в цепочку DOCKER —
+      # ДО INPUT, поэтому firewalld и iptables на хосте опубликованный порт не
+      # закрывают, и единственным барьером остаётся security group инстанса.
+      # У Qdrant нет аутентификации по умолчанию, поэтому наружу он не смотрит
+      # вовсе: sanya ходит к нему по имени сервиса внутри devbox8-net.
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      # В образе qdrant нет ни wget, ни curl, ни nc — только bash.
+      # Ходим в /readyz через bash-овый /dev/tcp.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/6333; printf "GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; grep -q "200 OK" <&3'
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  qdrant-data:
+
+# networks:
+#   shared_network:
+#     external: true
+#     name: devbox8-net

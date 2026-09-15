@@ -1,0 +1,24 @@
+# Conduit configuration for the Sanya local stand.
+#
+# Most settings here can be overridden by CONDUIT_* env vars in
+# docker-compose.yml — env wins because Conduit layers env on top of TOML
+# via the `figment` provider. The file exists primarily because recent
+# Conduit images require CONDUIT_CONFIG to point at an actual TOML path,
+# even when all values come from env.
+
+[global]
+server_name = "sanya.local"
+database_path = "/var/lib/matrix-conduit"
+database_backend = "rocksdb"
+port = 6167
+address = "0.0.0.0"
+
+# 20 MB — room for transcript and voice upload tests.
+max_request_size = 20_000_000
+
+allow_registration = true
+allow_federation = false
+allow_check_for_updates = false
+trusted_servers = []
+
+log = "warn,_=off,sled=off"

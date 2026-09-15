@@ -1,0 +1,42 @@
+[Unit]
+Description=Renew Let's Encrypt certificates via getssl
+Documentation=https://github.com/srvrco/getssl
+# getssl отвечает на HTTP-01 challenge через контейнер nginx и перезагружает его
+# через RELOAD_CMD ("docker exec nginx nginx -s reload"), поэтому Docker должен
+# быть поднят раньше.
+Wants=network-online.target
+After=network-online.target docker.service
+# Если репозиторий не там, где ждали, лучше не стартовать вовсе: иначе getssl
+# создаст рабочую директорию с нуля и выпишет новый ACME-аккаунт.
+ConditionPathIsDirectory=@DEPLOY_DIR@/platform/getssl-config
+# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
+# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
+# несуществующий обработчик работал бы, но шумел в журнале.
+@ONFAILURE@
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+
+# Запуск ИМЕННО из platform/. Общий getssl-config/getssl.cfg задаёт
+# ACCOUNT_KEY="./getssl-config/account.key" — путь относительно текущей
+# директории, а не относительно того, что назвал -w. Из любого другого места
+# getssl сгенерирует новый 4096-битный ключ ACME-аккаунта не там и потеряет
+# существующий аккаунт.
+WorkingDirectory=@DEPLOY_DIR@/platform
+
+# -U, а не -u. В getssl -u означает "--upgrade: скачать свежую версию getssl и
+# поставить поверх себя" (getssl:889), а вовсе не "продлить". Самообновляющийся
+# из интернета скрипт на машине с пятью боевыми vhost'ами — не то, что должно
+# происходить по ночам без присмотра. -U отключает даже проверку версии.
+#
+# У самого продления отдельного флага нет: -a обходит все домены, а решение
+# продлевать принимает RENEW_ALLOW="30" из getssl-config/getssl.cfg.
+# -q оставляет в журнале только исключительное: ошибки и факт выпуска.
+ExecStart=@DEPLOY_DIR@/platform/getssl -w ./getssl-config/ -U -a -q
+
+# Для Type=oneshot systemd по умолчанию ОТКЛЮЧАЕТ таймаут старта. Зависший
+# getssl (ожидание DNS, недоступный ACME-сервер, CHECK_REMOTE в никуда) висел
+# бы вечно и блокировал все последующие запуски — то есть отказ выглядел бы
+# как «таймер есть, продления нет», ровно тот, который мы чиним.
+TimeoutStartSec=30min

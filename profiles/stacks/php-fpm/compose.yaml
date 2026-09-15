@@ -1,0 +1,23 @@
+# PHP 5.6 FastCGI. База образа (alpine 3.8, пакеты php5) — EOL намеренно:
+# сайты, ради которых он существует, на современном PHP не работают.
+services:
+  php-fpm:
+    build:
+      context: ${Php_Stack_Dir:-${Platform_Deploy_Dir}/profile/stacks/php-fpm}/build
+    image: php5.6-fpm
+    container_name: php-fpm
+    restart: always
+    ports:
+      - "9000:9000"
+    volumes:
+      # Единственный том — общий каталог docroot'ов, тот же, что у nginx. Ничего
+      # постекового сюда не домешивается, поэтому спека постоянна и выключение
+      # чужого стека её не меняет.
+      - ${Platform_Vhosts_Dir:?}:${Platform_Vhosts_Mount:?}
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    external: true
+    name: ${Platform_Network:?}

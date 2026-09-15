@@ -1,0 +1,16 @@
+services:
+  redisd:
+    image: redis
+    container_name: redisd
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ${Redis_Data_Dir:?задайте Redis_Data_Dir в stacks/redis/.env}:/data
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    external: true
+    name: ${Platform_Network:?}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Hourly rotation of Sanya harness logs
+Documentation=file:@STACK_DIR@/logrotate/harness.conf
+
+[Timer]
+# Ежечасно, а не ежедневно: за сутки харнесс в аварийном цикле успевает
+# написать несколько гигабайт (см. инцидент 26.08.2026). Порог размера
+# задан в самом конфиге logrotate, здесь — только частота проверки.
+OnCalendar=hourly
+RandomizedDelaySec=5m
+# Пропущенный из-за выключенной машины запуск отработает после загрузки.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

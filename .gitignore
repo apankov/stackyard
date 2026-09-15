@@ -1,0 +1,22 @@
+# Секреты машин. Запрет плюс исключение ПОСЛЕ него: шаблон `.env*` без
+# исключения молча съедает каждый новый образец, и на сервере потом не из чего
+# завести файл. Проверяется `git check-ignore` по каждому образцу.
+machines/*/.env
+machines/*/.env-stacks
+machines/*/.env-backup
+machines/*/.env-notify
+machines/*/stacks/*/.env
+!machines/*/.env.example
+!machines/*/.env-stacks.example
+!machines/*/stacks/*/.env.example
+profiles/stacks/*/.env
+
+# Состояние машины: всё, что описывает ЭТУ машину и генерируется, а не пишется
+# руками. Сертификаты, ключ ACME-аккаунта, список баз с паролями, include'ы
+# nginx. В git этому места нет — ни как секрету, ни как второму источнику правды.
+machines/*/state/*
+!machines/*/state/.keepit
+
+# Дампы для первичного наполнения баз: кладутся руками на машине.
+machines/*/dumps/*
+!machines/*/dumps/.keepit

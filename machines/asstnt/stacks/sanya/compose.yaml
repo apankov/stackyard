@@ -1,0 +1,180 @@
+services:
+
+  mcp-server:
+    build:
+      context: ${Sanya_Host_Home_Dir}
+      dockerfile: docker/app/Dockerfile
+    image: sanya-app:latest
+    container_name: sanya-mcp-server
+    restart: unless-stopped
+    command: ["uv", "run", "mcp-server"]
+    ports:
+      # Петля, а не 0.0.0.0. Docker вставляет свои правила в цепочку DOCKER —
+      # ДО INPUT, поэтому firewalld и iptables на хосте опубликованный порт не
+      # закрывают, и единственным барьером остаётся security group инстанса.
+      # Это сервер инструментов агента без собственной аутентификации; наружу
+      # ему нельзя. Оператор ходит к нему по имени сервиса (Sanya_MCP_Server_URL).
+      - "127.0.0.1:${Sanya_MCP_Server_Port}:${Sanya_MCP_Server_Port}"  # host:container — MCP streamable-http
+    environment:
+      DB_PATH: ${Sanya_DB_Path}
+
+      TRACING_ENABLED: ${Langfuse_Tracing_Enabled}
+      LANGFUSE_PUBLIC_KEY: ${Langfuse_Public_Key}
+      LANGFUSE_SECRET_KEY: ${Langfuse_Secret_Key}
+      LANGFUSE_BASE_URL: ${Langfuse_Base_URL}
+      LANGFUSE_ENVIRONMENT: ${Langfuse_Environment}
+
+      MCP_SERVER_PORT: "${Sanya_MCP_Server_Port}"
+      TRANSPORT: telegram
+
+      # Telegram
+      TELEGRAM_API_ID: "${Telegram__API_Id}"
+      TELEGRAM_API_HASH: "${Telegram__API_Hash}"
+      TELEGRAM_PHONE: "${Telegram__Phone}"
+      TELEGRAM_SESSION_NAME: "${Telegram__Session_Name}"
+
+      # mem0 + Qdrant vector store
+      MEM0_QDRANT_HOST: ${Mem0_Qdrant_Host}
+      MEM0_QDRANT_PORT: ${Mem0_Qdrant_Port}
+
+      MEM0_EMBEDDER_OPENAI_API_KEY: "${Mem0_Embedder__OpenAI_API_Key}"
+      MEM0_LLM_ANTHROPIC_API_KEY: "${Mem0_LLM__Anthropic_API_Key}"
+      MEM0_USE_GEMINI: "${Mem0__Use_Gemini}"
+      MEM0_GEMINI_API_KEY: "${Mem0__Gemini_API_Key}"
+      MEM0_USE_OPENAI: "${Mem0__Use_OpenAI}"
+
+      WIKI_ROOT: /app/wiki
+
+      GOOGLE_API_KEY: "${Gemini_Common_API_Key}"
+      OPENAI_API_KEY: "${OpenAI_Common_API_Key}"
+
+      MODEL_CLASSIFIER: ${Model_Classifier}
+      MODEL_LIGHT: ${Model_Light}
+      MODEL_HEAVY: ${Model_Heavy}
+      MODEL_MEMORY_EXTRACTION: ${Model_Memory_Extraction}
+
+      MODEL_CLASSIFIER__API_KEY: ${Model_Classifier__API_Key}
+      MODEL_LIGHT__API_KEY: ${Model_Light__API_Key}
+      MODEL_HEAVY__API_KEY: ${Model_Heavy__API_Key}
+
+      MODEL_FALLBACK: ${Model_Fallback}
+    volumes:
+      - ${Sanya_Host_DB_Dir}:/app/db
+      - ${Sanya_Host_Wiki_Dir}:/app/wiki
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; socket.create_connection(('localhost',${Sanya_MCP_Server_Port}),2)\" || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - shared_network
+
+  harness:
+    # Reuses the image built by the mcp-server service.
+    image: sanya-app:latest
+    build:
+      context: ${Sanya_Host_Home_Dir}
+      dockerfile: docker/app/Dockerfile
+    container_name: sanya-harness
+    restart: unless-stopped
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    environment:
+      # Connect to the external MCP container instead of spawning one.
+      MCP_SPAWN: "false"
+      # MCP_SERVER: http://mcp-server:${Sanya_MCP_Server_Port}/mcp
+      MCP_SERVER: ${Sanya_MCP_Server_URL}/mcp
+      MCP_SERVER_PORT: "${Sanya_MCP_Server_Port}"
+
+      DB_PATH: ${Sanya_DB_Path}
+
+      TRACING_ENABLED: ${Langfuse_Tracing_Enabled}
+      LANGFUSE_PUBLIC_KEY: ${Langfuse_Public_Key}
+      LANGFUSE_SECRET_KEY: ${Langfuse_Secret_Key}
+      LANGFUSE_BASE_URL: ${Langfuse_Base_URL}
+      LANGFUSE_ENVIRONMENT: ${Langfuse_Environment}
+
+      # mem0 + Qdrant vector store
+      MEM0_QDRANT_HOST: ${Mem0_Qdrant_Host}
+      MEM0_QDRANT_PORT: ${Mem0_Qdrant_Port}
+
+      MEM0_EMBEDDER_OPENAI_API_KEY: "${Mem0_Embedder__OpenAI_API_Key}"
+      MEM0_LLM_ANTHROPIC_API_KEY: "${Mem0_LLM__Anthropic_API_Key}"
+      MEM0_USE_GEMINI: "${Mem0__Use_Gemini}"
+      MEM0_GEMINI_API_KEY: "${Mem0__Gemini_API_Key}"
+      MEM0_USE_OPENAI: "${Mem0__Use_OpenAI}"
+
+      TRANSPORT: telegram
+
+      # Telegram
+      TELEGRAM_API_ID: "${Telegram__API_Id}"
+      TELEGRAM_API_HASH: "${Telegram__API_Hash}"
+      TELEGRAM_PHONE: "${Telegram__Phone}"
+      TELEGRAM_SESSION_NAME: "${Telegram__Session_Name}"
+
+      # Matrix (only required when TRANSPORT=matrix)
+      # Reach the matrix-stand services by container name on the shared net.
+      # MATRIX_HOMESERVER: http://matrix-server:${Matrix_Server_Port}
+      # MATRIX_USER_ID: "@sanya:sanya.local"
+      # MATRIX_PASSWORD: 1
+
+      # Microsoft Teams
+      # TEAMS_APP_ID: "${Microsoft_Teams__App_Id}"
+      # TEAMS_APP_PASSWORD: "${Microsoft_Teams__App_Password}"
+      # TEAMS_LISTEN_PORT: ${Microsoft_Teams__Listen_Port}
+
+      LOG_FILE: /app/logs/events.jsonl
+
+      WIKI_ROOT: /app/wiki
+      REMINDER_INTERVAL_S: 3600
+
+      OUTBOX_AUTO_APPROVE_MINUTES: 60
+      STYLE_CHECK_POLL_S: 30
+      SEND_TASK_POLL_S: 10
+
+      GOOGLE_API_KEY: "${Gemini_Common_API_Key}"
+      OPENAI_API_KEY: "${OpenAI_Common_API_Key}"
+
+      MODEL_CLASSIFIER: ${Model_Classifier}
+      MODEL_LIGHT: ${Model_Light}
+      MODEL_HEAVY: ${Model_Heavy}
+      MODEL_MEMORY_EXTRACTION: ${Model_Memory_Extraction}
+
+      MODEL_CLASSIFIER__API_KEY: ${Model_Classifier__API_Key}
+      MODEL_LIGHT__API_KEY: ${Model_Light__API_Key}
+      MODEL_HEAVY__API_KEY: ${Model_Heavy__API_Key}
+
+      MODEL_FALLBACK: ${Model_Fallback}
+    volumes:
+      - ${Sanya_Host_DB_Dir}:/app/db
+      - ${Sanya_Host_Wiki_Dir}:/app/wiki
+      - ${Sanya_Host_Home_Dir}/agent:/app/agent
+      - ${Sanya_Host_Home_Dir}/logs:/app/logs
+      - ${Sanya_Host_Home_Dir}/${Telegram__Session_Name}.session:/app/${Telegram__Session_Name}.session
+    networks:
+      - shared_network
+    command: ["uv", "run", "harness"]
+
+  sanya-operator:
+    build:
+      context: ${Sanya_Host_Home_Dir}
+      dockerfile: docker/app/Dockerfile.operator
+    image: sanya-operator:latest
+    container_name: sanya-operator
+    restart: unless-stopped
+    networks:
+      - shared_network
+    # Порт наружу не публикуется, и это не мелочь: basic auth оператора стоит
+    # на vhost'е 03-operator.sanya.my-new-site.com.conf, а прямой порт его
+    # обходил целиком. Веб-интерфейс доступен только через nginx.
+    environment:
+      OPERATOR_PORT: "${Sanya_Operator_Port}"
+      # Same SQLite file as the harness/MCP server (shared db/ bind mount).
+      DB_PATH: ${Sanya_DB_Path}
+      # Reach the MCP container by name for the playground/tool tester.
+      # No /mcp suffix — playground/memories routes are mounted at server root.
+      MCP_SERVER_URL: ${Sanya_MCP_Server_URL}
+      MCP_SERVER_PORT: "${Sanya_MCP_Server_Port}"
+    volumes:
+      - ${Sanya_Host_DB_Dir}:/app/db

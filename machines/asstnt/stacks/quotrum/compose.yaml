@@ -1,0 +1,83 @@
+# Общая база для всех сервисов на нашем образе (веб, бот, напоминания, миграции).
+# DATABASE_URL переопределяем на хост postgres (в сети docker это имя сервиса, не localhost).
+# Остальные ключи (Google/OpenAI/Telegram/SECRET_KEY) берутся из .env как есть.
+x-quotrum-app: &qtrm-app
+  build: ${Quotrum__Host_Home_Dir}
+  image: quotrum-saas:local
+  # env_file: stacks/quotrum/.env
+  networks:
+    - shared_network
+  environment:
+    DATABASE_URL: ${Quotrum__DB_URL}
+    SECRET_KEY: ${Quotrum__Secret_Key}
+    ENVIRONMENT: ${Quotrum__Environment}
+    GOOGLE_CLIENT_ID: ${Quotrum__Google_Client_Id}
+    GOOGLE_CLIENT_SECRET: ${Quotrum__Google_Client_Secret}
+    GOOGLE_REDIRECT_URI: ${Quotrum__Google_Redirect_URI}
+    OPENAI_API_KEY: ${Quotrum__OpenAI_API_Key}
+    TELEGRAM_BOT_TOKEN: ${Quotrum__Telegram_Bot_Token}
+    TELEGRAM_BOT_USERNAME: ${Quotrum__Telegram_Bot_Username}
+    SUPPORT_TELEGRAM_USERNAME: ${Quotrum__Support_Telegram_Username}
+    STRIPE_SECRET_KEY: ${Quotrum__Stripe_Secret_Key}
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+
+  # One-shot: накатывает миграции и завершается. Остальные ждут его успеха.
+  quotrum-migrate:
+    <<: *qtrm-app
+    container_name: quotrum-migrate
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  quotrum-app:
+    <<: *qtrm-app
+    container_name: quotrum-app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${Quotrum__Website_Port}"]
+    # Порт наружу не публикуется: до контейнера ходит только nginx, по имени
+    # сервиса внутри devbox8-net. --host 0.0.0.0 выше — это «все интерфейсы
+    # КОНТЕЙНЕРА», а не хоста, и менять его не нужно.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      quotrum-migrate:
+        condition: service_completed_successfully
+
+  quotrum-bot:
+    <<: *qtrm-app
+    container_name: quotrum-bot
+    command: ["python", "-m", "app.bot"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      quotrum-migrate:
+        condition: service_completed_successfully
+
+  # Дневной шедулер напоминаний. run_reminders идемпотентен, дублей в один день не будет.
+  # TZ задаёт время срабатывания (10:00 по Москве) и для date, и для python zoneinfo.
+  quotrum-reminders:
+    <<: *qtrm-app
+    container_name: quotrum-reminders
+    environment:
+      DATABASE_URL: ${Quotrum__DB_URL}
+      TZ: Europe/Moscow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      quotrum-migrate:
+        condition: service_completed_successfully
+    command:
+      - /bin/sh
+      - -c
+      - |
+        while true; do
+          now=$$(date +%s)
+          target=$$(date -d "10:00" +%s)
+          [ "$$target" -le "$$now" ] && target=$$(date -d "tomorrow 10:00" +%s)
+          echo "reminders: сплю до $$(date -d "@$$target")"
+          sleep $$((target - now))
+          python -m scripts.run_reminders || echo "reminders: прогон упал"
+        done

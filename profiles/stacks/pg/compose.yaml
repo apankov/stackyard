@@ -1,0 +1,49 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - shared_network
+    volumes:
+      - ${Pg_Data_Dir:?задайте Pg_Data_Dir в stacks/pg/.env}:/var/lib/postgresql/data
+    environment:
+      # Слева контракт образа, справа наши имена. Префикс намеренно Pg_, а не
+      # Postgres_: Postgres_* — это ключи ЗАКАЗА базы, которые пишут стеки-
+      # потребители. Назови мы свои суперюзерские креды тем же префиксом, стек
+      # pg выглядел бы для генератора как собственный потребитель.
+      - POSTGRES_USER=${Pg_Root_User:?}
+      - POSTGRES_PASSWORD=${Pg_Root_Password:?}
+      - POSTGRES_DB=${Pg_Root_DB:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-initializer:
+    image: postgres:16-alpine
+    container_name: db-initializer
+    networks:
+      - shared_network
+    volumes:
+      - ${Pg_Stack_Dir:-${Platform_Deploy_Dir}/profile/stacks/pg}/db-init/initializer.sh:/initializer.sh:ro
+      # Список баз — в машинном state/, а не рядом со скриптом: внутрь profile/
+      # писать нельзя, следующее обновление профиля его затрёт.
+      - ${Platform_Deploy_Dir:?}/state/pg/databases.yaml:/config/databases.yaml:ro
+      - ${Platform_Deploy_Dir:?}/dumps:/dumps:ro
+    environment:
+      - POSTGRES_USER=${Pg_Root_User:?}
+      - POSTGRES_PASSWORD=${Pg_Root_Password:?}
+    entrypoint: >
+      sh -c "apk add --no-cache yq bash && bash /initializer.sh"
+    depends_on:
+      - postgres
+
+networks:
+  shared_network:
+    external: true
+    name: ${Platform_Network:?}
