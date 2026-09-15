@@ -706,6 +706,45 @@ names=$(grep -rniE 'devbox6|devbox-asstnt|12devs|my-new-site|pankov\.me|filinn|p
         | grep -v '^Binary' | grep -v 'selftest\.sh:[0-9]*:names=' || true)
 check "имён машин и клиентов в платформе нет" "$names" ""
 
+echo "== состояние свежей машины"
+
+# На свежей машине после ./bootstrap каталога state/ нет вовсе: bootstrap несёт
+# платформу, а состояние — дело машины. Первая же команда писала в
+# state/nginx-vhosts/ и умирала сырой ошибкой оболочки, а databases.yaml не
+# создавался никогда — при том что --check требовал `sync`, который его и не
+# создаёт. Замкнутый круг на первой минуте знакомства с платформой.
+rm -rf "$WORK/state"
+printf 'Enabled_Stacks="papa lima"\n' > "$WORK/.env-stacks"
+ensure_state_dirs
+for d in nginx-vhosts certs htpasswd getssl-config; do
+  check "state/$d заведён" "$([ -d "$WORK/state/$d" ] && echo да || echo нет)" "да"
+done
+check "каталог поставщика заведён" "$([ -d "$WORK/state/papa" ] && echo да || echo нет)" "да"
+
+# А на машине без поставщика его каталога быть не должно: пустой state/papa
+# там вводит в заблуждение не меньше, чем его отсутствие там, где он нужен.
+rm -rf "$WORK/state"
+printf 'Enabled_Stacks="lima"\n' > "$WORK/.env-stacks"
+ensure_state_dirs
+check "без поставщика его каталог не заводится" \
+  "$([ -d "$WORK/state/papa" ] && echo да || echo нет)" "нет"
+check "без поставщика путь к файлу баз пуст" "$(stacks_databases_file)" ""
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+
+# Заглушки сертификатов обязаны заводиться и профильным стекам. Иначе домен
+# объявлен, конфиг getssl есть, а файла нет — nginx не стартует и с
+# restart: always уносит ВСЕ сайты машины.
+fixture_root profile/stacks sierra stack.conf 'Domains="sierra.test"
+Containers="no"'
+fixture_root profile/stacks sierra nginx/60-sierra.conf 'server {
+	ssl_certificate /etc/nginx/certs/sierra.test-fullchain.crt;
+	ssl_certificate_key /etc/nginx/certs/sierra.test.key;
+}'
+printf 'Enabled_Stacks="papa lima november sierra"\n' > "$WORK/.env-stacks"
+check "путь сертификата профильного стека виден" \
+  "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+
 echo "== распознавание дампа"
 
 # Прошлая версия объявляла SQLite'ом ЛЮБОЙ gzip. А gzip'ом сжаты и дамп MySQL

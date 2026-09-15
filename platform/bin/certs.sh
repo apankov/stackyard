@@ -172,9 +172,7 @@ while IFS= read -r path; do
     esac
     note "заглушка: $filename"
   fi
-done < <(grep -rhE '^[[:space:]]*ssl_certificate(_key)?[[:space:]]' \
-           "$ROOT_DIR/stacks"/*/nginx "$ROOT_DIR/platform/nginx-vhosts" 2>/dev/null \
-           | awk '{print $2}' | tr -d ';' | sort -u)
+done < <(stacks_cert_paths | awk '{print $2}' | tr -d ';' | sort -u)
 
 # ------------------------------------------------- 3. ACME-аккаунт
 

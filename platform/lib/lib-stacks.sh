@@ -110,6 +110,32 @@ stacks_include_file() { printf '%s/state/nginx-vhosts/00-enabled.conf' "$(stacks
 # конкретную машину и выводится из Static= в stacks/*/stack.conf.
 stacks_static_file()  { printf '%s/state/nginx-static.generated.yaml' "$(stacks_root)"; }
 
+# Завести каталоги состояния машины. Идемпотентно.
+#
+# Существует одной функцией, а не строкой mkdir по месту, из-за конкретной
+# истории: `> ""` при отсутствующем поставщике чинили в docker-compose.sh и не
+# починили в stack.sh, потому что то же знание лежало в двух местах. Здесь оно
+# одно, и оба входа зовут его первым делом.
+#
+# Что чинится. На свежей машине после ./bootstrap не существует ни state/, ни
+# его подкаталогов: bootstrap приносит платформу, а состояние — дело машины.
+# Первая же команда (`./stack sync`) писала в state/nginx-vhosts/ и умирала
+# сырой ошибкой оболочки, а databases.yaml не создавался вовсе — и `--check`
+# требовал `sync`, который его не создаёт. Замкнутый круг на первой минуте
+# знакомства с платформой.
+ensure_state_dirs() {
+  local root p
+  root="$(stacks_root)"
+  mkdir -p "$root/state/nginx-vhosts" "$root/state/certs" \
+           "$root/state/htpasswd" "$root/state/getssl-config" 2>/dev/null || true
+  # Каталог поставщика — только когда поставщик включён: пустой state/pg на
+  # машине с MySQL вводил бы в заблуждение не меньше, чем его отсутствие там,
+  # где он нужен.
+  p="$(stacks_db_provider)"
+  [ -n "$p" ] && mkdir -p "$root/state/$p" 2>/dev/null
+  return 0
+}
+
 # ------------------------------------------------------- поставщик БД
 #
 # Движок НЕ знает, какая на машине СУБД. Он знает только роль: некий включённый
@@ -611,6 +637,29 @@ stacks_registries() {
 # декларации; digest отвечает «что сейчас запущено», меняется каждым деплоем и
 # поэтому лежит в .env стека, рядом с остальным серверным состоянием.
 stack_image_tag() { stack_conf_get "$1" Image_Tag; }
+
+# Пути сертификатов, на которые ссылаются vhost'ы ВСЕХ стеков — из обоих
+# корней — плюс платформенные.
+#
+# Через stack_vhost_dir, а не глобом "$ROOT_DIR/stacks"/*/nginx: глоб слеп к
+# профильному корню, и заглушка профильному стеку не создавалась. При этом
+# домен его виден (stacks_domains смотрит оба корня), поэтому getssl для него
+# исправно настраивался. Итог: домен объявлен, конфиг getssl есть, файла
+# заглушки нет — nginx не открывает ssl_certificate, не стартует, и с
+# restart: always уходит в краш-луп, уносящий ВСЕ сайты машины.
+#
+# 2>/dev/null здесь тоже мешал: он глушил промах глоба, то есть ту самую
+# слепоту, которую нужно было заметить.
+stacks_cert_paths() {
+  local s dir
+  while IFS= read -r s; do
+    dir="$(stack_vhost_dir "$s")"
+    [ -d "$dir" ] || continue
+    grep -rhE '^[[:space:]]*ssl_certificate(_key)?[[:space:]]' "$dir" 2>/dev/null || true
+  done < <(stacks_available)
+  grep -rhE '^[[:space:]]*ssl_certificate(_key)?[[:space:]]' \
+    "$(stacks_root)/platform/nginx-vhosts" 2>/dev/null || true
+}
 
 # ------------------------------------------------------------------ nginx
 

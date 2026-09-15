@@ -43,6 +43,9 @@ MUTATIONS=(
   'бэкап: gzip опознаётся как SQLite (A2)@@platform/lib/lib-env.sh@@    1f8b*) ;;                                                          # gzip — смотрим внутрь@@    1f8b*) printf sqlite_gz; return 0 ;;'
   'бэкап: tar под gzip не отличается@@platform/lib/lib-env.sh@@    7573746172*) printf '"'"'tar_gz'"'"'; return 0 ;;@@    7573746172*) printf unknown; return 0 ;;'
   'seed: инициализатор читает другой ключ (A3)@@profiles/stacks/mysql/db-init/initializer.sh@@yq e '"'"'.dump // ""'"'"' -@@yq e '"'"'.dump_file // ""'"'"' -'
+  'свежая машина: state/ не заводится (B1)@@platform/lib/lib-stacks.sh@@  mkdir -p "$root/state/nginx-vhosts"@@  mkdir -p "$root/state/NOPE"  #'
+  'свежая машина: каталог поставщика не заводится (A5)@@platform/lib/lib-stacks.sh@@  [ -n "$p" ] \&\& mkdir -p "$root/state/$p"@@  [ -n "$p" ] \&\& true'
+  'заглушки: профильный стек не сканируется (A4)@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n  grep -rhE@@  done < <(stacks_enabled 2>/dev/null | grep -v .)\n  grep -rhE'
   'статика: собирается по включённым@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n\n  cat <<@@  done < <(stacks_enabled)\n\n  cat <<'
 )
 

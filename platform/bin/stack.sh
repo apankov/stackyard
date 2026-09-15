@@ -43,6 +43,10 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 . "$LIB_DIR/lib-env.sh"
 
 MANIFEST="$ROOT_DIR/.env-stacks"
+
+# Каталоги состояния — до любой команды, которая в них пишет. На свежей машине
+# их нет вовсе, и первая же запись умирала сырой ошибкой оболочки.
+ensure_state_dirs
 DRY_RUN=0
 NO_START=0
 NO_UNITS=0
@@ -182,9 +186,12 @@ nginx_running() {
 databases_apply() {
   local f content
   f="$(stacks_databases_file)"
-  # Каталог принадлежит поставщику БД; если поставщика нет вовсе, писать некуда
-  # и не для кого — инициализатор живёт в нём же.
-  [ -d "$(dirname "$f")" ] || return 0
+  # Пусто — значит поставщик не включён. Это законное состояние: машине с одним
+  # прокси-стеком общая СУБД не нужна. Проверка на КАТАЛОГ здесь не годилась:
+  # dirname от пустой строки даёт ".", он существует всегда, и дальше шло
+  # `> ""` — сырая ошибка оболочки на первой же команде такой машины.
+  [ -n "$f" ] || { ok "поставщика общей БД нет — списку баз неоткуда взяться"; return 0; }
+  mkdir -p "$(dirname "$f")"
   content="$(stacks_databases_content)"
   if [ -f "$f" ] && [ "$(cat "$f")" = "$content" ]; then
     ok "базы MySQL уже соответствуют декларациям"
@@ -285,8 +292,7 @@ certs_stubs_if_needed() {
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     [ -f "$certs_dir/$(basename "$path")" ] || missing=1
-  done < <(grep -rhE '^[[:space:]]*ssl_certificate(_key)?[[:space:]]' "$ROOT_DIR/stacks"/*/nginx "$ROOT_DIR/platform/nginx-vhosts" 2>/dev/null \
-             | awk '{print $2}' | tr -d ';' | sort -u)
+  done < <(stacks_cert_paths | awk '{print $2}' | tr -d ';' | sort -u)
 
   [ "$missing" -eq 0 ] && return 0
   warn "не хватает файлов сертификатов — запускаю platform/bin/certs.sh (заглушки)"
