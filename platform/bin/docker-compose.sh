@@ -34,7 +34,7 @@ ENV_FILE="$ROOT_DIR/.env"
 # проекта задаётся отдельно, через --project-directory ниже.
 cd "$ROOT_DIR"
 
-# shellcheck source=scripts/lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
 
 # Флаги — только перед командой.

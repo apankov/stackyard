@@ -20,7 +20,7 @@ C=mysqld
 PW=""
 need_pw() {
   [ -n "$PW" ] && return 0
-  # shellcheck source=../../../../platform/lib/lib-env.sh
+  # shellcheck source=platform/lib/lib-env.sh
   . "${ROOT_DIR:?}/platform/lib/lib-env.sh"
   ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ROOT_DIR/stacks/mysql/.env"
   PW="$(env_get Mysql_Root_Password)"

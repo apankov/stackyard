@@ -21,9 +21,9 @@ set -uo pipefail
 # имели верный — опечатка была ровно в одном месте и жила, потому что её
 # следствие выглядело как «стек не отвечает», а не как сломанный скрипт.
 #
-# shellcheck source=../../../../platform/lib/lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "${ROOT_DIR:?}/platform/lib/lib-stacks.sh"
-# shellcheck source=../../../../platform/lib/lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "$ROOT_DIR/platform/lib/lib-env.sh"
 
 # .env стека — через stack_env_file, а не от STACK_DIR. У профильного стека

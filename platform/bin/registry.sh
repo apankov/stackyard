@@ -28,9 +28,9 @@ DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="${ROOT_DIR:-$( cd "$DIR0/../.." && pwd )}"
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 
-# shellcheck source=lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
-# shellcheck source=lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 
 problems=0

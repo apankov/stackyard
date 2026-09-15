@@ -20,7 +20,7 @@ ROOT_DIR="${ROOT_DIR:-$( cd "$DIR0/../.." && pwd )}"
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 ENV_FILE="$ROOT_DIR/.env"
 
-# shellcheck source=lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
 
 if [ ! -f "$ENV_FILE" ]; then

@@ -15,7 +15,7 @@ set -euo pipefail
 CHECK_ONLY=0
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
 
-# shellcheck source=../../../../platform/lib/lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "${ROOT_DIR:?}/platform/lib/lib-env.sh"
 ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ROOT_DIR/stacks/php-fpm/.env"
 

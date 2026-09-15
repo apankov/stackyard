@@ -30,12 +30,12 @@ DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="${ROOT_DIR:-$( cd "$DIR0/../.." && pwd )}"
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 
-# shellcheck source=scripts/lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 # lib-stacks нужен с самого начала: поставщика БД спрашиваем ещё при разборе
 # конфига. Раньше на его месте стояла константа с именем контейнера postgres,
 # и библиотека подключалась сильно позже, по месту первой надобности.
-# shellcheck source=../lib/lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
 
 # Состояние скрипта — в /var/lib, по тому же принципу:

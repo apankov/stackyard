@@ -16,7 +16,7 @@ CHECK_ONLY=0
 DB_DIR="${ROOT_DIR:?}/_db"
 [ -d "$DB_DIR" ] || { echo "[ok] каталога _db/ нет — тулкит на этой машине не используется"; exit 0; }
 
-# shellcheck source=../../../../platform/lib/lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "$ROOT_DIR/platform/lib/lib-env.sh"
 ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ROOT_DIR/stacks/mysql/.env"
 

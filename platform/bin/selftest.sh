@@ -71,9 +71,9 @@ printf 'services:\n  nginx:\n    image: nginx\n' > "$WORK/platform/compose/nginx
 # Читается подключаемыми ниже библиотеками, а не этим файлом.
 # shellcheck disable=SC2034
 ROOT_DIR="$WORK"
-# shellcheck source=lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "$WORK/platform/lib/lib-stacks.sh"
-# shellcheck source=lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "$WORK/platform/lib/lib-env.sh"
 
 echo "== include'ы vhost'ов"
@@ -144,6 +144,16 @@ check "include профильного стека идёт в профильны�
 # искать образец по машинному пути, обязательность .env у профильного стека не
 # проверяется вовсе, и стек считается укомплектованным без секретов.
 fixture_root profile/stacks papa .env.example 'Papa_Secret=CHANGE_ME'
+# Стек со своими контейнерами обязан иметь compose.yaml. Молчаливая
+# терпимость превращала бы забытый файл в «стек без контейнеров» — рабочий
+# конфиг, в котором ничего не запускается.
+fixture victor stack.conf 'Requires=""'
+check "стек без compose.yaml и без Containers=no — неполон" \
+  "$(stack_missing_files victor | grep -c 'compose.yaml')" "1"
+fixture whiskey stack.conf 'Requires=""
+Containers="no"'
+check "с Containers=no претензий нет" "$(stack_missing_files whiskey)" ""
+
 check "профильному стеку нужен .env, раз у него есть образец" \
   "$(stack_missing_files papa)" "stacks/papa/.env"
 printf 'x\n' > "$WORK/stacks/papa/.env" 2>/dev/null || { mkdir -p "$WORK/stacks/papa"; printf 'x\n' > "$WORK/stacks/papa/.env"; }
@@ -425,6 +435,25 @@ printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
 
 check "upstream'ы находятся, хотя первый стек манифеста без nginx/" \
   "$(errexit_run stacks_upstreams)" "november-app"
+
+# fastcgi_pass наравне с proxy_pass. Не симметрия ради симметрии: nginx
+# резолвит оба при ЧТЕНИИ конфига, и опущенный php-fpm при пересоздании nginx
+# уносит все сайты, включая статические. Раньше это ловилось случайно — через
+# настоящую фикстуру с PHP-сайтом, — а случайное покрытие исчезает при первой
+# же перестановке в тестах.
+fixture oscar2 stack.conf 'Requires=""'
+fixture oscar2 compose.yaml 'services:
+  oscar2-app:
+    image: alpine'
+fixture oscar2 nginx/80-oscar2.conf 'server {
+	location ~ .php$ {
+		fastcgi_pass	php-fpm:9000;
+	}
+}'
+printf 'Enabled_Stacks="mike november oscar2"\n' > "$WORK/.env-stacks"
+check "fastcgi_pass тоже считается upstream'ом" \
+  "$(errexit_run stacks_upstreams | grep -cx 'php-fpm')" "1"
+printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
 check "домен без vhost'а находится под set -e" \
   "$(errexit_run check_domains_match mike | wc -l | tr -d ' ')" "1"
 check "vhost без домена находится под set -e" \
@@ -446,6 +475,19 @@ check "сервис включённого стека — знакомый" \
   "$(printf '%s\n' "$known" | grep -cx 'november-app')" "1"
 check "сервис ВЫКЛЮЧЕННОГО стека тоже знакомый" \
   "$(printf '%s\n' "$known" | grep -cx 'golf-app')" "1"
+
+# Платформенные сервисы исключаются из сервисов стека: иначе `disable` снёс бы
+# контейнер nginx вместе со всеми сайтами машины.
+fixture papa2 stack.conf 'Requires=""'
+fixture papa2 compose.yaml 'services:
+  nginx:
+    image: alpine
+  papa2-app:
+    image: alpine'
+check "платформенный сервис не считается сервисом стека" \
+  "$(errexit_run stack_services papa2 | grep -cx nginx)" "0"
+check "собственный сервис стека считается" \
+  "$(errexit_run stack_services papa2 | grep -cx papa2-app)" "1"
 check "сервиса, которого не объявляет никто, в списке нет" \
   "$(printf '%s\n' "$known" | grep -cx 'stray-app')" "0"
 
@@ -566,6 +608,12 @@ check "апостроф в пароле экранирован" \
   "$(printf '%s' "$yaml" | grep -c "password: 'p@ss''w0rd'")" "1"
 check "необязательный ключ попал, где объявлен" \
   "$(printf '%s' "$yaml" | grep -c "dump: 'lima-seed.sql'")" "1"
+# Путь в S3 для SQLite — формула, которую делят backup.sh и check-backups.sh.
+# Проверяется ЗНАЧЕНИЕ, а не только «формула одна»: разъехавшись, они молча
+# кладут и ищут в разных местах.
+check "путь SQLite в S3" "$(sqlite_s3_subpath /var/lib/app/twd-tm.db)" "sqlite/twd-tm"
+check "путь SQLite: расширение .db срезано" "$(sqlite_s3_subpath /x/base.db)" "sqlite/base"
+
 check "стек без объявления в yaml не попадает" \
   "$(printf '%s' "$yaml" | grep -c 'alpha')" "0"
 
@@ -698,6 +746,24 @@ writes=$(grep -rnE '(>>?|tee|cp|mkdir -p|install) +[^|#]*\$\{?(ROOT_DIR|REPO_DIR
            "$REPO_DIR"/profiles 2>/dev/null \
         | grep -v 'stack-path-ok' | grep -v 'selftest\.sh:' || true)
 check "в общие слои никто не пишет" "$writes" ""
+
+# 3. Директива `# shellcheck source=` обязана резолвиться ОТ КОРНЯ репозитория:
+#    именно так шеллчек её и ищет — от рабочего каталога, а не от проверяемого
+#    файла. Форма ../lib/... выглядела верной и молча не резолвилась, а SC1091
+#    идёт уровнем info, то есть при -S error его не видно вовсе. Итог: -x был
+#    включён, а каждый скрипт линтился в изоляции, и опечатка в пути к
+#    библиотеке доживала до рантайма (ровно так уцелел дефект A9).
+badsrc=""
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  t="${line##*source=}"; t="${t%% *}"
+  [ -f "$REPO_DIR/$t" ] || badsrc="$badsrc ${line%%:*}:$t"
+#    Ищем НАСТОЯЩУЮ форму директивы (строка целиком — комментарий шеллчека), а
+#    не подстроку: иначе проверка ловит собственный образец поиска и рассказ о
+#    том, что она проверяет. На этом я попался трижды подряд.
+done < <(grep -rnE '^[[:space:]]*# shellcheck source=' "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib \
+           "$REPO_DIR"/bin "$REPO_DIR"/tests "$REPO_DIR"/profiles 2>/dev/null)
+check "директивы shellcheck source= резолвятся" "$badsrc" ""
 
 # 3. Ссылка на платформенный compose-файл, которого нет. Так в stack.sh жил
 #    `-f platform/compose/php-fpm.yaml`, оставшийся с тех пор, когда php-fpm был
@@ -905,10 +971,63 @@ done
 
 # Движок обязан обслуживать ОБЕ машины-фикстуры без правок. Они с разными
 # СУБД намеренно: платформа считается общей ровно тогда, когда обе работают.
-for m in "$FIXTURES"/*/; do
-  [ -d "$m" ] || continue
-  name=$(basename "${m%/}")
-  [ -f "$m/.env-stacks" ] || { printf '  · фикстура %s не настроена, пропускаю\n' "$name"; continue; }
+# Фикстура настраивается ЗДЕСЬ, а не заранее руками.
+#
+# Её .env, .env-stacks и stacks/*/.env в git не лежат (это .env-файлы, правило
+# одно на всех). Значит на свежем клоне их нет, и блок уходил в «пропускаю» —
+# а пропуск неотличим от «проверено». Selftest был зелёным только на машине
+# автора, где эти файлы остались с прошлых запусков.
+#
+# Поэтому копируем фикстуру во временный каталог и заводим ей окружение из
+# образцов. Заодно это проверяет сами образцы: фикстура, у которой .env.example
+# неполон, теперь не настроится.
+fixture_machine() {
+  local src="$1" dst="$2" f
+  mkdir -p "$dst"
+  cp -R "$src"/. "$dst"/ 2>/dev/null
+  rm -rf "$dst/platform" "$dst/profile" "$dst/.stackyard" "$dst/state"
+  ln -sfn "$REPO_DIR/platform" "$dst/platform"
+  ln -sfn "$REPO_DIR/profiles" "$dst/profile"
+  [ -f "$dst/.env-stacks" ] || cp "$dst/.env-stacks.example" "$dst/.env-stacks" 2>/dev/null
+  if [ ! -f "$dst/.env" ] && [ -f "$dst/.env.example" ]; then
+    sed "s|^Platform_Deploy_Dir=.*|Platform_Deploy_Dir=$dst|" "$dst/.env.example" > "$dst/.env"
+  fi
+  # Секреты стеков — из образцов, с подстановкой вместо CHANGE_ME. Значение
+  # своё у каждой фикстуры: одинаковый секрет у двух машин — то, что ловит
+  # bin/audit-isolation.sh, и заводить его здесь значило бы учить плохому.
+  for f in "$dst"/stacks/*/; do
+    [ -d "$f" ] || continue
+    [ -f "$f/.env" ] && continue
+    local ex; ex="$(cd "$REPO_DIR" && ROOT_DIR="$dst" bash -c ". platform/lib/lib-stacks.sh; stack_dir $(basename "${f%/}")")/.env.example"
+    [ -f "$ex" ] || ex="$f/.env.example"
+    [ -f "$ex" ] && sed "s/CHANGE_ME/$(basename "$dst")-fixture-pw/" "$ex" > "$f/.env"
+  done
+  # Профильным стекам .env тоже нужен, а их каталога в машине может не быть.
+  while IFS= read -r st; do
+    [ -n "$st" ] || continue
+    local sd; sd="$dst/stacks/$st"
+    [ -f "$sd/.env" ] && continue
+    local pex="$REPO_DIR/profiles/stacks/$st/.env.example"
+    [ -f "$pex" ] || continue
+    mkdir -p "$sd"
+    sed "s/CHANGE_ME/$(basename "$dst")-fixture-pw/" "$pex" > "$sd/.env"
+  done < <(ROOT_DIR="$dst" bash -c ". $REPO_DIR/platform/lib/lib-stacks.sh; stacks_enabled 2>/dev/null")
+}
+
+fixtures_seen=0
+for src in "$FIXTURES"/*/; do
+  [ -d "$src" ] || continue
+  name=$(basename "${src%/}")
+  m="$WORK/fx-$name"
+  fixture_machine "$src" "$m"
+  fixtures_seen=$((fixtures_seen + 1))
+
+  # Фикстура обязана быть НЕПУСТОЙ. Без этого все проверки ниже сравнивают
+  # пустое с пустым и проходят: ровно так блок и выглядел «зелёным», когда на
+  # деле пропускался. Пустое равно пустому — это не проверка.
+  enabled_n=$( ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_enabled 2>/dev/null" | grep -c . || true)
+  check "$name: фикстура настроена и непуста" \
+    "$([ "${enabled_n:-0}" -ge 1 ] && echo да || echo "нет (стеков: ${enabled_n:-0})")" "да"
 
   # Domains и server_name — два списка одного и того же. Разъезд означает либо
   # сертификат, который выпускается и никому не служит, либо vhost, работающий
@@ -937,13 +1056,34 @@ for m in "$FIXTURES"/*/; do
     [ "$orphan" = "0" ] && orphan=""
   fi
   check "$name: заказов базы без поставщика нет" "$orphan" ""
+
+  # Ни одного недостающего файла: если образец неполон, фикстура не настроится,
+  # и раньше это было незаметно.
+  missing_all=""
+  while IFS= read -r st; do
+    [ -n "$st" ] || continue
+    mf=$( ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stack_missing_files $st" 2>/dev/null )
+    [ -n "$mf" ] && missing_all="$missing_all $st:$mf"
+  done < <(ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_enabled 2>/dev/null")
+  check "$name: у включённых стеков всё на месте" "$missing_all" ""
 done
+
+# Пропуск фикстуры неотличим от её проверки, поэтому их число проверяется явно.
+# Две с разными СУБД — тот минимум, ради которого фикстуры и существуют.
+check "фикстуры действительно прогнаны" "$([ "$fixtures_seen" -ge 2 ] && echo да || echo "нет ($fixtures_seen)")" "да"
 
 echo "== .gitignore"
 
 # Правило `.env*` без исключения молча съедает каждый новый образец: уже
 # добавленные файлы продолжают отслеживаться, а новые не попадают в git, и
 # обнаруживается это на свежей машине. Поэтому правила проверяются явно.
+# Вне git-репозитория check-ignore ответить не может, и его молчание выглядело
+# как «файл отслеживается» — шесть ложных провалов на распакованном архиве.
+# Отсутствие ответа и ответ «нет» — разные вещи, и путать их нельзя нигде.
+if ! ( cd "$REPO_DIR" && git rev-parse --git-dir ) >/dev/null 2>&1; then
+  echo "  · это не git-репозиторий — правила .gitignore проверить нечем, блок пропущен"
+else
+
 ignored() {
   ( cd "$REPO_DIR" && git check-ignore -q "$1" 2>/dev/null && echo ignored || echo tracked )
 }
@@ -981,6 +1121,8 @@ fell_out=$( cd "$REPO_DIR" && git ls-files | while IFS= read -r f; do
               git check-ignore -q "$f" 2>/dev/null && echo "$f"
             done )
 check "отслеживаемые файлы не выпали из git" "$fell_out" ""
+
+fi
 
 echo
 if [ "$failures" -eq 0 ]; then

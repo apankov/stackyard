@@ -202,7 +202,7 @@ done
 # 4. Юниты включённых стеков. Стек, которому нужен таймер, кладёт юнит в
 # stacks/<стек>/systemd/ и этот скрипт не трогает.
 
-# shellcheck source=lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
 export DEPLOY_DIR="$Platform_Deploy_Dir"
 export SERVICE_USER

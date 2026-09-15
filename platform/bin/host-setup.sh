@@ -39,9 +39,9 @@ fi
 PROBLEMS=0
 WARNINGS=0
 
-# shellcheck source=lib-stacks.sh
+# shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
-# shellcheck source=lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 
 # Только платформенные значения. Читаем через lib-env.sh, а не grep'ом: он один

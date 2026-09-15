@@ -50,6 +50,10 @@ MUTATIONS=(
   'health: библиотека по пути devbox6 (A9)@@profiles/stacks/mysql/scripts/health.sh@@. "$ROOT_DIR/platform/lib/lib-env.sh"@@. "$ROOT_DIR/scripts/lib-env.sh"'
   'include: файл снова сортируется раньше зон (A15)@@platform/lib/lib-stacks.sh@@state/nginx-vhosts/10-enabled.conf@@state/nginx-vhosts/00-enabled.conf'
   'http2: проверка образа всегда молчит (A16)@@platform/lib/lib-stacks.sh@@        printf '"'"'образ %s старее 1.25.1@@        true \&\& printf '"'"'' # '"'"'образ %s старее 1.25.1'
+  'фикстуры: окружение не заводится, блок пропускается (C6)@@platform/bin/selftest.sh@@  fixture_machine "$src" "$m"@@  true'
+  'shellcheck: директива source= не резолвится (C5)@@platform/bin/certs.sh@@# shellcheck source=platform/lib/lib-stacks.sh@@# shellcheck source=../lib/lib-stacks.sh'
+  # bootstrap сетью selftest не проверяет: прогон не должен зависеть от
+  # интернета. Его проверяют руками, см. README.
   'статика: собирается по включённым@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n\n  cat <<@@  done < <(stacks_enabled)\n\n  cat <<'
 )
 

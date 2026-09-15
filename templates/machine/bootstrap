@@ -59,17 +59,27 @@ else
       echo "  Машина работает на непроверенной версии. Закрепить: ./bin/pin.sh <машина>" >&2
     fi
   else
-    echo "stackyard $VERSION: получаю $REPO"
+    echo "stackyard $VERSION ($COMMIT): получаю $REPO"
     command -v git >/dev/null || { echo "Ошибка: нужен git" >&2; exit 2; }
-    git clone --quiet --depth 1 --branch "$VERSION" "$REPO" "$DEST.tmp"
-    got="$( cd "$DEST.tmp" && git rev-parse HEAD )"
-    # Тег мог быть передвинут после того, как машину закрепили. Отказ, а не
-    # предупреждение: дальше поедет код, которого никто не утверждал.
-    if [ "$got" != "$COMMIT" ]; then
-      echo "ОТКАЗ: тег $VERSION указывает на $got, а в stackyard.lock записан $COMMIT." >&2
-      echo "  Тег передвинули. Проверьте, что именно изменилось, и обновите lock осознанно." >&2
+
+    # Клонируем ветку по умолчанию и переходим на ЗАКРЕПЛЁННЫЙ КОММИТ.
+    #
+    # Не `--branch "$VERSION"`: тег — это украшение. Закрепление идёт по
+    # коммиту, и требовать существования тега значит ломать установку там, где
+    # его просто не создали. Ровно это и обнаружилось при первой публикации:
+    # репозиторий на месте, коммит на месте, тегов нет — и bootstrap падал.
+    #
+    # Без --depth: глубина отсекает историю, а нужный коммит может лежать за
+    # её пределами. Репозиторий маленький, полный клон дешевле, чем догадки
+    # о том, насколько углубляться.
+    git clone --quiet "$REPO" "$DEST.tmp" || { rm -rf "$DEST.tmp"; echo "Ошибка: не удалось склонировать $REPO" >&2; exit 1; }
+    if ! ( cd "$DEST.tmp" && git checkout --quiet "$COMMIT" ) 2>/dev/null; then
+      echo "ОТКАЗ: коммита $COMMIT нет в $REPO." >&2
+      echo "  Либо его не запушили, либо в stackyard.lock опечатка." >&2
       rm -rf "$DEST.tmp"; exit 1
     fi
+    got="$( cd "$DEST.tmp" && git rev-parse HEAD )"
+    [ "$got" = "$COMMIT" ] || { echo "ОТКАЗ: после checkout HEAD=$got, а ожидался $COMMIT" >&2; rm -rf "$DEST.tmp"; exit 1; }
     printf '%s\n' "$got" > "$DEST.tmp/.commit"
     rm -rf "$DEST.tmp/.git"
   fi

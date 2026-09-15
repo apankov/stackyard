@@ -22,7 +22,7 @@ DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="${ROOT_DIR:-$( cd "$DIR0/../.." && pwd )}"
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 
-# shellcheck source=scripts/lib-env.sh
+# shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 
 # Переопределяется только ради тестов: боевой путь — /var/lib/devbox-notify,
