@@ -20,7 +20,13 @@ paths=("$@")
 if [ ${#paths[@]} -eq 0 ]; then
   list="${HOME}/.stackyard-fleet"
   [ -f "$list" ] || { echo "Укажите пути к машинам или заведите $list" >&2; exit 2; }
-  mapfile -t paths < <(grep -vE '^\s*(#|$)' "$list")
+  # Тильду разворачиваем сами: в файле её пишут руками, а оболочка внутри
+  # переменной её не раскрывает — путь просто не находится, и парк молча
+  # выглядит пустым.
+  while IFS= read -r l; do
+    case "$l" in ''|\#*) continue ;; esac
+    paths+=("${l/#\~/$HOME}")
+  done < "$list"
 fi
 
 printf '%-24s %-10s %-10s %s\n' МАШИНА ВЕРСИЯ ОТСТАЁТ КОММИТ
