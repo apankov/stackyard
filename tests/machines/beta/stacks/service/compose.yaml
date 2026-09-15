@@ -1,0 +1,14 @@
+services:
+  service-app:
+    image: nginx:alpine
+    container_name: service-app
+    restart: always
+    networks:
+      - shared_network
+    depends_on:
+      - postgres
+
+networks:
+  shared_network:
+    external: true
+    name: ${Platform_Network:?}

@@ -1,0 +1,20 @@
+# Платформа. В git машины её нет намеренно: она приезжает по stackyard.lock,
+# и копия в репозитории означала бы второй источник правды о том, какой код
+# на машине работает.
+/.stackyard/
+/platform
+/profile
+
+# Секреты и состояние машины.
+.env
+.env-stacks
+.env-backup
+.env-notify
+stacks/*/.env
+!.env.example
+!.env-stacks.example
+!stacks/*/.env.example
+state/*
+!state/.keepit
+dumps/*
+!dumps/.keepit

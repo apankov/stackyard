@@ -1,32 +1,29 @@
-# Секреты машин. Запрет плюс исключение ПОСЛЕ него: шаблон `.env*` без
-# исключения молча съедает каждый новый образец, и на сервере потом не из чего
-# завести файл. Проверяется `git check-ignore` по каждому образцу.
-machines/*/.env
-machines/*/.env-stacks
-machines/*/.env-backup
-machines/*/.env-notify
-machines/*/stacks/*/.env
-!machines/*/.env.example
-!machines/*/.env-stacks.example
-!machines/*/stacks/*/.env.example
+# Настоящих машин в этом репозитории НЕТ: он публичный, а домены и состав
+# стеков клиента в публичном репозитории — ровно та утечка, ради которой всё
+# разделение и делалось. Машины живут своими приватными репозиториями.
+#
+# В tests/machines/ лежат СИНТЕТИЧЕСКИЕ фикстуры: две конфигурации, на которых
+# гоняется движок. Их .env — тестовые значения, но в git им всё равно не место:
+# образец рядом, и путать образец с заполненным файлом не стоит нигде.
+tests/machines/*/.env
+tests/machines/*/.env-stacks
+tests/machines/*/stacks/*/.env
+!tests/machines/*/.env.example
+!tests/machines/*/.env-stacks.example
+!tests/machines/*/stacks/*/.env.example
 profiles/stacks/*/.env
 
 # Состояние машины: всё, что описывает ЭТУ машину и генерируется, а не пишется
 # руками. Сертификаты, ключ ACME-аккаунта, список баз с паролями, include'ы
 # nginx. В git этому места нет — ни как секрету, ни как второму источнику правды.
-machines/*/state/*
-!machines/*/state/.keepit
+tests/machines/*/state/*
+!tests/machines/*/state/.keepit
+tests/machines/*/dumps/*
+!tests/machines/*/dumps/.keepit
 
-# Дампы для первичного наполнения баз: кладутся руками на машине.
-machines/*/dumps/*
-!machines/*/dumps/.keepit
-
-# Вендоренные копии слоёв ВНУТРИ рабочего пространства.
-#
-# Здесь они дубликат: platform/ и profiles/ лежат рядом, в этом же репозитории.
-# В репозитории КЛИЕНТСКОЙ машины всё наоборот — там копия и есть то, ради чего
-# вендоринг существует, и она коммитится вместе с .vendor.lock. Это единственное
-# место, где раскладка рабочего пространства и раскладка машины расходятся.
-machines/*/platform/
-machines/*/profile/
-machines/*/.vendor.lock
+# Платформа, установленная в фикстуры их же bootstrap'ом. Дубликат того, что
+# лежит рядом в platform/ и profiles/.
+tests/machines/*/.stackyard/
+tests/machines/*/platform
+tests/machines/*/profile
+tests/machines/*/.vendor.lock
