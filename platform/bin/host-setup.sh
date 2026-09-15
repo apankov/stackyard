@@ -290,10 +290,15 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   # работает дважды — из cron и из таймера, — а два параллельных продления
   # спорят за один ACME-аккаунт и за один каталог.
   if sudo -n true 2>/dev/null || [ "$(id -u)" -eq 0 ]; then
-    if grep -qsE 'devbox6|backuper|getssl' /etc/crontab /etc/cron.d/* 2>/dev/null; then
-      bad "в cron остались задачи devbox6 — они дублируют таймеры systemd; уберите их"
+    # Ищем по путям ЭТОЙ машины, а не по зашитому имени: имя конкретного
+    # девбокса в платформе означало бы, что на любой другой машине проверка
+    # молча проходит, ничего не найдя.
+    if grep -qsF "$ROOT_DIR" /etc/crontab /etc/cron.d/* 2>/dev/null \
+       || grep -qsE 'getssl|backup\.sh' /etc/crontab /etc/cron.d/* 2>/dev/null; then
+      bad "в cron остались задачи этой машины — они дублируют таймеры systemd; уберите их"
+      grep -nsE "$ROOT_DIR|getssl|backup\.sh" /etc/crontab /etc/cron.d/* 2>/dev/null | sed 's/^/         /'
     else
-      ok "в cron задач devbox6 нет"
+      ok "в cron задач этой машины нет"
     fi
   fi
 else

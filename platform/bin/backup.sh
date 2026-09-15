@@ -38,7 +38,7 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 # shellcheck source=../lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
 
-# Состояние скрипта — рядом с /var/lib/sanya-logrotate, по тому же принципу:
+# Состояние скрипта — в /var/lib, по тому же принципу:
 # не в репозитории (его переносят и пересоздают) и не в /tmp (чистится).
 STATE_DIR=/var/lib/devbox-backup
 GNUPGHOME_DIR="$STATE_DIR/gnupg"

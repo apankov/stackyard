@@ -19,7 +19,7 @@ WorkingDirectory=@DEPLOY_DIR@
 
 # От root, в отличие от getssl-*, которые работают от владельца репозитория.
 # Причина конкретная: db/twd.db и содержимое бинд-маунтов принадлежат root
-# (по той же причине от root работает logrotate-sanya), а `sqlite3 .backup`
+# (по той же причине от root работают стековые ротаторы), а `sqlite3 .backup`
 # создаёт рядом файлы -wal и -shm.
 ExecStart=@DEPLOY_DIR@/platform/bin/backup.sh
 

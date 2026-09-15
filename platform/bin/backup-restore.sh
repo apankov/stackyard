@@ -44,7 +44,7 @@ usage() {
 Использование:
   ./scripts/backup-restore.sh --list [<подпуть>]
         показать, что лежит в S3. Без аргумента — источники верхнего уровня,
-        например: --list postgres/sanya_next
+        например: --list mysql/orders
 
   ./scripts/backup-restore.sh --check <файл>
         распознать расшифрованный дамп и показать его содержимое.

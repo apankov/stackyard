@@ -378,7 +378,7 @@ check "сервис включённого стека — знакомый" \
 check "сервис ВЫКЛЮЧЕННОГО стека тоже знакомый" \
   "$(printf '%s\n' "$known" | grep -cx 'golf-app')" "1"
 check "сервиса, которого не объявляет никто, в списке нет" \
-  "$(printf '%s\n' "$known" | grep -cx 'quotrum-website')" "0"
+  "$(printf '%s\n' "$known" | grep -cx 'stray-app')" "0"
 
 echo "== живой nginx против спеки"
 
@@ -592,6 +592,33 @@ check "согласованная пара претензий не вызыва�
 # манифесте он бывает первым, и тогда список реестров получился бы пустым.
 check "реестры находятся под set -e, хотя первый стек манифеста без реестра" \
   "$(errexit_run stacks_registries quebec oscar)" "111.dkr.ecr.eu-north-1.amazonaws.com"
+
+echo "== гигиена платформы"
+
+# Классы дефектов, на которых я уже попадался. Проверяем не конкретные места, а
+# сам класс: конкретное чинится один раз, класс возвращается.
+
+# 1. Путь к стеку, собранный строкой, слеп к профильному корню: такой стек
+#    просто не находится, и его preflight/health/.env молча не выполняются.
+#    Единственный законный способ — stack_dir.
+built=$(grep -nE '\$(ROOT_DIR|\(stacks_root\))[^"]*/stacks/\$' \
+          "$REPO_DIR"/platform/bin/*.sh "$REPO_DIR"/platform/lib/*.sh 2>/dev/null \
+        | grep -v 'stack_env_file' || true)
+check "путь к стеку нигде не собирается строкой" "$built" ""
+
+# 2. Запись в platform/ или profile/: это общие слои, bootstrap перезаписывает
+#    их целиком. Записанное туда исчезает при следующем обновлении, а до того
+#    лежит в слое, который раздаётся всем машинам.
+writes=$(grep -nE '> *"?\$(ROOT_DIR|REPO_DIR)[^"]*/(platform|profile)/' \
+           "$REPO_DIR"/platform/bin/*.sh "$REPO_DIR"/bin/*.sh 2>/dev/null || true)
+check "в общие слои никто не пишет" "$writes" ""
+
+# 3. Имя конкретной машины или клиента в публичном слое. Репозиторий публичный;
+#    кроме утечки это ещё и проверка, которая на другой машине молча проходит.
+names=$(grep -rniE 'devbox6|devbox-asstnt|12devs|my-new-site|pankov\.me|filinn|pckup|sanya|quotrum|tokensale' \
+          "$REPO_DIR"/platform "$REPO_DIR"/profiles "$REPO_DIR"/bin 2>/dev/null \
+        | grep -v '^Binary' | grep -v 'selftest\.sh:[0-9]*:names=' || true)
+check "имён машин и клиентов в платформе нет" "$names" ""
 
 echo "== пути в S3"
 
