@@ -8,7 +8,7 @@ Wants=network-online.target
 After=network-online.target docker.service
 # Если репозиторий не там, где ждали, лучше не стартовать вовсе: иначе getssl
 # создаст рабочую директорию с нуля и выпишет новый ACME-аккаунт.
-ConditionPathIsDirectory=@DEPLOY_DIR@/platform/getssl-config
+ConditionPathIsDirectory=@DEPLOY_DIR@/state/getssl-config
 # Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
 # настроены (.env-notify), иначе пустота. Юнит с OnFailure на
 # несуществующий обработчик работал бы, но шумел в журнале.
@@ -18,12 +18,13 @@ ConditionPathIsDirectory=@DEPLOY_DIR@/platform/getssl-config
 Type=oneshot
 User=@SERVICE_USER@
 
-# Запуск ИМЕННО из platform/. Общий getssl-config/getssl.cfg задаёт
+# Запуск ИМЕННО из state/ МАШИНЫ. Общий getssl-config/getssl.cfg задаёт
 # ACCOUNT_KEY="./getssl-config/account.key" — путь относительно текущей
 # директории, а не относительно того, что назвал -w. Из любого другого места
 # getssl сгенерирует новый 4096-битный ключ ACME-аккаунта не там и потеряет
-# существующий аккаунт.
-WorkingDirectory=@DEPLOY_DIR@/platform
+# существующий аккаунт. Каталог машинный, а не платформенный, намеренно:
+# аккаунт обязан быть свой у каждой машины — см. scripts/certs.sh.
+WorkingDirectory=@DEPLOY_DIR@/state
 
 # -U, а не -u. В getssl -u означает "--upgrade: скачать свежую версию getssl и
 # поставить поверх себя" (getssl:889), а вовсе не "продлить". Самообновляющийся

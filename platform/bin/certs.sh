@@ -44,13 +44,47 @@ Platform_Deploy_Dir=$(grep -E '^Platform_Deploy_Dir=' "$ENV_FILE" | head -n 1 | 
 
 CERTS_DIR="$ROOT_DIR/state/certs"
 GETSSL_DIR="$ROOT_DIR/state/getssl-config"
-TEMPLATE="$GETSSL_DIR/getssl.cfg.template"
+# Шаблон и общий конфиг — платформенные, они одинаковы у всех машин.
+# Результат работы getssl и ключ ACME-аккаунта — машинные, в state/.
+TEMPLATE="$ROOT_DIR/platform/getssl-config/getssl.cfg.template"
+SHARED_CFG="$ROOT_DIR/platform/getssl-config/getssl.cfg"
 
 problems=0
 note() { printf '  %s\n' "$1"; }
 lack() { printf '  [нет] %s\n' "$1"; problems=$((problems + 1)); }
 
 [ -f "$TEMPLATE" ] || { echo "Ошибка: нет шаблона $TEMPLATE" >&2; exit 2; }
+
+# ---------------------------------------------- 0. изоляция ACME-аккаунта
+#
+# Ключ ACME-аккаунта обязан быть СВОИМ у каждой машины, и это не гигиена.
+# Один аккаунт на всех клиентов означает общие лимиты Let's Encrypt
+# (зациклившееся продление у одного жжёт квоту другому) и общий доступ на
+# отзыв чужих сертификатов. Заметить это нельзя ничем, кроме проверки здесь:
+# работает такая конфигурация идеально ровно до первого инцидента.
+#
+# Отказ, а не предупреждение: ключ, лежащий в платформе, размножится по всем
+# машинам следующей же вендорной копией.
+if [ -e "$ROOT_DIR/platform/getssl-config/account.key" ]; then
+  echo "ОТКАЗ: platform/getssl-config/account.key существует." >&2
+  echo "  Платформа раздаётся всем машинам — ключ ACME-аккаунта в ней означает" >&2
+  echo "  один аккаунт Let's Encrypt на всех: общие лимиты и общий отзыв." >&2
+  echo "  Аккаунт машины живёт в state/getssl-config/account.key." >&2
+  exit 2
+fi
+
+echo "== общий конфиг getssl"
+mkdir -p "$GETSSL_DIR"
+# Материализуем копией, а не симлинком: getssl читает конфиг относительно cwd,
+# и симлинк в платформу пережил бы не всякую вендорную копию.
+if [ -f "$GETSSL_DIR/getssl.cfg" ] && cmp -s "$SHARED_CFG" "$GETSSL_DIR/getssl.cfg"; then
+  note "getssl.cfg совпадает с платформенным"
+elif [ "$CHECK_ONLY" -eq 1 ]; then
+  lack "getssl.cfg отсутствует или разошёлся с платформенным"
+else
+  cp "$SHARED_CFG" "$GETSSL_DIR/getssl.cfg"
+  note "getssl.cfg записан из платформы"
+fi
 
 # --------------------------------------------------- 1. конфиги getssl
 
@@ -151,7 +185,12 @@ done < <(grep -rhE '^[[:space:]]*ssl_certificate(_key)?[[:space:]]' \
 echo
 echo "== ACME-аккаунт"
 if [ -f "$GETSSL_DIR/account.key" ]; then
-  note "account.key на месте"
+  # Права важны не меньше наличия: по этому ключу отзывают сертификаты машины.
+  perm=$(stat -c '%a' "$GETSSL_DIR/account.key" 2>/dev/null || stat -f '%OLp' "$GETSSL_DIR/account.key")
+  case "$perm" in
+    600|400) note "account.key на месте ($perm)" ;;
+    *) lack "account.key имеет права $perm вместо 600 — chmod 600 $GETSSL_DIR/account.key" ;;
+  esac
 else
   printf '  [!] %s\n' "нет $GETSSL_DIR/account.key — getssl заведёт новый аккаунт при следующем запуске"
   printf '  %s\n' "Если аккаунт был, найдите ключ и положите сюда, а не выпускайте новый."
