@@ -24,10 +24,13 @@ services:
       # включённых стеков не зависят.
       - ${Platform_Deploy_Dir:?}/stacks:/etc/nginx/stacks:ro
       - ${Platform_Deploy_Dir:?}/profile/stacks:/etc/nginx/profile-stacks:ro
-      # Файлы basic-auth. Каталог смонтирован всегда, даже пустой: vhost с
-      # auth_basic_user_file на несмонтированный путь — это 500 на каждом
-      # запросе, и заметно это только снаружи.
-      - ${Platform_Deploy_Dir:?}/platform/htpasswd:/etc/nginx/htpasswd:ro
+      # Файлы basic-auth. В state/, а не в platform/: платформа общая и
+      # перезаписывается bootstrap'ом целиком, а это секреты машины.
+      #
+      # Каталог смонтирован всегда, даже пустой: vhost с auth_basic_user_file
+      # на несмонтированный путь — это 500 на каждом запросе, и заметно это
+      # только снаружи.
+      - ${Platform_Deploy_Dir:?}/state/htpasswd:/etc/nginx/htpasswd:ro
       - ${Platform_Deploy_Dir:?}/platform/acme:/var/www/acme
       - ${Platform_Deploy_Dir:?}/state/certs:/etc/nginx/certs
       - ${Platform_Vhosts_Dir:?}:${Platform_Vhosts_Mount:?}

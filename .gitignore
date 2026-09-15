@@ -23,6 +23,9 @@ tests/machines/*/dumps/*
 
 # Платформа, установленная в фикстуры их же bootstrap'ом. Дубликат того, что
 # лежит рядом в platform/ и profiles/.
+# Платформа, приехавшая в фикстуру через bootstrap. Сейчас фикстуры смотрят в
+# рабочее дерево симлинками (tests/machines/README.md), но каталог возможен,
+# если кто-то прогонит bootstrap руками.
 tests/machines/*/.stackyard/
 tests/machines/*/platform
 tests/machines/*/profile

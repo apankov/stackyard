@@ -32,7 +32,7 @@ NAME="$(basename "$DEST")"
 VERSION="v$(cat "$ROOT/platform/VERSION")"
 COMMIT="$( cd "$ROOT" && git rev-parse HEAD )"
 
-mkdir -p "$DEST"/{stacks,state,dumps,gpg}
+mkdir -p "$DEST"/{stacks,state/htpasswd,state/certs,dumps,gpg}
 touch "$DEST/state/.keepit" "$DEST/dumps/.keepit" "$DEST/gpg/.keepit"
 
 # Образцы бэкапа и оповещений. Файлы отдельные от .env намеренно: они НЕ входят
@@ -60,7 +60,7 @@ EOF
 
 # Обёртки. Три строки каждая, и они единственная причина, по которой из корня
 # машины можно набрать ./stack вместо полного пути внутрь платформы.
-for w in stack:stack.sh dc:docker-compose.sh host-setup:host-setup.sh certs:certs.sh; do
+for w in stack:stack.sh dc:docker-compose.sh host-setup:host-setup.sh certs:certs.sh registry:registry.sh; do
   name="${w%%:*}"; target="${w#*:}"
   cat > "$DEST/$name" <<EOF
 #!/usr/bin/env bash
