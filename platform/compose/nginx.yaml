@@ -24,10 +24,26 @@ services:
       # включённых стеков не зависят.
       - ${Platform_Deploy_Dir:?}/stacks:/etc/nginx/stacks:ro
       - ${Platform_Deploy_Dir:?}/profile/stacks:/etc/nginx/profile-stacks:ro
+      # Файлы basic-auth. Каталог смонтирован всегда, даже пустой: vhost с
+      # auth_basic_user_file на несмонтированный путь — это 500 на каждом
+      # запросе, и заметно это только снаружи.
+      - ${Platform_Deploy_Dir:?}/platform/htpasswd:/etc/nginx/htpasswd:ro
       - ${Platform_Deploy_Dir:?}/platform/acme:/var/www/acme
       - ${Platform_Deploy_Dir:?}/state/certs:/etc/nginx/certs
       - ${Platform_Vhosts_Dir:?}:${Platform_Vhosts_Mount:?}
       - /var/log/nginx:/var/log/nginx
+    # Апстрим не обязан жить в нашей сети. Стенд в чужом compose-проекте или
+    # процесс на самом хосте доступны только через host-gateway.
+    #
+    # Альтернатива — объявить чужую сеть external и подключить к ней nginx —
+    # означает, что `down` в чужом репозитории уносит эту сеть, а с ней nginx.
+    # Вместе с nginx пропадает обработчик ACME-челленджа, то есть продление
+    # сертификатов ломается ровно тогда, когда чужой стенд лежит.
+    #
+    # Стоит всегда: это одна запись в /etc/hosts контейнера, и машине, которой
+    # она не нужна, она ничего не стоит.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - shared_network
 
