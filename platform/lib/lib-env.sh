@@ -103,7 +103,7 @@ env_require() {
 # неотличима от заданной пустой.
 _env_check_refs() {
   local key="$1" s="$2" raw ref missing=""
-  raw=$(grep -E "^[[:space:]]*${key}=" "${ROOT_DIR:?}/stacks/$s/stack.conf" 2>/dev/null \
+  raw=$(grep -E "^[[:space:]]*${key}=" "$(stack_conf_file "$s")" 2>/dev/null \
         | tail -n 1 | cut -d '=' -f2- | tr -d '"'"'" || true)
   [ -n "$raw" ] || return 0
   while [[ "$raw" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
@@ -168,7 +168,7 @@ HDR
   while IFS= read -r s; do
     [ -n "$s" ] || continue
     ENV_VARS=()
-    env_load_files "$root/.env" "$root/stacks/$s/.env" "$(stack_conf_file "$s")"
+    env_load_files "$root/.env" "$(stack_env_file "$s")" "$(stack_conf_file "$s")"
     [ -n "$(env_get "${prefix}_DB")" ] || continue
     body="$body
 # стек $s"
@@ -198,7 +198,7 @@ check_db_decl() {
   prefix="$(stacks_db_prefix)"
   [ -n "$prefix" ] || return 0
   ENV_VARS=()
-  env_load_files "$root/.env" "$root/stacks/$s/.env" "$(stack_conf_file "$s")"
+  env_load_files "$root/.env" "$(stack_env_file "$s")" "$(stack_conf_file "$s")"
   for key in $DB_KEYS_REQUIRED; do
     if [ -n "$(env_get "${prefix}_${key}")" ]; then any=1; else missing="$missing ${prefix}_${key}"; fi
   done
@@ -225,7 +225,7 @@ check_databases_unique() {
   while IFS= read -r s; do
     [ -n "$s" ] || continue
     ENV_VARS=()
-    env_load_files "$root/.env" "$root/stacks/$s/.env" "$(stack_conf_file "$s")"
+    env_load_files "$root/.env" "$(stack_env_file "$s")" "$(stack_conf_file "$s")"
     db="$(env_get "${prefix}_DB")"
     [ -n "$db" ] && printf '%s\t%s\n' "$db" "$s"
   done < <(stacks_enabled 2>/dev/null) | sort | awk -F'\t' '
@@ -256,7 +256,7 @@ stack_backup_sources() {
   # Свой набор переменных на стек: значения соседнего стека не должны протекать
   # в подстановки этого.
   ENV_VARS=()
-  env_load_files "$root/.env" "$root/stacks/$s/.env" "$root/stacks/$s/stack.conf"
+  env_load_files "$root/.env" "$(stack_env_file "$s")" "$(stack_conf_file "$s")"
   for kind in db sqlite files volume; do
     case "$kind" in
       db)       key=Backup_DB ;;

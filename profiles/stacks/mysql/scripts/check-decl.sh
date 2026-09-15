@@ -11,11 +11,17 @@
 
 set -uo pipefail
 
+# Обе библиотеки: lib-stacks знает, в каком корне лежит стек, lib-env — как
+# читать .env. Собирать пути руками здесь было нельзя вдвойне: профильный
+# stack.conf грузился ПОСЛЕ машинного и перебивал его — наоборот к stack_dir,
+# где машинный корень первый. Стек, скопированный из профиля и поправленный,
+# проверялся бы по старому, профильному значению.
+# shellcheck source=../../../../platform/lib/lib-stacks.sh
+. "${ROOT_DIR:?}/platform/lib/lib-stacks.sh"
 # shellcheck source=../../../../platform/lib/lib-env.sh
-. "${ROOT_DIR:?}/platform/lib/lib-env.sh"
+. "$ROOT_DIR/platform/lib/lib-env.sh"
 s="${STACK_NAME:?}"; prefix="${DB_PREFIX:?}"
-ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ROOT_DIR/stacks/$s/.env" "$ROOT_DIR/stacks/$s/stack.conf" \
-                            "$ROOT_DIR/profile/stacks/$s/stack.conf"
+ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$(stack_env_file "$s")" "$(stack_conf_file "$s")"
 
 user="$(env_get "${prefix}_User")"
 [ -n "$user" ] || exit 0

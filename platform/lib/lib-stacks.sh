@@ -46,7 +46,7 @@ stacks_root() {
 # Обратный порядок означал бы, что профиль молча перебивает машинную правку —
 # худший исход: человек правит файл, который не читают.
 stack_roots() {
-  printf '%s/stacks\n' "$(stacks_root)"
+  printf '%s/stacks\n' "$(stacks_root)"   # stack-path-ok: здесь корни и определяются
   [ -d "$(stacks_root)/profile/stacks" ] && printf '%s/profile/stacks\n' "$(stacks_root)"
   return 0
 }
@@ -68,7 +68,7 @@ stack_dir() {
   while IFS= read -r r; do
     [ -f "$r/$1/stack.conf" ] && { printf '%s/%s' "$r" "$1"; return 0; }
   done < <(stack_roots)
-  printf '%s/stacks/%s' "$(stacks_root)" "$1"
+  printf '%s/stacks/%s' "$(stacks_root)" "$1"   # stack-path-ok: путь для сообщения об ошибке
 }
 
 stack_compose_file() { printf '%s/compose.yaml' "$(stack_dir "$1")"; }
@@ -80,6 +80,8 @@ stack_conf_file()    { printf '%s/stack.conf' "$(stack_dir "$1")"; }
 # Секреты принадлежат машине, а не профилю: профиль приезжает вендорингом и
 # обновляется целиком, и положить пароль внутрь него значило бы, что следующее
 # обновление его затрёт, а git профиля его увидит.
+# stack-path-ok: .env стека ВСЕГДА в машинном корне, даже у профильного стека —
+# это и есть замысел, см. комментарий выше.
 stack_env_file()     { printf '%s/stacks/%s/.env' "$(stacks_root)" "$1"; }
 
 # Каталог стеков ВНУТРИ контейнера nginx. Значение обязано совпадать с целью
@@ -645,6 +647,18 @@ stack_units() {
   done
 }
 
+# Каталог стека ОТНОСИТЕЛЬНО корня — то есть без префикса ROOT_DIR.
+#
+# Нужен там, где путь пишется не для нас, а для кого-то ещё: systemd видит
+# машину по DEPLOY_DIR, и подставлять туда локальный ROOT_DIR нельзя. При этом
+# КОРЕНЬ (машинный или профильный) обязан быть настоящим — иначе юнит
+# профильного стека получит ExecStart в машинный каталог, где лежит только
+# .env, и упадёт с 203/EXEC по таймеру, ночью.
+_stack_dir_suffix() {
+  local d; d="$(stack_dir "$1")"
+  printf '%s' "${d#"$(stacks_root)"}"
+}
+
 # Текст юнита с подставленными плейсхолдерами.
 #
 # Юниты systemd не умеют переменных вовсе — ни своих, ни окружения на этапе
@@ -657,7 +671,7 @@ unit_render() {
   local file="$1" stack="$2"
   sed \
     -e "s#@DEPLOY_DIR@#${DEPLOY_DIR:?}#g" \
-    -e "s#@STACK_DIR@#${DEPLOY_DIR:?}/stacks/$stack#g" \
+    -e "s#@STACK_DIR@#${DEPLOY_DIR:?}$(_stack_dir_suffix "$stack")#g" \
     -e "s#@SERVICE_USER@#${SERVICE_USER:?}#g" \
     -e "s#@ONFAILURE@#${ONFAILURE:-}#g" \
     "$file"

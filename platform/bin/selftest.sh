@@ -102,6 +102,75 @@ want='include /etc/nginx/stacks/zulu/nginx/*.conf;
 include /etc/nginx/stacks/alpha/nginx/*.conf;'
 check "порядок include'ов следует префиксам файлов, а не именам стеков" "$got" "$want"
 
+echo "== два корня стеков"
+
+# Главный новый механизм платформы, и до этой секции он не был покрыт ничем.
+# Мутационный прогон показал: выключи профильный корень в stack_dir или в
+# stacks_available — ни один тест не падал.
+#
+# Режимы «подключить» и «скопировать» выражены ИМЕННО этими двумя корнями,
+# отдельного переключателя нет. Значит ошибка здесь не ломает что-то заметное,
+# а делает профильный стек невидимым: его preflight не запускается, его
+# stack.conf не читается, его vhost не включается — и всё молча.
+fixture_root profile/stacks papa stack.conf 'Requires=""
+Domains="papa.test"'
+fixture_root profile/stacks papa compose.yaml 'services:
+  papa-app:
+    image: alpine'
+fixture_root profile/stacks papa nginx/50-papa.conf 'server { server_name papa.test; }'
+fixture_root profile/stacks quebec stack.conf 'Requires=""'
+printf 'Enabled_Stacks="papa quebec alpha"\n' > "$WORK/.env-stacks"
+
+check "профильный стек виден в списке" \
+  "$(stacks_available | grep -cx papa)" "1"
+check "каталог профильного стека — профильный" \
+  "$(stack_dir papa)" "$WORK/profile/stacks/papa"
+check "compose профильного стека найден" \
+  "$(stack_compose_file papa)" "$WORK/profile/stacks/papa/compose.yaml"
+check "домен профильного стека виден" \
+  "$(stacks_domains | grep -cx papa.test)" "1"
+
+# .env стека ВСЕГДА машинный, даже у профильного: профиль обновляется целиком,
+# и секрет внутри него затёрло бы следующим обновлением.
+check ".env профильного стека — в машинном корне" \
+  "$(stack_env_file papa)" "$WORK/stacks/papa/.env"
+
+# include обязан указывать в тот корень, где стек лежит на самом деле: иначе
+# после копирования стека в машинный nginx продолжал бы читать профильную копию.
+check "include профильного стека идёт в профильный каталог" \
+  "$(stacks_include_lines | grep -c '/etc/nginx/profile-stacks/papa/nginx')" "1"
+
+# Образец .env ищется РЯДОМ СО СТЕКОМ, а сам .env — в машинном корне. Если
+# искать образец по машинному пути, обязательность .env у профильного стека не
+# проверяется вовсе, и стек считается укомплектованным без секретов.
+fixture_root profile/stacks papa .env.example 'Papa_Secret=CHANGE_ME'
+check "профильному стеку нужен .env, раз у него есть образец" \
+  "$(stack_missing_files papa)" "stacks/papa/.env"
+printf 'x\n' > "$WORK/stacks/papa/.env" 2>/dev/null || { mkdir -p "$WORK/stacks/papa"; printf 'x\n' > "$WORK/stacks/papa/.env"; }
+check "с машинным .env претензий нет" "$(stack_missing_files papa)" ""
+
+# Машинный корень перекрывает профильный — это и есть «отцепиться». Объявляет
+# стек тот каталог, где лежит stack.conf: половина копии стеком не становится.
+mkdir -p "$WORK/stacks/papa"
+: > "$WORK/stacks/papa/.env"
+check "каталог с одним .env профильный стек НЕ перекрывает" \
+  "$(stack_dir papa)" "$WORK/profile/stacks/papa"
+fixture papa stack.conf 'Requires=""
+Domains="papa.test"'
+check "машинная копия перекрывает профильную" \
+  "$(stack_dir papa)" "$WORK/stacks/papa"
+check "include после копирования идёт в машинный каталог" \
+  "$(stacks_include_lines | grep -c '/etc/nginx/stacks/papa/nginx')" "0"
+rm -rf "$WORK/stacks/papa"
+
+# Юнит профильного стека обязан указывать в профильный каталог НА СЕРВЕРЕ.
+fixture_root profile/stacks papa systemd/devbox-papa-x.service '[Service]
+ExecStart=@STACK_DIR@/scripts/x.sh'
+check "юнит профильного стека указывает в профиль" \
+  "$( DEPLOY_DIR=/srv/m SERVICE_USER=u ONFAILURE= \
+      unit_render "$WORK/profile/stacks/papa/systemd/devbox-papa-x.service" papa \
+      | grep -c 'ExecStart=/srv/m/profile/stacks/papa/scripts/x.sh' )" "1"
+
 echo "== stack.conf"
 
 fixture bravo stack.conf 'Requires="pg qdrant"
@@ -599,18 +668,35 @@ echo "== гигиена платформы"
 # сам класс: конкретное чинится один раз, класс возвращается.
 
 # 1. Путь к стеку, собранный строкой, слеп к профильному корню: такой стек
-#    просто не находится, и его preflight/health/.env молча не выполняются.
-#    Единственный законный способ — stack_dir.
-built=$(grep -nE '\$(ROOT_DIR|\(stacks_root\))[^"]*/stacks/\$' \
-          "$REPO_DIR"/platform/bin/*.sh "$REPO_DIR"/platform/lib/*.sh 2>/dev/null \
-        | grep -v 'stack_env_file' || true)
+#    просто не находится, и его preflight/health/stack.conf молча не читаются.
+#    Единственный законный способ — stack_dir и производные от него.
+#
+#    Ищем сам ПРИЗНАК — литерал '/stacks/' сразу перед подстановкой, — а не
+#    конкретные имена переменных: прошлая версия проверки перечисляла ROOT_DIR
+#    и stacks_root, из-за чего не видела ни $root, ни ${DEPLOY_DIR:?}, ни один
+#    файл в profiles/. Она давала ноль совпадений при шести настоящих случаях,
+#    то есть служила разрешением не думать про класс.
+#
+#    Законные исключения помечаются в коде комментарием # stack-path-ok:
+#    их два вида — определение самих корней и .env стека, который по замыслу
+#    ВСЕГДА машинный. Пометка грепается, то есть исключение видно и его можно
+#    пересчитать; молчаливого исключения быть не должно.
+built=$(grep -rnE '/stacks/\$' \
+          "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin \
+          "$REPO_DIR"/profiles 2>/dev/null \
+        | grep -v 'stack-path-ok' \
+        | grep -v 'selftest\.sh:' || true)
 check "путь к стеку нигде не собирается строкой" "$built" ""
 
 # 2. Запись в platform/ или profile/: это общие слои, bootstrap перезаписывает
 #    их целиком. Записанное туда исчезает при следующем обновлении, а до того
 #    лежит в слое, который раздаётся всем машинам.
-writes=$(grep -nE '> *"?\$(ROOT_DIR|REPO_DIR)[^"]*/(platform|profile)/' \
-           "$REPO_DIR"/platform/bin/*.sh "$REPO_DIR"/bin/*.sh 2>/dev/null || true)
+#    Ищем любую запись, а не только `>`: cp, tee и >> туда же. И смотрим все
+#    каталоги, где может оказаться пишущий код, а не только два.
+writes=$(grep -rnE '(>>?|tee|cp|mkdir -p|install) +[^|#]*\$\{?(ROOT_DIR|REPO_DIR|Platform_Deploy_Dir)[^ "]*/(platform|profile)/' \
+           "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin \
+           "$REPO_DIR"/profiles 2>/dev/null \
+        | grep -v 'stack-path-ok' | grep -v 'selftest\.sh:' || true)
 check "в общие слои никто не пишет" "$writes" ""
 
 # 3. Имя конкретной машины или клиента в публичном слое. Репозиторий публичный;
