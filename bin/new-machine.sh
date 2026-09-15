@@ -32,8 +32,14 @@ NAME="$(basename "$DEST")"
 VERSION="v$(cat "$ROOT/platform/VERSION")"
 COMMIT="$( cd "$ROOT" && git rev-parse HEAD )"
 
-mkdir -p "$DEST"/{stacks,state,dumps}
-touch "$DEST/state/.keepit" "$DEST/dumps/.keepit"
+mkdir -p "$DEST"/{stacks,state,dumps,gpg}
+touch "$DEST/state/.keepit" "$DEST/dumps/.keepit" "$DEST/gpg/.keepit"
+
+# Образцы бэкапа и оповещений. Файлы отдельные от .env намеренно: они НЕ входят
+# в список --env-file docker-compose.sh, и лишний обязательный env-файл был бы
+# ещё одним способом уронить все compose-команды разом.
+cp "$ROOT/templates/machine/.env-backup.example" "$DEST/.env-backup.example"
+cp "$ROOT/templates/machine/.env-notify.example" "$DEST/.env-notify.example"
 
 cp "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"
 chmod +x "$DEST/bootstrap"
@@ -85,6 +91,8 @@ stacks/*/.env
 !.env.example
 !.env-stacks.example
 !stacks/*/.env.example
+!.env-backup.example
+!.env-notify.example
 state/*
 !state/.keepit
 dumps/*

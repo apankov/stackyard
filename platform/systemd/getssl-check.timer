@@ -1,6 +1,6 @@
 [Unit]
 Description=Weekly TLS certificate expiry check
-Documentation=file:@DEPLOY_DIR@/scripts/check-certs.sh
+Documentation=file:@DEPLOY_DIR@/platform/bin/check-certs.sh
 
 [Timer]
 # Понедельник, через несколько часов после ночного окна продления, чтобы

@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly devbox status digest
+Documentation=file:@DEPLOY_DIR@/platform/bin/notify.sh
+
+[Timer]
+# Понедельник, начало рабочего дня: сводку должен кто-то прочитать, а
+# непрочитанная сводка не отличается от неотправленной.
+OnCalendar=Mon *-*-* 09:30:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,6 +1,6 @@
 [Unit]
 Description=Verify TLS certificate expiry dates
-Documentation=file:@DEPLOY_DIR@/scripts/check-certs.sh
+Documentation=file:@DEPLOY_DIR@/platform/bin/check-certs.sh
 # Условий на пути здесь намеренно нет. Юнит с невыполненным Condition
 # пропускается и НЕ считается упавшим — а этот юнит и есть страховка от
 # тихого простоя. Пропавший каталог должен приводить к failed, поэтому
@@ -15,4 +15,4 @@ Type=oneshot
 User=@SERVICE_USER@
 # Ненулевой код -> юнит в состоянии failed -> виден в `systemctl --failed`.
 # Это и есть весь механизм оповещения на сегодня: см. §"Чего здесь нет" в README.
-ExecStart=@DEPLOY_DIR@/scripts/check-certs.sh
+ExecStart=@DEPLOY_DIR@/platform/bin/check-certs.sh

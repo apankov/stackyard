@@ -1,0 +1,35 @@
+[Unit]
+Description=Back up devbox databases to S3
+Documentation=file:@DEPLOY_DIR@/docs/architecture/backup-design.md
+# Дампы снимаются через `docker exec`, выгрузка идёт в S3 — нужны и докер, и сеть.
+Wants=network-online.target
+After=network-online.target docker.service
+# Условий на пути здесь намеренно НЕТ, по той же причине, что и в
+# getssl-check.service: юнит с невыполненным Condition пропускается и НЕ
+# считается упавшим. Отсутствующий .env-backup должен приводить к failed —
+# скрипт для этого выходит с кодом 2, — а не к тихому «бэкапов нет уже месяц».
+# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
+# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
+# несуществующий обработчик работал бы, но шумел в журнале.
+@ONFAILURE@
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+
+# От root, в отличие от getssl-*, которые работают от владельца репозитория.
+# Причина конкретная: db/twd.db и содержимое бинд-маунтов принадлежат root
+# (по той же причине от root работает logrotate-sanya), а `sqlite3 .backup`
+# создаёт рядом файлы -wal и -shm.
+ExecStart=@DEPLOY_DIR@/platform/bin/backup.sh
+
+# Для Type=oneshot systemd по умолчанию ОТКЛЮЧАЕТ таймаут старта. Зависший
+# pg_dump (заблокированная таблица, отвалившийся S3) висел бы вечно и держал
+# блокировку, из-за которой все следующие прогоны молча не начинались бы —
+# то есть отказ выглядел бы как «таймер есть, бэкапов нет».
+TimeoutStartSec=1h
+
+# Рядом работают семь стеков на 916 МБ памяти. Дамп — фоновая задача, и он не
+# должен отбирать процессор и диск у того, что обслуживает запросы.
+Nice=10
+IOSchedulingClass=idle

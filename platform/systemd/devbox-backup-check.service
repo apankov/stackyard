@@ -1,0 +1,26 @@
+[Unit]
+Description=Verify that database backups exist and are fresh
+Documentation=file:@DEPLOY_DIR@/platform/bin/check-backups.sh
+Wants=network-online.target
+After=network-online.target docker.service
+# Условий на пути нет намеренно — этот юнит и есть страховка от тихого
+# простоя. Пропущенный юнит не считается упавшим, а нам нужно ровно обратное:
+# невозможность проверить должна быть видна. Скрипт для этого выходит с кодом 2.
+# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
+# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
+# несуществующий обработчик работал бы, но шумел в журнале.
+@ONFAILURE@
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+# От владельца репозитория, как getssl-check: root тут не нужен — скрипт только
+# читает .env-backup, спрашивает postgres через docker и слушает S3.
+User=@SERVICE_USER@
+
+# Ненулевой код -> юнит в состоянии failed -> виден в `systemctl --failed`.
+# Это и есть весь механизм оповещения на сегодня. Внешний канал (почта,
+# Telegram) — отдельная задача, и подключаться он будет сюда.
+ExecStart=@DEPLOY_DIR@/platform/bin/check-backups.sh
+
+TimeoutStartSec=10min

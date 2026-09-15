@@ -1,0 +1,18 @@
+[Unit]
+Description=Weekly devbox status digest to Telegram
+Documentation=file:@DEPLOY_DIR@/platform/bin/notify.sh
+After=network-online.target docker.service
+Wants=network-online.target
+# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
+# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
+# несуществующий обработчик работал бы, но шумел в журнале.
+@ONFAILURE@
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+# Смысл сводки — не «я жив», а подтверждение, что тишина в канале означает
+# отсутствие проблем, а не сломанный нотификатор. Без неё эти два состояния
+# неразличимы, и весь мониторинг держится на предположении.
+ExecStart=@DEPLOY_DIR@/platform/bin/notify.sh --heartbeat
+TimeoutStartSec=5min

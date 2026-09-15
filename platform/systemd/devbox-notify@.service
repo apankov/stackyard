@@ -1,0 +1,18 @@
+[Unit]
+Description=Report failure of %i to Telegram
+Documentation=file:@DEPLOY_DIR@/platform/bin/notify.sh
+# У ЭТОГО юнита OnFailure нет и быть не может: обработчик, падение которого
+# запускает обработчик, — это цикл. Если отправка не удалась, юнит уходит в
+# failed и виден в `systemctl --failed` — то есть деградирует ровно до того
+# состояния, которое было до появления оповещений.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+# От root: состояние дедупликации лежит в /var/lib/devbox-notify, а journalctl
+# по чужому юниту читается не всяким пользователем.
+ExecStart=@DEPLOY_DIR@/platform/bin/notify.sh --unit %i
+# Три попытки по 15 секунд внутри скрипта плюс паузы — с запасом.
+TimeoutStartSec=3min
