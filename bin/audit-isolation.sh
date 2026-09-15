@@ -31,8 +31,27 @@ warn() { printf '  [!]    %s\n' "$1"; WARNINGS=$((WARNINGS + 1)); }
 bad()  { printf '  [FAIL] %s\n' "$1"; PROBLEMS=$((PROBLEMS + 1)); }
 step() { printf '\n== %s\n' "$1"; }
 
-machines=()
-for d in "$ROOT"/machines/*/; do [ -d "$d" ] && machines+=("$(basename "${d%/}")"); done
+# Машины лежат ВНЕ этого репозитория: stackyard публичный, а домены и состав
+# стеков клиента в публичном репозитории — ровно та утечка, от которой всё и
+# затевалось. Поэтому пути приходят снаружи.
+#
+#   ./bin/audit-isolation.sh ~/dev/machines/*
+#   ./bin/audit-isolation.sh            # из ~/.stackyard-fleet, по строке на путь
+paths=("$@")
+if [ ${#paths[@]} -eq 0 ]; then
+  list="${HOME}/.stackyard-fleet"
+  [ -f "$list" ] || { echo "Укажите пути к машинам или заведите $list" >&2; exit 2; }
+  while IFS= read -r l; do
+    case "$l" in ''|\#*) continue ;; esac
+    paths+=("${l/#\~/$HOME}")
+  done < "$list"
+fi
+
+machines=(); declare -A MDIR=()
+for p in "${paths[@]}"; do
+  [ -d "$p" ] || { echo "Предупреждение: нет каталога $p — пропускаю" >&2; continue; }
+  n="$(basename "$p")"; machines+=("$n"); MDIR[$n]="$p"
+done
 [ ${#machines[@]} -gt 0 ] || { echo "Машин не найдено"; exit 0; }
 
 # --------------------------------------------- 1. в платформе нет секретов
@@ -67,8 +86,8 @@ Notify_Telegram_Token Notify_Telegram_Chat_Id"
 # Собираем «ключ<TAB>значение<TAB>машина» по всем env-файлам всех машин.
 pairs=$(
   for m in "${machines[@]}"; do
-    for f in "$ROOT/machines/$m"/.env "$ROOT/machines/$m"/.env-backup \
-             "$ROOT/machines/$m"/.env-notify "$ROOT/machines/$m"/stacks/*/.env; do
+    for f in "${MDIR[$m]}"/.env "${MDIR[$m]}"/.env-backup \
+             "${MDIR[$m]}"/.env-notify "${MDIR[$m]}"/stacks/*/.env; do
       [ -f "$f" ] || continue
       # Построчно, без source: значение с пробелами или обратными кавычками
       # иначе стало бы исполняемым кодом.
@@ -121,7 +140,7 @@ step "Ключи ACME-аккаунтов"
 # скопированный файл выглядит настроенным правильно.
 sums=""
 for m in "${machines[@]}"; do
-  k="$ROOT/machines/$m/state/getssl-config/account.key"
+  k="${MDIR[$m]}/state/getssl-config/account.key"
   if [ ! -f "$k" ]; then
     warn "$m: ключа ACME-аккаунта ещё нет (заведёт getssl при первом выпуске)"
     continue

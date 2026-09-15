@@ -91,10 +91,15 @@ fi
 # Какой env-файл брать для стека: настоящий, иначе образец под --examples,
 # иначе ничего (стек без .env-<стек>.example обходится корневым .env).
 env_file_for() {
-  local f
+  local f ex
   f="$(stack_env_file "$1")"
+  # Образец ищем РЯДОМ СО СТЕКОМ, а не по машинному пути: у профильного стека
+  # .env машинный, а .env.example лежит в profile/. Поиск образца по машинному
+  # пути не нашёл бы его никогда, и `--examples` падал бы на профильном стеке
+  # ровно там, где он существует, чтобы не падать.
+  ex="$(stack_dir "$1")/.env.example"
   if [ -f "$f" ]; then printf '%s' "$f"
-  elif [ "$USE_EXAMPLES" -eq 1 ] && [ -f "$f.example" ]; then printf '%s' "$f.example"
+  elif [ "$USE_EXAMPLES" -eq 1 ] && [ -f "$ex" ]; then printf '%s' "$ex"
   fi
 }
 

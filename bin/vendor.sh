@@ -14,9 +14,9 @@
 # а platform/bin/check-vendor.sh их сверяет. Молча разошедшаяся платформа иначе
 # выглядит как исправная.
 #
-#   ./bin/vendor.sh <машина>            # вендорить платформу и профиль
-#   ./bin/vendor.sh <машина> --dry-run  # показать, что изменится
-#   ./bin/vendor.sh <машина> --unlink   # вернуть симлинки (режим разработки)
+#   ./bin/vendor.sh <путь-к-машине>            # положить копии платформы и профиля
+#   ./bin/vendor.sh <путь-к-машине> --dry-run  # показать, что изменится
+#   ./bin/vendor.sh <путь-к-машине> --unlink   # убрать копии
 
 set -euo pipefail
 
@@ -31,21 +31,20 @@ while [ $# -gt 0 ]; do
     *)  MACHINE="$1"; shift ;;
   esac
 done
-[ -n "$MACHINE" ] || { echo "Использование: $0 <машина> [--dry-run|--unlink]" >&2; exit 2; }
+[ -n "$MACHINE" ] || { echo "Использование: $0 <путь-к-машине> [--dry-run|--unlink]" >&2; exit 2; }
 
-DEST="$ROOT/machines/$MACHINE"
-[ -d "$DEST" ] || { echo "Ошибка: нет машины '$MACHINE'" >&2; exit 2; }
+# Путь, а не имя: машины живут вне этого репозитория.
+DEST="$MACHINE"
+[ -d "$DEST" ] || { echo "Ошибка: нет каталога '$DEST'" >&2; exit 2; }
 
 run() { if [ "$DRY" -eq 1 ]; then printf '  [dry] %s\n' "$*"; else "$@"; fi; }
 
 if [ "$UNLINK" -eq 1 ]; then
   for layer in platform profile; do
-    src="platform"; [ "$layer" = profile ] && src="profiles"
     run rm -rf "$DEST/$layer"
-    run ln -sfn "../../$src" "$DEST/$layer"
   done
   run rm -f "$DEST/.vendor.lock"
-  echo "Машина '$MACHINE' переведена в режим разработки: слои подключены симлинками."
+  echo "Копии убраны из '$DEST'. Платформу вернёт ./bootstrap."
   exit 0
 fi
 
@@ -58,7 +57,7 @@ manifest() {
       | while IFS= read -r f; do printf '%s  %s/%s\n' "$(shasum -a 256 "$f" | cut -d' ' -f1)" "$prefix" "${f#./}"; done )
 }
 
-echo "== вендоринг в machines/$MACHINE"
+echo "== вендоринг в $DEST"
 for layer in platform profile; do
   src="$ROOT/platform"; [ "$layer" = profile ] && src="$ROOT/profiles"
   ver="$(cat "$src/VERSION" 2>/dev/null || echo '0.0.0-unknown')"
@@ -85,4 +84,4 @@ fi
 } > "$DEST/.vendor.lock"
 
 echo "  .vendor.lock: $(grep -c '^[0-9a-f]' "$DEST/.vendor.lock") файлов"
-echo "Готово. Проверить: cd machines/$MACHINE && ./host-setup --check"
+echo "Готово. Проверить: cd $DEST && ./host-setup --check"
