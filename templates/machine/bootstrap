@@ -29,10 +29,15 @@ REPO="$(val repo)"; VERSION="$(val version)"; COMMIT="$(val commit)"
 
 [ -n "$COMMIT" ] || { echo "Ошибка: в $LOCK не задан commit" >&2; exit 2; }
 
-# Уже то, что нужно — выходим молча. bootstrap зовут и из юнитов, и руками,
-# и он обязан быть дешёвым при повторном запуске.
-if [ -f "$DEST/.commit" ] && [ "$(cat "$DEST/.commit")" = "$COMMIT" ]; then
-  echo "stackyard $VERSION ($COMMIT) уже на месте"
+# Что считать «уже установленным». В сетевом режиме — коммит из lock: он и есть
+# то, что машине полагается. В локальном — HEAD источника: там платформу как раз
+# правят, и сверка с lock означала бы, что правка не доезжает до машины, пока
+# не передвинут lock. Ровно на этом я и попался при разработке.
+want="$COMMIT"
+[ -n "${STACKYARD_SOURCE:-}" ] && want="$( cd "$STACKYARD_SOURCE" && git rev-parse HEAD )"
+
+if [ -f "$DEST/.commit" ] && [ "$(cat "$DEST/.commit")" = "$want" ]; then
+  echo "stackyard $VERSION ($want) уже на месте"
 else
   rm -rf "$DEST.tmp" "$DEST"
   if [ -n "${STACKYARD_SOURCE:-}" ]; then

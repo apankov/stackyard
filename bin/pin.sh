@@ -63,6 +63,16 @@ s = re.sub(r'^commit=.*$',  'commit='  + commit,  s, flags=re.M)
 io.open(lock, 'w', encoding='utf-8').write(s)
 PY
 
+# bootstrap — единственный файл платформы, который лежит в git машины (иначе
+# машине нечем было бы забрать платформу). Значит, он единственный, кто может
+# отстать. Обновляем его тем же действием, что и версию: отдельный шаг, о
+# котором надо помнить, рано или поздно забудут.
+if ! cmp -s "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"; then
+  cp "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"
+  chmod +x "$DEST/bootstrap"
+  echo "  bootstrap обновлён из шаблона"
+fi
+
 echo
 echo "Закреплено: $OLD_V ($OLD_C) -> $VERSION ($COMMIT)"
 echo "Дальше в машине: ./bootstrap && ./stack --check, затем git commit stackyard.lock"
