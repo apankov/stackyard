@@ -185,6 +185,26 @@ done
 
 # ---------------------------------------------------------------- 4. пакеты
 
+step "Незаполненные секреты"
+
+# Образцы .env несут CHANGE_ME там, где значение обязано быть задано: без него
+# `--examples` не смог бы проверить синтаксис compose на машине без секретов.
+# Цена этого удобства — плейсхолдер, который легко скопировать и не заметить,
+# поэтому он проверяется здесь. Ищем по ЗНАЧЕНИЮ, а не по списку ключей:
+# платформа не знает, какие ключи заведёт очередной стек.
+left=0
+for f in "$ROOT_DIR"/.env "$ROOT_DIR"/.env-backup "$ROOT_DIR"/.env-notify "$ROOT_DIR"/stacks/*/.env; do
+  [ -f "$f" ] || continue
+  while IFS= read -r line; do
+    case "$line" in \#*|'') continue ;; esac
+    case "${line#*=}" in
+      CHANGE_ME|'"CHANGE_ME"'|"'CHANGE_ME'")
+        bad "${f#"$ROOT_DIR"/}: ${line%%=*} не заполнен (осталось CHANGE_ME)"; left=$((left + 1)) ;;
+    esac
+  done < "$f"
+done
+[ "$left" -eq 0 ] && ok "незаполненных значений нет"
+
 step "Пакеты"
 
 MISSING_PKGS=()
