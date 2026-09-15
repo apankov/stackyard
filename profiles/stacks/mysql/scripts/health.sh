@@ -14,9 +14,24 @@ set -uo pipefail
 # Через lib-env.sh, а не grep'ом: пароль лежит в .env стека, и он единственный,
 # кто знает про разворачивание ${...} и снятие кавычек. Однострочник вернул бы
 # пароль вместе с кавычками, и health.sh докладывал бы о мёртвой базе при живой.
-# shellcheck source=../../../scripts/lib-env.sh
-. "${ROOT_DIR:?}/scripts/lib-env.sh"
-ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "${STACK_DIR:-$ROOT_DIR/stacks/mysql}/.env"
+#
+# Путь к библиотеке — platform/lib/. Здесь стоял scripts/lib-env.sh из devbox6,
+# и проверка падала на КАЖДОМ прогоне `--check` с «No such file or directory».
+# Соседние скрипты стека (check-decl.sh, host-setup.sh, backup-dump.sh) путь
+# имели верный — опечатка была ровно в одном месте и жила, потому что её
+# следствие выглядело как «стек не отвечает», а не как сломанный скрипт.
+#
+# shellcheck source=../../../../platform/lib/lib-stacks.sh
+. "${ROOT_DIR:?}/platform/lib/lib-stacks.sh"
+# shellcheck source=../../../../platform/lib/lib-env.sh
+. "$ROOT_DIR/platform/lib/lib-env.sh"
+
+# .env стека — через stack_env_file, а не от STACK_DIR. У профильного стека
+# STACK_DIR указывает в profile/, где .env не лежит по построению: секрет
+# принадлежит машине. Подставив туда STACK_DIR, проверка врала бы «нет
+# Mysql_Root_Password» при исправном файле — и вечно красный блок перестал бы
+# читаться целиком, вместе с настоящими находками.
+ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$(stack_env_file mysql)"
 
 PW="$(env_get Mysql_Root_Password)"
 [ -n "$PW" ] || { echo "в stacks/mysql/.env нет Mysql_Root_Password"; exit 1; }

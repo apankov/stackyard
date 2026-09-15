@@ -362,7 +362,7 @@ verb_list() {
     if [ -d "$(stack_vhost_dir "$s")" ]; then
       n=$(ls -1 "$(stack_vhost_dir "$s")"/*.conf 2>/dev/null | grep -c . || true)
       if [ "$n" -gt 0 ]; then
-        if grep -q "conf.d/$s/\*.conf" "$(stacks_include_file)" 2>/dev/null; then
+        if stack_vhost_enabled "$s"; then
           vhosts="$n (вкл)"
         else
           vhosts="$n (выкл)"
@@ -1051,7 +1051,7 @@ verb_check() {
   # объявленную в нём сеть shared_network, и в одиночку `config` на них падает
   # с «refers to undefined network». Сервисы самого корневого файла (nginx) из
   # сравнения вычитаем — lib-stacks.sh исключает их намеренно.
-  local base_svc cfg_args cfg_files dep dsvc ef
+  local base_svc cfg_args cfg_files dep dsvc ef pf
   base_svc="$(platform_services)"
   while IFS= read -r s; do
     # Стек без своих контейнеров сверять не с чем: compose-файла у него нет.
@@ -1066,7 +1066,18 @@ verb_check() {
     # `config` падает на каждом стеке, и проверка перестаёт что-либо сверять,
     # выглядя при этом рабочей.
     cfg_args=(--project-directory "$ROOT_DIR" --env-file .env)
-    cfg_files=(-f platform/compose/nginx.yaml -f platform/compose/php-fpm.yaml)
+    # Платформенные файлы — списком ИЗ КАТАЛОГА, а не перечислением. Здесь
+    # стоял `-f platform/compose/php-fpm.yaml`, оставшийся с тех пор, когда
+    # php-fpm был платформенным сервисом. Файла нет, `docker compose` падает на
+    # несуществующем -f, а 2>/dev/null ниже это съедает: cfg_svc пуст, и для
+    # КАЖДОГО стека печаталось «config не отработал». Проверка, существующая
+    # чтобы поймать расхождение разбора yaml, была мертва на всех машинах.
+    cfg_files=()
+    for pf in "$ROOT_DIR"/platform/compose/*.yaml; do
+      [ -f "$pf" ] || continue
+      case "$pf" in *.generated.yaml) continue ;; esac
+      cfg_files+=(-f "${pf#"$ROOT_DIR"/}")
+    done
     for dep in "$s" $(stack_requires "$s"); do
       ef="$(stack_env_file "$dep")"
       [ -f "$ef" ] && cfg_args+=(--env-file "$ef")

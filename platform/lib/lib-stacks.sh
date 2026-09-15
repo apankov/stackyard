@@ -858,6 +858,21 @@ stacks_include_lines() {
   done
 }
 
+# Включён ли vhost стека в работающем include-файле.
+#
+# Сверяем ровно ту строку, которую производит stacks_include_lines, а не
+# похожую на неё: прошлая версия искала подстроку "conf.d/<стек>/*.conf",
+# которой в генерируемом файле нет и никогда не было (там путь вида
+# /etc/nginx/stacks/<стек>/nginx/*.conf). Совпадений не было ни разу, поэтому
+# `stack.sh list` показывал «выкл» у КАЖДОГО стека с vhost'ами — при включённом
+# include. Колонка, которая всегда врёт, хуже отсутствующей: по ней принимают
+# решения.
+stack_vhost_enabled() {
+  local want
+  want="include $(stack_dir_in_container "$1")/nginx/*.conf;"
+  grep -qxF "$want" "$(stacks_include_file)" 2>/dev/null
+}
+
 # Содержимое 00-enabled.conf для текущего манифеста.
 stacks_include_content() {
   cat <<'HDR'

@@ -46,6 +46,8 @@ MUTATIONS=(
   'свежая машина: state/ не заводится (B1)@@platform/lib/lib-stacks.sh@@  mkdir -p "$root/state/nginx-vhosts"@@  mkdir -p "$root/state/NOPE"  #'
   'свежая машина: каталог поставщика не заводится (A5)@@platform/lib/lib-stacks.sh@@  [ -n "$p" ] \&\& mkdir -p "$root/state/$p"@@  [ -n "$p" ] \&\& true'
   'заглушки: профильный стек не сканируется (A4)@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n  grep -rhE@@  done < <(stacks_enabled 2>/dev/null | grep -v .)\n  grep -rhE'
+  'include: читатель ищет не ту строку (A6)@@platform/lib/lib-stacks.sh@@  want="include $(stack_dir_in_container "$1")/nginx/*.conf;"@@  want="conf.d/$1/*.conf"'
+  'health: библиотека по пути devbox6 (A9)@@profiles/stacks/mysql/scripts/health.sh@@. "$ROOT_DIR/platform/lib/lib-env.sh"@@. "$ROOT_DIR/scripts/lib-env.sh"'
   'статика: собирается по включённым@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n\n  cat <<@@  done < <(stacks_enabled)\n\n  cat <<'
 )
 

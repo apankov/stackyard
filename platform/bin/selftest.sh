@@ -699,12 +699,64 @@ writes=$(grep -rnE '(>>?|tee|cp|mkdir -p|install) +[^|#]*\$\{?(ROOT_DIR|REPO_DIR
         | grep -v 'stack-path-ok' | grep -v 'selftest\.sh:' || true)
 check "в общие слои никто не пишет" "$writes" ""
 
+# 3. Ссылка на платформенный compose-файл, которого нет. Так в stack.sh жил
+#    `-f platform/compose/php-fpm.yaml`, оставшийся с тех пор, когда php-fpm был
+#    платформенным: compose падал на несуществующем -f, 2>/dev/null это съедал,
+#    и целый блок проверки был мёртв на всех машинах.
+#    Строки-комментарии пропускаем: guard про КОД, а не про прозу. Объяснение
+#    прошлого дефекта неизбежно содержит имя файла, которого больше нет, и
+#    ловить его — значит заставлять стирать объяснения.
+badref=""
+for ref in $(grep -rhE 'platform/compose/[A-Za-z0-9_.-]+\.yaml' \
+               "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
+             | grep -vE '^[[:space:]]*#' \
+             | grep -oE 'platform/compose/[A-Za-z0-9_.-]+\.yaml' | sort -u); do
+  case "$ref" in *.generated.yaml) continue ;; esac
+  [ -f "$REPO_DIR/$ref" ] || badref="$badref $ref"
+done
+check "ссылок на несуществующие файлы платформы нет" "$badref" ""
+
+# 4. Скрипты стеков подключают библиотеки по пути platform/lib/. Путь из
+#    devbox6 (scripts/lib-env.sh) переживал перенос незамеченным, потому что
+#    его следствие выглядело как «стек не отвечает», а не как сломанный скрипт.
+badlib=$(grep -rn 'ROOT_DIR[^"]*}\?/scripts/lib-' "$REPO_DIR"/profiles "$REPO_DIR"/platform 2>/dev/null \
+         | grep -vE ':[0-9]+:[[:space:]]*#' || true)
+check "стеки подключают библиотеки из platform/lib" "$badlib" ""
+
 # 3. Имя конкретной машины или клиента в публичном слое. Репозиторий публичный;
 #    кроме утечки это ещё и проверка, которая на другой машине молча проходит.
 names=$(grep -rniE 'devbox6|devbox-asstnt|12devs|my-new-site|pankov\.me|filinn|pckup|sanya|quotrum|tokensale' \
           "$REPO_DIR"/platform "$REPO_DIR"/profiles "$REPO_DIR"/bin 2>/dev/null \
-        | grep -v '^Binary' | grep -v 'selftest\.sh:[0-9]*:names=' || true)
+        | grep -v '^Binary' | grep -v 'selftest\.sh:[0-9]*:names=' \
+        | grep -vE ':[0-9]+:[[:space:]]*#' || true)
 check "имён машин и клиентов в платформе нет" "$names" ""
+
+echo "== include: генератор против читателя"
+
+# Формула строки include пишется в одном месте и читается в другом. Разъезд
+# молчит в обе стороны: прошлая версия читателя искала "conf.d/<стек>/*.conf",
+# которой генератор не производил никогда, и колонка VHOSTS показывала «выкл»
+# у каждого стека с vhost'ами. Колонка, которая всегда врёт, хуже отсутствующей.
+fixture tango stack.conf 'Domains="tango.test"
+Containers="no"'
+fixture tango nginx/70-tango.conf 'server { server_name tango.test; }'
+fixture_root profile/stacks uniform stack.conf 'Domains="uniform.test"
+Containers="no"'
+fixture_root profile/stacks uniform nginx/71-uniform.conf 'server { server_name uniform.test; }'
+printf 'Enabled_Stacks="papa lima november tango uniform"\n' > "$WORK/.env-stacks"
+
+mkdir -p "$(dirname "$(stacks_include_file)")"
+stacks_include_content > "$(stacks_include_file)"
+
+check "читатель видит включённый машинный стек" \
+  "$(stack_vhost_enabled tango && echo да || echo нет)" "да"
+check "читатель видит включённый ПРОФИЛЬНЫЙ стек" \
+  "$(stack_vhost_enabled uniform && echo да || echo нет)" "да"
+
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+stacks_include_content > "$(stacks_include_file)"
+check "выключенный стек читателем не виден" \
+  "$(stack_vhost_enabled tango && echo да || echo нет)" "нет"
 
 echo "== состояние свежей машины"
 
