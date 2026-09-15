@@ -43,7 +43,16 @@ else
     # незакоммиченные правки — иначе «локальный режим» тихо отличался бы от того,
     # что получит машина из сети.
     ( cd "$STACKYARD_SOURCE" && git archive HEAD ) | tar -x -C "$DEST.tmp"
-    ( cd "$STACKYARD_SOURCE" && git rev-parse HEAD ) > "$DEST.tmp/.commit"
+    got="$( cd "$STACKYARD_SOURCE" && git rev-parse HEAD )"
+    printf '%s\n' "$got" > "$DEST.tmp/.commit"
+    # Локальный режим намеренно НЕ отказывает при расхождении с lock: он для
+    # того и существует, чтобы поставить ещё не выпущенную версию. Но молчать
+    # нельзя — иначе машина работает не на том, что записано, и по lock этого
+    # не видно.
+    if [ "$got" != "$COMMIT" ]; then
+      echo "  ВНИМАНИЕ: локальный HEAD $got не совпадает с stackyard.lock ($COMMIT)." >&2
+      echo "  Машина работает на непроверенной версии. Закрепить: ./bin/pin.sh <машина>" >&2
+    fi
   else
     echo "stackyard $VERSION: получаю $REPO"
     command -v git >/dev/null || { echo "Ошибка: нужен git" >&2; exit 2; }
