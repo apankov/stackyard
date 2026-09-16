@@ -43,8 +43,32 @@ fi
 OLD_V="$(grep -E '^version=' "$LOCK" | cut -d= -f2-)"
 OLD_C="$(grep -E '^commit='  "$LOCK" | cut -d= -f2-)"
 
+# Машинные файлы платформы (bootstrap и обёртки) обновляются ДО проверки
+# версии: они лежат в git машины и потому способны отстать независимо от того,
+# менялась ли версия. Ровно так машина и осталась со старым сообщением обёртки
+# после починки — pin.sh выходил раньше, чем до них доходило.
+if ! cmp -s "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"; then
+  cp "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"
+  chmod +x "$DEST/bootstrap"
+  echo "  bootstrap обновлён из шаблона"
+fi
+
+# Обёртки — по той же причине, что bootstrap: они лежат в git машины, значит
+# способны отстать. Обновляем только существующие: набор точек входа у машины
+# свой, и заводить здесь новые — не дело обновления версии.
+for w in stack:stack.sh dc:docker-compose.sh host-setup:host-setup.sh certs:certs.sh registry:registry.sh; do
+  name="${w%%:*}"; target="${w#*:}"
+  [ -f "$DEST/$name" ] || continue
+  rendered="$(sed "s/@TARGET@/$target/g" "$ROOT/templates/machine/wrapper")"
+  [ "$(cat "$DEST/$name")" = "$rendered" ] && continue
+  printf '%s\n' "$rendered" > "$DEST/$name"
+  chmod +x "$DEST/$name"
+  echo "  обёртка $name обновлена из шаблона"
+done
+
+
 if [ "$OLD_C" = "$COMMIT" ]; then
-  echo "Машина уже закреплена на $VERSION ($COMMIT) — ничего не меняю."
+  echo "Машина уже закреплена на $VERSION ($COMMIT)."
   exit 0
 fi
 
@@ -67,12 +91,6 @@ PY
 # машине нечем было бы забрать платформу). Значит, он единственный, кто может
 # отстать. Обновляем его тем же действием, что и версию: отдельный шаг, о
 # котором надо помнить, рано или поздно забудут.
-if ! cmp -s "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"; then
-  cp "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"
-  chmod +x "$DEST/bootstrap"
-  echo "  bootstrap обновлён из шаблона"
-fi
-
 echo
 echo "Закреплено: $OLD_V ($OLD_C) -> $VERSION ($COMMIT)"
 echo "Дальше в машине: ./bootstrap && ./stack --check, затем git commit stackyard.lock"

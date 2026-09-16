@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Точка входа машины. ROOT_DIR задаётся явно: platform/ — симлинк в .stackyard,
+# и вычисленный из пути скрипта каталог указывал бы не туда.
+ROOT_DIR="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export ROOT_DIR
+[ -x "$ROOT_DIR/platform/bin/@TARGET@" ] || {
+  echo "Платформы нет: $ROOT_DIR/platform/bin/@TARGET@ недоступен." >&2
+  echo "Запустите ./bootstrap. Если он говорит «уже на месте» — проверьте," >&2
+  echo "что $ROOT_DIR/platform это симлинк в .stackyard, а не каталог:" >&2
+  echo "  ls -ld $ROOT_DIR/platform" >&2
+  exit 2
+}
+exec "$ROOT_DIR/platform/bin/@TARGET@" "$@"

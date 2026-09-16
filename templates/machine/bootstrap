@@ -89,7 +89,41 @@ fi
 
 # Слои подключаются симлинками внутрь машины: compose и обёртки обращаются к
 # ./platform и ./profile, и им не должно быть важно, откуда те взялись.
+#
+# Настоящий каталог на этом месте — отказ, а не повод его снести.
+#
+# `ln -sfn TARGET DIR`, когда DIR это существующий КАТАЛОГ, не заменяет его, а
+# создаёт ссылку ВНУТРИ него: получается platform/platform, а сам platform/
+# остаётся прежним. Команда при этом завершается успешно. Так выглядит машина,
+# оставшаяся на старой раскладке (её platform/ лежит в git) — bootstrap
+# рапортовал «Готово», а обёртки потом говорили «Платформы нет», и связать одно
+# с другим было нечем.
+for layer in platform profile; do
+  p="$ROOT/$layer"
+  if [ -e "$p" ] && [ ! -L "$p" ]; then
+    echo "ОТКАЗ: $p существует и не является симлинком." >&2
+    echo "  Платформа приезжает в .stackyard/ и подключается ссылкой; настоящий" >&2
+    echo "  каталог здесь означает старую раскладку репозитория — вероятно, вы" >&2
+    echo "  не на той ветке. Проверьте: git branch --show-current" >&2
+    exit 1
+  fi
+done
 ln -sfn .stackyard/platform "$ROOT/platform"
 ln -sfn .stackyard/profiles "$ROOT/profile"
+
+# Отчитываться об успехе, не проверив результат, нельзя: именно так и появилось
+# расхождение между «Готово» у bootstrap и «Платформы нет» у обёрток.
+for probe in platform/bin/stack.sh platform/bin/host-setup.sh profile/stacks; do
+  [ -e "$ROOT/$probe" ] && continue
+  echo "ОТКАЗ: после установки нет $probe." >&2
+  echo "  Платформа скачалась, но подключилась неверно. Уберите $ROOT/platform," >&2
+  echo "  $ROOT/profile и $ROOT/.stackyard и повторите." >&2
+  exit 1
+done
+[ -x "$ROOT/platform/bin/stack.sh" ] || {
+  echo "ОТКАЗ: platform/bin/stack.sh не исполняем." >&2
+  echo "  Проверьте, что клон не потерял права доступа (core.fileMode)." >&2
+  exit 1
+}
 
 echo "Готово. Дальше: sudo ./host-setup --check"

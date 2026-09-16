@@ -62,15 +62,7 @@ EOF
 # машины можно набрать ./stack вместо полного пути внутрь платформы.
 for w in stack:stack.sh dc:docker-compose.sh host-setup:host-setup.sh certs:certs.sh registry:registry.sh; do
   name="${w%%:*}"; target="${w#*:}"
-  cat > "$DEST/$name" <<EOF
-#!/usr/bin/env bash
-# Точка входа машины. ROOT_DIR задаётся явно: platform/ — симлинк в .stackyard,
-# и вычисленный из пути скрипта каталог указывал бы не туда.
-ROOT_DIR="\$( cd -P "\$( dirname "\${BASH_SOURCE[0]}" )" && pwd )"
-export ROOT_DIR
-[ -x "\$ROOT_DIR/platform/bin/$target" ] || { echo "Платформы нет — запустите ./bootstrap" >&2; exit 2; }
-exec "\$ROOT_DIR/platform/bin/$target" "\$@"
-EOF
+  sed "s/@TARGET@/$target/g" "$ROOT/templates/machine/wrapper" > "$DEST/$name"
   chmod +x "$DEST/$name"
 done
 
