@@ -76,7 +76,7 @@ MUTATIONS=(
   'корень: ROOT_DIR остаётся в .stackyard@@platform/bin/htpasswd.sh@@  [ "${ROOT_DIR##*/}" = .stackyard ] \&\& ROOT_DIR="${ROOT_DIR%/*}"@@  true'
   'htpasswd: -b вместе с -i (usage вместо пароля)@@platform/bin/htpasswd.sh@@FLAGS="-iB"@@FLAGS="-ibB"'
   'htpasswd: права ставит хост, а не контейнер@@platform/bin/htpasswd.sh@@  sh -c "$IN_CONTAINER"@@  sh -c "$IN_CONTAINER"\n\nchmod 640 "$FILE"'
-  'nginx: образ зашит мимо nginx_image@@platform/bin/htpasswd.sh@@  "$(nginx_image)" \\@@  nginx:1.30-alpine \\'
+  'nginx: образ зашит мимо nginx_image@@platform/bin/htpasswd.sh@@"$(nginx_image)"@@nginx:1.30-alpine'
 )
 
 pass=0; miss=0
