@@ -366,7 +366,14 @@ check_domains_unique() {
       for a in $(domain_sans "$d"); do printf '%s\t%s\n' "$a" "$s"; done
     done
   done < <(stacks_available) | sort | awk -F'\t' '
-    { if ($1 == prev) print "домен " $1 " объявлен и в " prevs ", и в " $2; prev = $1; prevs = $2 }'
+    # Соседние строки могут быть от ОДНОГО стека: Domains="a.test a.test" или
+    # a.test+a.test — такая же ошибка, но называть её «объявлен и в papa, и в
+    # papa» нельзя: сообщение выглядит сломанным, и его перестают читать.
+    { if ($1 == prev) {
+        if ($2 == prevs) print "домен " $1 " объявлен в стеке " $2 " дважды"
+        else             print "домен " $1 " объявлен и в " prevs ", и в " $2
+      }
+      prev = $1; prevs = $2 }'
 }
 
 # Домен в stack.conf без server_name во vhost'ах стека означает сертификат,

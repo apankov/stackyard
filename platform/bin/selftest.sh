@@ -350,6 +350,21 @@ OnCalendar=daily'
 printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
 
 check "дубль домена найден" "$(check_domains_unique | wc -l | tr -d ' ')" "1"
+check "дубль домена назван двумя разными стеками" \
+  "$(check_domains_unique | grep -cE 'объявлен и в .*, и в ' | tr -d ' ')" "1"
+
+# Тот же домен ДВАЖДЫ В ОДНОМ стеке — такая же ошибка, но сообщение «объявлен и
+# в hotel, и в hotel» читается как поломка проверки, а не как находка, и её
+# перестают читать вместе со всем отчётом.
+fixture hotel stack.conf 'Domains="hotel.test hotel.test"
+Containers="no"'
+printf 'Enabled_Stacks="golf delta hotel"\n' > "$WORK/.env-stacks"
+check "дубль внутри одного стека назван своими словами" \
+  "$(check_domains_unique | grep -c 'в стеке hotel дважды' | tr -d ' ')" "1"
+check "про «и в hotel, и в hotel» не сообщается" \
+  "$(check_domains_unique | grep -c 'и в hotel, и в hotel' | tr -d ' ')" "0"
+rm -rf "$WORK/stacks/hotel"
+printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
 check "домен без vhost и vhost без домена — обе стороны" \
   "$(check_domains_match golf | wc -l | tr -d ' ')" "2"
 # CLAUDE.md §7 требует от host-пути обоих свойств сразу: абсолютный И через
