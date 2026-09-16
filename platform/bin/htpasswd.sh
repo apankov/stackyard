@@ -74,7 +74,7 @@ printf '%s' "$PASS" | docker run --rm -i \
   -e HTUSER="$USER_NAME" -e HTFILE="$NAME" \
   -v "$HT_DIR":/ht \
   nginx:1.30-alpine \
-  sh -c "apk add --no-cache apache2-utils >/dev/null 2>&1 && htpasswd $FLAGS \"/ht/\$HTFILE\" \"\$HTUSER\""
+  sh -c "apk add --no-cache apache2-utils >/dev/null 2>&1 && htpasswd $FLAGS \"/ht/\$HTFILE\" \"\$HTUSER\""  # pkg-mgr-ok: apk внутри образа nginx:alpine, а не на хосте
 
 chmod 640 "$FILE"
 echo "готово: $FILE"

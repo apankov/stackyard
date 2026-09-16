@@ -365,7 +365,7 @@ for entry in "${STACK_SOURCES[@]}"; do
   case "${src%%:*}" in
     sqlite)
       command -v sqlite3 >/dev/null 2>&1 \
-        || die "нет sqlite3 (sudo dnf install -y sqlite), а стек объявил источник SQLite"
+        || die "нет sqlite3 — поставьте его пакетом дистрибутива (sudo ./host-setup доставит), а стек объявил источник SQLite"
       [ -f "${src#*:}" ] \
         || die "нет файла SQLite '${src#*:}' — проверьте Backup_Sqlite в stack.conf стека '${entry%%|*}'"
       ;;
@@ -417,7 +417,7 @@ if ! printf 'canary' | gpg_encrypt > /dev/null 2>"$gpg_err"; then
   sed 's/^/  gpg: /' "$gpg_err" >&2
   rm -f "$gpg_err"
   echo "  На Amazon Linux 2023 обычная причина — пакет gnupg2-minimal без gpg-agent." >&2
-  echo "  Полная сборка: sudo dnf install -y gnupg2   (заменит gnupg2-minimal)" >&2
+  echo "  Нужна полная сборка gnupg вместо minimal — поставьте её пакетом дистрибутива" >&2
   exit 2
 fi
 rm -f "$gpg_err"

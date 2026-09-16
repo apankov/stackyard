@@ -64,7 +64,52 @@ step() { echo; echo "== $1"; }
 #
 # Список платформенный, а не постековый, намеренно: выключение стека не должно
 # снимать пакет, который нужен кому-то ещё.
-PACKAGES=(logrotate openssl bzip2 gnupg2)
+# Имена ОБЩИЕ; в имена дистрибутива их переводит pkg_name ниже. Общий список
+# здесь потому, что предусловие — это возможность (шифровать, сжимать), а не
+# строка из каталога пакетов конкретного дистрибутива.
+PACKAGES=(logrotate openssl bzip2 gnupg sqlite)
+
+# Менеджер пакетов. Определяем, а не предполагаем: платформа раздаётся, и
+# зашитый dnf означает, что на Debian/Ubuntu первая же установка упирается в
+# «dnf: command not found» — с подсказкой, которую невозможно выполнить.
+PKG_MGR=""
+for m in apt-get dnf yum apk zypper; do  # pkg-mgr-ok
+  command -v "$m" >/dev/null 2>&1 && { PKG_MGR="$m"; break; }
+done
+
+# Имя пакета в терминах дистрибутива. Совпадает не всегда: gnupg против gnupg2,
+# sqlite3 против sqlite. Ошибка здесь выглядит как «пакета не существует» — то
+# есть как проблема машины, а не как наша.
+pkg_name() {
+  case "$PKG_MGR:$1" in
+    apt-get:gnupg|apk:gnupg)   echo gnupg ;;
+    dnf:gnupg|yum:gnupg|zypper:gnupg) echo gnupg2 ;;
+    apt-get:sqlite)            echo sqlite3 ;;
+    apk:sqlite)                echo sqlite ;;
+    *:sqlite)                  echo sqlite ;;
+    *)                         echo "$1" ;;
+  esac
+}
+
+pkg_installed() {
+  case "$PKG_MGR" in
+    apt-get) dpkg -s "$1" >/dev/null 2>&1 ;;  # pkg-mgr-ok
+    dnf|yum|zypper) rpm -q "$1" >/dev/null 2>&1 ;;  # pkg-mgr-ok
+    apk)     apk info -e "$1" >/dev/null 2>&1 ;;  # pkg-mgr-ok
+    *)       return 1 ;;
+  esac
+}
+
+pkg_install_cmd() {
+  case "$PKG_MGR" in
+    apt-get) echo "sudo apt-get install -y" ;;  # pkg-mgr-ok
+    dnf)     echo "sudo dnf install -y" ;;  # pkg-mgr-ok
+    yum)     echo "sudo yum install -y" ;;  # pkg-mgr-ok
+    apk)     echo "sudo apk add" ;;  # pkg-mgr-ok
+    zypper)  echo "sudo zypper install -y" ;;  # pkg-mgr-ok
+    *)       echo "(менеджер пакетов не определён)" ;;
+  esac
+}
 
 # ---------------------------------------------------------------- 1. базовое
 
@@ -94,7 +139,7 @@ else
   # Установку docker намеренно не автоматизируем: она тянет за собой членство
   # в группе docker, а оно применяется только после перелогина — то есть
   # скрипт всё равно не смог бы завершить дело за один проход.
-  bad "нет docker. Поставить: sudo dnf install -y docker && sudo systemctl enable --now docker && sudo usermod -aG docker \$USER (затем перелогиниться)"
+  bad "нет docker. Поставить его пакетом вашего дистрибутива, затем: sudo systemctl enable --now docker && sudo usermod -aG docker \$USER (и перелогиниться)"
 fi
 
 # ------------------------------------------------------ 2. внешний том
@@ -207,18 +252,29 @@ done
 
 step "Пакеты"
 
-MISSING_PKGS=()
-for pkg in "${PACKAGES[@]}"; do
-  if rpm -q "$pkg" >/dev/null 2>&1; then ok "$pkg"; else MISSING_PKGS+=("$pkg"); fi
-done
+if [ -z "$PKG_MGR" ]; then
+  bad "менеджер пакетов не опознан (искали apt-get, dnf, yum, apk, zypper)"
+  echo "         Поставьте вручную: ${PACKAGES[*]}"
+else
+  MISSING_PKGS=()
+  for pkg in "${PACKAGES[@]}"; do
+    real="$(pkg_name "$pkg")"
+    if pkg_installed "$real"; then ok "$real"; else MISSING_PKGS+=("$real"); fi
+  done
 
-if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-  if [ "$CHECK_ONLY" -eq 1 ]; then
-    bad "не установлены: ${MISSING_PKGS[*]} (sudo dnf install -y ${MISSING_PKGS[*]})"
-  else
-    echo "  ... установка: ${MISSING_PKGS[*]}"
-    dnf install -y "${MISSING_PKGS[@]}"
-    for pkg in "${MISSING_PKGS[@]}"; do ok "$pkg (установлен)"; done
+  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+      bad "не установлены: ${MISSING_PKGS[*]} ($(pkg_install_cmd) ${MISSING_PKGS[*]})"
+    else
+      echo "  ... установка ($PKG_MGR): ${MISSING_PKGS[*]}"
+      case "$PKG_MGR" in
+        apt-get) apt-get update -qq && apt-get install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
+        dnf|yum) "$PKG_MGR" install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
+        apk)     apk add "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
+        zypper)  zypper install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
+      esac
+      for pkg in "${MISSING_PKGS[@]}"; do ok "$pkg (установлен)"; done
+    fi
   fi
 fi
 

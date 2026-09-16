@@ -126,7 +126,7 @@ else
     BACKUP_SKIP="нет публичного GPG-ключа $BACKUP_PUBKEY (генерируется НЕ на этой машине, см. README)"
   elif ! command -v aws >/dev/null 2>&1; then
     INSTALL_BACKUP=0
-    BACKUP_SKIP="нет команды aws (sudo dnf install -y awscli)"
+    BACKUP_SKIP="нет команды aws — поставьте awscli пакетом дистрибутива"
   fi
 fi
 
