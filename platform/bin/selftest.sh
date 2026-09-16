@@ -911,14 +911,84 @@ check "необязательный аргумент читается как \${
 #    этого условия аудит изоляции докладывал «ключ одинаков у машин X и X».
 #    Ложная тревога в проверке безопасности хуже её отсутствия: её учатся не
 #    читать, а вместе с ней перестают читать и настоящую находку.
-#    Смотрим на ФАЙЛ, а не на строку: сравнение источников стоит строкой ниже,
-#    внутри того же awk-выражения, и построчный греп его не видит.
+#    Смотрим не на строку и не на файл, а на ОКНО вокруг каждого сравнения.
+#    Построчно нельзя: сравнение источников стоит строкой ниже, внутри того же
+#    awk-выражения. По файлу целиком — тоже: в audit-isolation.sh таких awk два,
+#    и исправленный прикрывал собой сломанный (ровно так эта проверка и
+#    пропустила первую мутацию).
 baddup=""
-for f in $(grep -rIl '$1 == prev' "$REPO_DIR"/bin "$REPO_DIR"/platform 2>/dev/null \
-           | grep -vE '(selftest|mutate)\.sh$'); do
-  grep -qE '\$2 (==|!=) prev' "$f" || baddup="$baddup $f"
-done
+while IFS=: read -r f n _; do
+  [ -n "${n:-}" ] || continue
+  sed -n "$((n > 2 ? n - 2 : 1)),$((n + 5))p" "$f" | grep -qE '\$2 (==|!=) prev' \
+    || baddup="$baddup $f:$n"
+done < <(grep -rIn '$1 == prev' "$REPO_DIR"/bin "$REPO_DIR"/platform 2>/dev/null \
+         | grep -vE '(selftest|mutate)\.sh:')
 check "поиск дубликатов отличает источник от самого себя" "$baddup" ""
+
+# 9. Чужой код копией в репозитории. Копия getssl весила 155 КБ, лежала под
+#    GPL-3 в публичном репозитории под MIT и успела обрасти локальными
+#    правками, про которые никто уже не помнил, откуда они. Теперь такие вещи
+#    закрепляются lock-файлом и скачиваются на машину; проверяем, что копия не
+#    вернулась и что ссылки на неё не остались.
+#
+#    Признак копии — исполняемый файл вне bin/ и lib/ длиннее 500 строк:
+#    маленькие шаблоны и конфиги так не выглядят.
+vendored=""
+while IFS= read -r f; do
+  case "$f" in */bin/*|*/lib/*) continue ;; esac
+  [ -x "$f" ] || continue
+  [ "$(wc -l < "$f")" -gt 500 ] && vendored="$vendored $f"
+done < <(find "$REPO_DIR/platform" "$REPO_DIR/profiles" -type f 2>/dev/null)
+check "чужой код не лежит копией в платформе" "$vendored" ""
+
+#    Хвост ([^-.a-zA-Z0-9]|$) обязателен с обеих сторон: без «|$» шаблон не
+#    видел ссылку в КОНЦЕ строки — а именно так она и выглядит в ExecStart.
+stale=$(grep -rInE 'platform/getssl([^-.a-zA-Z0-9]|$)' "$REPO_DIR"/platform "$REPO_DIR"/bin "$REPO_DIR"/templates 2>/dev/null \
+        | grep -vE '(selftest|mutate)\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
+check "ссылок на убранную копию getssl не осталось" "$stale" ""
+
+# 10. Корень машины, вычисленный от пути скрипта. На машине platform/ — это
+#     симлинк в .stackyard/, и `cd -P` его разворачивает: два уровня вверх дают
+#     .stackyard, а не машину. Скрипт после этого заводит state/ внутри слоя,
+#     который перезаписывается при каждом ./bootstrap. Замечено на живом
+#     сервере: htpasswd.sh положил файл в .stackyard/state/ и там же его искал,
+#     так что «пусто» он печатал совершенно честно.
+badroot=""
+for f in $(grep -rIl 'cd "$DIR0/../\.\." && pwd' "$REPO_DIR"/platform/bin 2>/dev/null); do
+  grep -q '\.stackyard' "$f" || badroot="$badroot $f"
+done
+check "ROOT_DIR не остаётся внутри .stackyard" "$badroot" ""
+
+# 11. Взаимоисключающие флаги htpasswd. -i читает пароль со стдина, -b берёт его
+#     ТРЕТЬИМ аргументом; вместе они означают «жду третий аргумент», которого
+#     нет, и htpasswd печатает usage и выходит. На сервере это выглядит как
+#     сломанный скрипт, а не как неверные флаги. Прогоном не проверить: htpasswd
+#     живёт в контейнере, а selftest работает без docker.
+badflags=$(grep -n 'FLAGS=' "$REPO_DIR/platform/bin/htpasswd.sh" 2>/dev/null \
+           | grep -E '\-[a-zA-Z]*i[a-zA-Z]*b|\-[a-zA-Z]*b[a-zA-Z]*i' || true)
+check "htpasswd: -i и -b не стоят вместе" "$badflags" ""
+
+# 12. Обёртки машины перечислены одним списком (templates/machine/wrappers), и
+#     каждая цель обязана существовать: опечатка здесь даёт машине точку входа,
+#     которая падает на "Платформы нет" — то есть сообщением про bootstrap,
+#     хотя bootstrap ни при чём.
+badwrap=""
+while IFS=: read -r name target; do
+  case "$name" in ''|\#*) continue ;; esac
+  [ -f "$REPO_DIR/platform/bin/$target" ] || badwrap="$badwrap $name->$target"
+done < "$REPO_DIR/templates/machine/wrappers"
+check "цели обёрток машины существуют" "$badwrap" ""
+
+# Lock обязан называть всё, без чего скачивание не воспроизводится. Пустое поле
+# здесь означало бы «скачаем что дадут»: ровно то, от чего lock и заводят.
+for field in repo version sha256; do
+  v=$(sed -n "s/^$field=//p" "$REPO_DIR/platform/getssl.lock" | head -n 1)
+  check "getssl.lock: поле $field заполнено" "$([ -n "$v" ] && echo да || echo нет)" "да"
+done
+# Сумма — ровно 64 шестнадцатеричных знака. Обрезанная или с пробелом не
+# совпадёт ни с чем, и getssl-fetch будет вечно докладывать о подмене.
+check "getssl.lock: сумма похожа на sha256" \
+  "$(sed -n 's/^sha256=//p' "$REPO_DIR/platform/getssl.lock" | head -n 1 | grep -cE '^[0-9a-f]{64}$')" "1"
 
 echo "== порядок и зоны лимитов"
 
@@ -1013,6 +1083,26 @@ printf 'Enabled_Stacks="papa lima november sierra"\n' > "$WORK/.env-stacks"
 check "путь сертификата профильного стека виден" \
   "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+
+echo "== корень машины из-под симлинка"
+
+# Раскладка ровно как на машине: platform — симлинк в .stackyard/. Гард выше
+# смотрит на текст скрипта, а этот блок — на то, КУДА скрипт на самом деле
+# сходит. Текстовая проверка одна не годится: она пройдёт и на скрипте, где
+# нужная строка есть, но стоит не в той ветке.
+MROOT="$WORK/машина"
+rm -rf "$MROOT"
+mkdir -p "$MROOT/.stackyard"
+cp -R "$REPO_DIR/platform" "$MROOT/.stackyard/platform"
+ln -s .stackyard/platform "$MROOT/platform"
+# pwd -P у ожидания — потому что скрипт разворачивает симлинки сам (cd -P), а
+# в macOS $TMPDIR это /var -> /private/var. Иначе тест ловил бы раскладку
+# временного каталога, а не то, ради чего написан.
+MREAL="$(cd "$MROOT" && pwd -P)"
+check "скрипт через симлинк видит корнем машину, а не .stackyard" \
+  "$(cd "$MROOT" && env -u ROOT_DIR ./platform/bin/htpasswd.sh proba --list 2>&1)" \
+  "пусто: $MREAL/state/htpasswd/proba"
+rm -rf "$MROOT"
 
 echo "== переносимость: время, суммы, сторож"
 

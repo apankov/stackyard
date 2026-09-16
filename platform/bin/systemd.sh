@@ -80,8 +80,13 @@ if [ ! -d "$Platform_Deploy_Dir/state/getssl-config" ]; then
   exit 1
 fi
 
-if [ ! -x "$Platform_Deploy_Dir/platform/getssl" ]; then
-  echo "Ошибка: $Platform_Deploy_Dir/platform/getssl не найден или не исполняем" >&2
+# getssl — машинный артефакт в state/, а не файл платформы: его скачивает
+# getssl-fetch.sh по platform/getssl.lock. Юниты ставить бессмысленно, пока
+# его нет: таймер был бы, продления — нет, и выглядело бы это как «getssl
+# молчит, потому что продлевать нечего».
+if [ ! -x "$Platform_Deploy_Dir/state/bin/getssl" ]; then
+  echo "Ошибка: нет $Platform_Deploy_Dir/state/bin/getssl" >&2
+  echo "  Скачать: ./platform/bin/getssl-fetch.sh" >&2
   exit 1
 fi
 

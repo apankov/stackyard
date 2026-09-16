@@ -34,7 +34,7 @@ WorkingDirectory=@DEPLOY_DIR@/state
 # У самого продления отдельного флага нет: -a обходит все домены, а решение
 # продлевать принимает RENEW_ALLOW="30" из getssl-config/getssl.cfg.
 # -q оставляет в журнале только исключительное: ошибки и факт выпуска.
-ExecStart=@DEPLOY_DIR@/platform/getssl -w ./getssl-config/ -U -a -q
+ExecStart=@DEPLOY_DIR@/state/bin/getssl -w ./getssl-config/ -U -a -q
 
 # Для Type=oneshot systemd по умолчанию ОТКЛЮЧАЕТ таймаут старта. Зависший
 # getssl (ожидание DNS, недоступный ACME-сервер, CHECK_REMOTE в никуда) висел

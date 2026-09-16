@@ -391,6 +391,16 @@ fi
 
 step "Заглушки сертификатов и таймеры"
 
+# getssl не лежит в репозитории — он скачивается по platform/getssl.lock.
+# Раньше проверки таймеров: без него юниты ставить некуда, и отказ «таймер
+# есть, продления нет» выглядел бы так же, как исправная машина, которой
+# нечего продлевать.
+if [ "$CHECK_ONLY" -eq 1 ]; then
+  "$DIR0/getssl-fetch.sh" --check || PROBLEMS=$((PROBLEMS + 1))
+else
+  "$DIR0/getssl-fetch.sh" | sed 's/^/  /' || PROBLEMS=$((PROBLEMS + 1))
+fi
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
   [ -f "$ROOT_DIR/state/certs/nginx-selfsigned.crt" ] \
     && ok "заглушечный сертификат есть" \

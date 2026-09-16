@@ -67,6 +67,14 @@ MUTATIONS=(
   'сторож: фолбэк не отдаёт 124@@platform/lib/lib-env.sh@@  [ "$rc" -eq 143 ] \&\& rc=124@@  true'
   'find: снова -printf (только GNU)@@platform/bin/backup.sh@@  done < <(find "$TMP_DIR" -maxdepth 1 -type f ! -name '"'"'*.part'"'"' 2>/dev/null)@@  done < <(find "$TMP_DIR" -maxdepth 1 -type f -printf '"'"'%p '"'"' 2>/dev/null)'
   'аудит: дубликат у машины с самой собой (B7)@@bin/audit-isolation.sh@@if ($1 == prev \&\& $2 != prevm) print prevm@@if ($1 == prev) print prevm'
+
+  # --- getssl больше не лежит копией: ссылки на неё не должны возвращаться.
+  'getssl: юнит снова зовёт копию из платформы@@platform/systemd/getssl-renew.service@@ExecStart=@DEPLOY_DIR@/state/bin/getssl@@ExecStart=@DEPLOY_DIR@/platform/getssl'
+  'getssl: сумма в lock обрезана@@platform/getssl.lock@@sha256=c26d1a714fb96feeed2ac808cf16aae8e453d0005475e47e5732213ab1a7485e@@sha256=c26d1a714fb96feeed2ac808'
+
+  # --- корень машины из-под симлинка platform/ и флаги htpasswd.
+  'корень: ROOT_DIR остаётся в .stackyard@@platform/bin/htpasswd.sh@@  [ "${ROOT_DIR##*/}" = .stackyard ] \&\& ROOT_DIR="${ROOT_DIR%/*}"@@  true'
+  'htpasswd: -b вместе с -i (usage вместо пароля)@@platform/bin/htpasswd.sh@@FLAGS="-iB"@@FLAGS="-ibB"'
 )
 
 pass=0; miss=0
