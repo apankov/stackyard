@@ -86,7 +86,7 @@ stack_env_file()     { printf '%s/stacks/%s/.env' "$(stacks_root)" "$1"; }
 
 # Каталог стеков ВНУТРИ контейнера nginx. Значение обязано совпадать с целью
 # монтирования $Platform_Deploy_Dir/stacks в platform/compose/nginx.yaml:
-# генерируемый 00-enabled.conf читает nginx, а не хост.
+# генерируемый 10-enabled.conf читает nginx, а не хост.
 STACKS_DIR_IN_CONTAINER="/etc/nginx/stacks"
 STACKS_PROFILE_DIR_IN_CONTAINER="/etc/nginx/profile-stacks"
 
@@ -192,7 +192,7 @@ stacks_db_init_service() {
 
 # Генерируемый список баз. Лежит ВНУТРИ каталога поставщика, потому что оттуда
 # его читает инициализатор, — но пишет его платформа, из деклараций всех
-# включённых стеков. Ровно так же platform/nginx-vhosts/00-enabled.conf лежит
+# включённых стеков. Ровно так же state/nginx-vhosts/10-enabled.conf лежит
 # рядом с nginx: место определяет потребитель, а не автор.
 #
 # Профильный поставщик — исключение из «генерируемое лежит у потребителя»:
@@ -886,7 +886,7 @@ stack_vhost_enabled() {
   grep -qxF "$want" "$(stacks_include_file)" 2>/dev/null
 }
 
-# Содержимое 00-enabled.conf для текущего манифеста.
+# Содержимое 10-enabled.conf для текущего манифеста.
 # Каталог машины с её собственным http-конфигом (зоны лимитов, карты).
 # Монтирование постоянное; пустой каталог законен — include по маске, которая
 # ничего не нашла, для nginx не ошибка.

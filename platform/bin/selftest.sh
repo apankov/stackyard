@@ -5,7 +5,7 @@
 #   ./platform/bin/selftest.sh
 #
 # Существует потому, что проверить генераторы на боевой машине нельзя, не
-# сломав её: неверный 00-enabled.conf — это отсутствие всех vhost'ов сразу, а
+# сломав её: неверный 10-enabled.conf — это отсутствие всех vhost'ов сразу, а
 # неверный nginx-static — пересоздание nginx. Здесь ROOT_DIR подменяется на
 # временный каталог с парой выдуманных стеков, и проверяется ровно тот текст,
 # который генераторы производят.
@@ -1100,6 +1100,42 @@ printf 'Enabled_Stacks="papa lima november sierra"\n' > "$WORK/.env-stacks"
 check "путь сертификата профильного стека виден" \
   "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+
+echo "== генерируемые файлы: имя одно на всех"
+
+# Переименование генерируемого файла обязано доходить до ВСЕХ, кто его
+# называет. Фикс A15 переименовал 00-enabled.conf в 10-enabled.conf в
+# генераторе — и не дошёл до compose, который монтирует его по имени, и до
+# docker-compose.sh, где ветка case сверялась с образцом имени.
+#
+# Обошлось это дорого: docker на отсутствующий файл в bind-mount заводит
+# КАТАЛОГ, после чего nginx не стартует вовсе — «create mountpoint ...
+# read-only file system». То есть отказ выглядит как поломка docker, а не как
+# незавершённое переименование.
+#
+# В compose литерал неизбежен: подстановок с вызовом функции там нет. Поэтому
+# сверяем литерал с тем, что производит библиотека.
+inc_name="$(basename "$(stacks_include_file)")"
+check "compose монтирует тот же файл, что производит stacks_include_file" \
+  "$(grep -c "nginx-vhosts/$inc_name:/etc/nginx/conf.d/$inc_name" "$REPO_DIR/platform/compose/nginx.yaml")" "1"
+check "старого имени в compose не осталось" \
+  "$(grep -cE 'nginx-vhosts/[0-9]+-enabled\.conf' "$REPO_DIR/platform/compose/nginx.yaml")" "1"
+
+# Имя генерируемого compose-файла в коде не пишется вовсе — спрашивается у
+# stacks_static_file. Комментарии не в счёт: гард про код, а объяснение
+# прошлого дефекта неизбежно называет файл.
+stat_name="$(basename "$(stacks_static_file)")"
+# grep по ОДНОМУ файлу не печатает его имя, поэтому строка начинается сразу с
+# номера — шаблон исключения комментариев здесь другой, чем у гардов выше.
+badstat=$(grep -In "$stat_name" "$REPO_DIR/platform/bin/docker-compose.sh" 2>/dev/null \
+          | grep -vE '^[0-9]+:[[:space:]]*#' || true)
+check "имя генерируемого compose-файла в коде не повторяется" "$badstat" ""
+
+# Ни один потребитель не должен узнавать имя по образцу: образец переживает
+# переименование молча, а ветка case перестаёт совпадать без единого слова.
+badpat=$(grep -rInE '\*[0-9]+-enabled\.conf\)' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
+         | grep -vE '(selftest|mutate)\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
+check "имя генерируемого файла не сверяется образцом" "$badpat" ""
 
 echo "== устаревший bind-mount"
 

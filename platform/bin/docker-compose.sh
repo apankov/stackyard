@@ -141,10 +141,14 @@ ensure_state_dirs
 for gen in "$(stacks_static_file)" "$(stacks_include_file)"; do
   [ -f "$gen" ] && continue
   mkdir -p "$(dirname "$gen")"
-  case "$gen" in
-    *nginx-static.generated.yaml) stacks_static_content  > "$gen" ;;
-    *00-enabled.conf)             stacks_include_content > "$gen" ;;
-  esac
+  # Сравниваем со значением, а не с образцом имени. Образец был *00-enabled.conf
+  # и пережил переименование файла в 10-: ветка перестала совпадать молча, и
+  # генерируемый include не создавался вовсе.
+  if [ "$gen" = "$(stacks_static_file)" ]; then
+    stacks_static_content  > "$gen"
+  else
+    stacks_include_content > "$gen"
+  fi
 done
 
 # Файл со списком баз тоже генерируемый, но живёт внутри стека pg и нужен
@@ -183,9 +187,14 @@ for stack in $STACKS; do
   [ -n "$ef" ] && DOCKER_COMPOSE_BASE+=(--env-file "${ef#"$ROOT_DIR"/}")
 done
 
+# Путь генерируемого файла спрашиваем у библиотеки. Второй раз написанное имя
+# переживает переименование молча — ровно так `*00-enabled.conf` перестал
+# совпадать после фикса A15, и генерируемый include не создавался вовсе.
+STATIC_REL="$(stacks_static_file)"; STATIC_REL="${STATIC_REL#"$ROOT_DIR"/}"
+
 DOCKER_COMPOSE_BASE+=(
   -f platform/compose/nginx.yaml
-  -f state/nginx-static.generated.yaml
+  -f "$STATIC_REL"
 )
 
 # Стек без собственных контейнеров (сайт на платформенных nginx/php-fpm)

@@ -81,6 +81,11 @@ MUTATIONS=(
   # --- устаревший bind-mount после ./bootstrap.
   'mount: пустой хост тоже считается уликой@@platform/lib/lib-stacks.sh@@  [ "${1:-0}" -gt 0 ] \&\& [ "${2:-0}" -eq 0 ]@@  [ "${2:-0}" -eq 0 ]'
   'mount: улика не распознаётся вовсе@@platform/lib/lib-stacks.sh@@  [ "${1:-0}" -gt 0 ] \&\& [ "${2:-0}" -eq 0 ]@@  false'
+
+  # --- переименование генерируемого файла, не дошедшее до потребителей (A15).
+  'compose: монтирует старое имя include@@platform/compose/nginx.yaml@@nginx-vhosts/10-enabled.conf:/etc/nginx/conf.d/10-enabled.conf@@nginx-vhosts/00-enabled.conf:/etc/nginx/conf.d/00-enabled.conf'
+  'генератор: имя сверяется образцом@@platform/bin/docker-compose.sh@@  if [ "$gen" = "$(stacks_static_file)" ]; then@@  case "$gen" in *00-enabled.conf) :;; esac\n  if [ "$gen" = "$(stacks_static_file)" ]; then'
+  'compose: имя генерируемого файла написано второй раз@@platform/bin/docker-compose.sh@@  -f "$STATIC_REL"@@  -f state/nginx-static.generated.yaml'
 )
 
 pass=0; miss=0
