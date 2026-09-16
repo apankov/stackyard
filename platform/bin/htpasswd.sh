@@ -34,6 +34,13 @@ if [ -z "${ROOT_DIR:-}" ]; then
   # каждого скрипта зовёт его как ./platform/bin/<имя>.sh — этот путь и чиним.
   [ "${ROOT_DIR##*/}" = .stackyard ] && ROOT_DIR="${ROOT_DIR%/*}"
 fi
+LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
+
+# shellcheck source=platform/lib/lib-env.sh
+. "$LIB_DIR/lib-env.sh"
+# shellcheck source=platform/lib/lib-stacks.sh
+. "$LIB_DIR/lib-stacks.sh"
+env_load_files "$ROOT_DIR/.env"
 # state/, а не platform/: платформа — общий слой, она скачивается bootstrap'ом
 # на каждую машину и перезаписывается целиком. Файл basic-auth, положенный туда,
 # исчез бы при следующем обновлении платформы, а до того лежал бы секретом в
@@ -82,13 +89,29 @@ mkdir -p "$HT_DIR"
 FLAGS="-iB"
 [ -s "$FILE" ] || FLAGS="-ciB"
 
-printf '%s' "$PASS" | docker run --rm -i \
-  -e HTUSER="$USER_NAME" -e HTFILE="$NAME" \
-  -v "$HT_DIR":/ht \
-  nginx:1.30-alpine \
-  sh -c "apk add --no-cache apache2-utils >/dev/null 2>&1 && htpasswd $FLAGS \"/ht/\$HTFILE\" \"\$HTUSER\""  # pkg-mgr-ok: apk внутри образа nginx:alpine, а не на хосте
+# Права и владельца ставит САМ контейнер, пока он ещё root. На хосте это
+# сделать нельзя: файл создан контейнером от root, и `chmod` от обычного
+# пользователя падает с EPERM — ровно так это и вылезло на сервере.
+#
+# Владелец — вызвавший, группа — nginx из ТОГО ЖЕ образа, режим 640. Каждая
+# часть обязательна: владельцем файл читает человек (--list), группой — рабочий
+# процесс nginx (он работает не от root, а от uid 101), а 640 оставляет файл
+# закрытым для всех остальных. Раньше выходило root:root 640 — и basic auth
+# отвечал бы 403, потому что читать файл было некому.
+#
+# gid берём из образа, а не константой: он часть чужого образа, а не наша.
+# Команда собрана в переменную одной строкой не для красоты: пометка
+# # pkg-mgr-ok обязана стоять на той же строке, что apk (гард построчный), а
+# внутри многострочного `sh -c "..."` каждая строка кончается обратным слэшем,
+# и комментарий туда не поставить.
+IN_CONTAINER="apk add --no-cache apache2-utils >/dev/null 2>&1 && htpasswd $FLAGS \"/ht/\$HTFILE\" \"\$HTUSER\" && chown \"\$HTOWNER\":\"\$(id -g nginx)\" \"/ht/\$HTFILE\" && chmod 640 \"/ht/\$HTFILE\""  # pkg-mgr-ok: apk внутри образа nginx:alpine, а не на хосте
 
-chmod 640 "$FILE"
+printf '%s' "$PASS" | docker run --rm -i \
+  -e HTUSER="$USER_NAME" -e HTFILE="$NAME" -e HTOWNER="$(id -u)" \
+  -v "$HT_DIR":/ht \
+  "$(nginx_image)" \
+  sh -c "$IN_CONTAINER"
+
 echo "готово: $FILE"
 echo "во vhost'е: auth_basic_user_file /etc/nginx/htpasswd/$NAME;"
 echo "перечитать конфиг: docker exec nginx nginx -s reload"

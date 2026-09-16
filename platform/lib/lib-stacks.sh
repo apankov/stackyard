@@ -1058,9 +1058,16 @@ check_limit_zones() {
 # только в логах контейнера: снаружи машина просто не отвечает.
 #
 # Печатает строку на проблему, молчит когда её нет.
+# Образ nginx — один на всех, кто его называет. Копий было три: compose (там
+# без литерала нельзя), эта проверка и htpasswd.sh, который про
+# Platform_Nginx_Image вовсе не знал и запускал свой. На машине с
+# переопределённым образом это значило, что файл паролей готовит НЕ тот nginx,
+# который его потом читает, — а прав на файл это касается напрямую.
+nginx_image() { env_get Platform_Nginx_Image "nginx:1.30-alpine"; }
+
 check_nginx_image() {
   local img tag major minor patch
-  img="$(env_get Platform_Nginx_Image "nginx:1.30-alpine")"
+  img="$(nginx_image)"
   tag="${img##*:}"; tag="${tag%%-*}"
   case "$tag" in
     [0-9]*.[0-9]*)

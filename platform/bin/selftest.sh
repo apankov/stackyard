@@ -979,6 +979,23 @@ while IFS=: read -r name target; do
 done < "$REPO_DIR/templates/machine/wrappers"
 check "цели обёрток машины существуют" "$badwrap" ""
 
+# 13. Имя образа nginx — одно на всех, кто его называет. Копий было три, и
+#     htpasswd.sh про Platform_Nginx_Image вовсе не знал: на машине с
+#     переопределённым образом файл паролей готовил НЕ тот nginx, который его
+#     читает, — а от образа зависит gid, то есть права на файл.
+#     В compose литерал неизбежен (там подстановки без запасного значения нет),
+#     поэтому его и не считаем; речь про скрипты.
+badimg=$(grep -rInE 'nginx:[0-9]+\.[0-9]+' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
+         | grep -vE '(selftest|mutate)\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
+check "скрипты берут образ nginx из nginx_image" "$badimg" ""
+
+# 14. Файл, созданный контейнером, принадлежит root: на хосте его уже не
+#     переназначить, и `chmod` от обычного пользователя падает с EPERM. Права
+#     должен ставить сам контейнер, пока он root. Проверяем, что после docker
+#     run в скрипте не осталось хостового chmod по этому файлу.
+badchmod=$(grep -n '^chmod .*"\$FILE"' "$REPO_DIR/platform/bin/htpasswd.sh" 2>/dev/null || true)
+check "права файла паролей ставит контейнер, а не хост" "$badchmod" ""
+
 # Lock обязан называть всё, без чего скачивание не воспроизводится. Пустое поле
 # здесь означало бы «скачаем что дадут»: ровно то, от чего lock и заводят.
 for field in repo version sha256; do
