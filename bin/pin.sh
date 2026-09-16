@@ -59,15 +59,15 @@ fi
 # Обёртки — по той же причине, что bootstrap: они лежат в git машины, значит
 # способны отстать. Обновляем только существующие: набор точек входа у машины
 # свой, и заводить здесь новые — не дело обновления версии.
-for w in stack:stack.sh dc:docker-compose.sh host-setup:host-setup.sh certs:certs.sh registry:registry.sh; do
-  name="${w%%:*}"; target="${w#*:}"
+while IFS=: read -r name target; do
+  case "$name" in ''|\#*) continue ;; esac
   [ -f "$DEST/$name" ] || continue
   rendered="$(sed "s/@TARGET@/$target/g" "$ROOT/templates/machine/wrapper")"
   [ "$(cat "$DEST/$name")" = "$rendered" ] && continue
   printf '%s\n' "$rendered" > "$DEST/$name"
   chmod +x "$DEST/$name"
   echo "  обёртка $name обновлена из шаблона"
-done
+done < "$ROOT/templates/machine/wrappers"
 
 
 if [ "$OLD_C" = "$COMMIT" ]; then

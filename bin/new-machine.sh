@@ -62,11 +62,11 @@ EOF
 
 # Обёртки. Три строки каждая, и они единственная причина, по которой из корня
 # машины можно набрать ./stack вместо полного пути внутрь платформы.
-for w in stack:stack.sh dc:docker-compose.sh host-setup:host-setup.sh certs:certs.sh registry:registry.sh; do
-  name="${w%%:*}"; target="${w#*:}"
+while IFS=: read -r name target; do
+  case "$name" in ''|\#*) continue ;; esac
   sed "s/@TARGET@/$target/g" "$ROOT/templates/machine/wrapper" > "$DEST/$name"
   chmod +x "$DEST/$name"
-done
+done < "$ROOT/templates/machine/wrappers"
 
 cat > "$DEST/.gitignore" <<'EOF'
 # Платформа. В git машины её нет намеренно: она приезжает по stackyard.lock,
