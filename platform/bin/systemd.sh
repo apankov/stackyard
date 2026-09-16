@@ -17,7 +17,16 @@ DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Каталог МАШИНЫ, а не платформы. Обычно его задаёт обёртка ./stack в корне
 # машины; запасной вариант — на два уровня вверх от platform/bin, чтобы скрипт
 # работал и при прямом вызове.
-ROOT_DIR="${ROOT_DIR:-$( cd "$DIR0/../.." && pwd )}"
+if [ -z "${ROOT_DIR:-}" ]; then
+  ROOT_DIR="$( cd "$DIR0/../.." && pwd )"
+  # На машине platform/ — симлинк в .stackyard/, и `cd -P` выше его уже
+  # развернул: два уровня приводят не в машину, а в .stackyard. Тогда state/
+  # заводится ВНУТРИ скачиваемого слоя и пропадает при следующем ./bootstrap,
+  # а до того htpasswd, сертификаты и databases.yaml лежат не там, где их ищут
+  # контейнеры. Обёртки в корне машины ROOT_DIR задают сами, но документация
+  # каждого скрипта зовёт его как ./platform/bin/<имя>.sh — этот путь и чиним.
+  [ "${ROOT_DIR##*/}" = .stackyard ] && ROOT_DIR="${ROOT_DIR%/*}"
+fi
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 ENV_FILE="$ROOT_DIR/.env"
 UNIT_SRC="$ROOT_DIR/platform/systemd"
