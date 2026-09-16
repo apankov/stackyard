@@ -747,6 +747,16 @@ writes=$(grep -rnE '(>>?|tee|cp|mkdir -p|install) +[^|#]*\$\{?(ROOT_DIR|REPO_DIR
         | grep -v 'stack-path-ok' | grep -v 'selftest\.sh:' || true)
 check "в общие слои никто не пишет" "$writes" ""
 
+# 3. `sudo -u` обязан пробрасывать ROOT_DIR через env: sudo сбрасывает
+#    окружение, и скрипт платформы вычислит корень от своего пути — а лежит он
+#    в .stackyard/platform/bin, то есть корнем станет .stackyard. Отказ
+#    выглядит как «нет .env» на машине, где .env есть.
+badsudo=$(grep -rn 'sudo -u' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
+          | grep -vE ':[0-9]+:[[:space:]]*#' \
+          | grep -v 'selftest\.sh:' \
+          | grep -v 'env ROOT_DIR=' || true)
+check "sudo -u пробрасывает ROOT_DIR" "$badsudo" ""
+
 # 3. Менеджер пакетов и команды дистрибутива не зашиваются: платформа
 #    раздаётся, и `dnf` в ней означает, что на Debian/Ubuntu установка упирается
 #    в «dnf: command not found» — с подсказкой, которую невозможно выполнить.

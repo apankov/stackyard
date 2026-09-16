@@ -54,6 +54,8 @@ MUTATIONS=(
   'shellcheck: директива source= не резолвится (C5)@@platform/bin/certs.sh@@# shellcheck source=platform/lib/lib-stacks.sh@@# shellcheck source=../lib/lib-stacks.sh'
   # bootstrap сетью selftest не проверяет: прогон не должен зависеть от
   # интернета. Его проверяют руками, см. README.
+  'sudo -u теряет ROOT_DIR@@platform/bin/host-setup.sh@@sudo -u "$SERVICE_USER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh"@@sudo -u "$SERVICE_USER" "$DIR0/certs.sh"'
+  'менеджер пакетов снова зашит@@platform/bin/host-setup.sh@@      apt-get) apt-get update -qq \&\& apt-get install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok@@      apt-get) dnf install -y "${MISSING_PKGS[@]}" ;;'
   'статика: собирается по включённым@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n\n  cat <<@@  done < <(stacks_enabled)\n\n  cat <<'
 )
 

@@ -363,7 +363,12 @@ else
   # сертификатами. Root-овые файлы он молча заменить не сможет.
   SERVICE_USER=$(stat -c '%U' "$ROOT_DIR" 2>/dev/null || stat -f '%Su' "$ROOT_DIR")
   echo "  ... заглушки сертификатов (от имени $SERVICE_USER)"
-  sudo -u "$SERVICE_USER" "$DIR0/certs.sh" | sed 's/^/      /'
+  # ROOT_DIR передаётся ЯВНО через env: sudo сбрасывает окружение (env_reset),
+  # и экспортированная обёрткой переменная до дочернего процесса не доходит. Без
+  # неё certs.sh вычисляет корень от своего пути — а лежит он в
+  # .stackyard/platform/bin, то есть корнем оказывается .stackyard, и скрипт
+  # ищет .env там. Отказ выглядит как «нет .env» на машине, где .env есть.
+  sudo -u "$SERVICE_USER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh" | sed 's/^/      /'
 
   echo "  ... таймеры systemd"
   "$DIR0/systemd.sh" | sed 's/^/      /'
