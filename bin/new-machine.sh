@@ -20,7 +20,9 @@ DEST=""; REPO="https://github.com/apankov/stackyard.git"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo) REPO="$2"; shift 2 ;;
+    # ${2-}, а не "$2": под set -u забытое значение даёт «$2: unbound
+    # variable» вместо внятного «--repo требует значение».
+    --repo) REPO="${2-}"; [ -n "$REPO" ] || { echo "Ошибка: --repo требует значение" >&2; exit 2; }; shift 2 ;;
     -*) echo "Неизвестный аргумент: $1" >&2; exit 2 ;;
     *)  DEST="$1"; shift ;;
   esac
