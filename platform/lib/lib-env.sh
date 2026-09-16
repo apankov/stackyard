@@ -229,7 +229,14 @@ check_databases_unique() {
     db="$(env_get "${prefix}_DB")"
     [ -n "$db" ] && printf '%s\t%s\n' "$db" "$s"
   done < <(stacks_enabled 2>/dev/null) | sort | awk -F'\t' '
-    { if ($1 == prev) print "базу " $1 " заказывают и " prevs ", и " $2; prev = $1; prevs = $2 }'
+    # $2 != prevs — по той же причине, что в check_domains_unique: соседние
+    # строки могут прийти от одного стека, и «заказывают и papa, и papa»
+    # читается как поломка проверки, а не как находка.
+    { if ($1 == prev) {
+        if ($2 == prevs) print "базу " $1 " стек " $2 " заказывает дважды"
+        else             print "базу " $1 " заказывают и " prevs ", и " $2
+      }
+      prev = $1; prevs = $2 }'
 }
 
 # stack_backup_sources <стек>
