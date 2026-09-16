@@ -83,7 +83,9 @@ MUTATIONS=(
   'mount: улика не распознаётся вовсе@@platform/lib/lib-stacks.sh@@  [ "${1:-0}" -gt 0 ] \&\& [ "${2:-0}" -eq 0 ]@@  false'
 
   # --- переименование генерируемого файла, не дошедшее до потребителей (A15).
-  'compose: монтирует старое имя include@@platform/compose/nginx.yaml@@nginx-vhosts/10-enabled.conf:/etc/nginx/conf.d/10-enabled.conf@@nginx-vhosts/00-enabled.conf:/etc/nginx/conf.d/00-enabled.conf'
+  'compose: файл монтируется внутрь :ro-каталога@@platform/compose/nginx.yaml@@      - ${Platform_Deploy_Dir:?}/state/nginx-vhosts:/etc/nginx/enabled:ro@@      - ${Platform_Deploy_Dir:?}/state/nginx-vhosts/10-enabled.conf:/etc/nginx/conf.d/10-enabled.conf:ro'
+  'compose: каталог состояния не монтируется вовсе@@platform/compose/nginx.yaml@@      - ${Platform_Deploy_Dir:?}/state/nginx-vhosts:/etc/nginx/enabled:ro@@      - ${Platform_Deploy_Dir:?}/nginx:/etc/nginx/enabled:ro'
+  'nginx: платформа не читает каталог состояния@@platform/nginx-vhosts/05-enabled.conf@@include /etc/nginx/enabled/*.conf;@@# include убран'
   'генератор: имя сверяется образцом@@platform/bin/docker-compose.sh@@  if [ "$gen" = "$(stacks_static_file)" ]; then@@  case "$gen" in *00-enabled.conf) :;; esac\n  if [ "$gen" = "$(stacks_static_file)" ]; then'
   'compose: имя генерируемого файла написано второй раз@@platform/bin/docker-compose.sh@@  -f "$STATIC_REL"@@  -f state/nginx-static.generated.yaml'
 )

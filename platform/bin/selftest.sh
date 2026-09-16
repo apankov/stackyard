@@ -1101,6 +1101,40 @@ check "путь сертификата профильного стека вид�
   "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
 
+echo "== вложенные монтирования"
+
+# Точку монтирования для вложенного пути docker создаёт ВНУТРИ уже
+# смонтированного каталога. Если тот смонтирован с :ro, создать её нечем, и
+# контейнер не стартует вовсе. Сообщение при этом говорит про mountpoint и
+# read-only file system — то есть отказ выглядит как поломка docker, а не как
+# неверная спека, и ищут его не там. Так стоял генерируемый список include'ов:
+# файлом внутрь conf.d, смонтированного с :ro.
+#
+# Проверяем КЛАСС: ни одна цель монтирования не должна лежать внутри другой
+# цели, смонтированной только на чтение. Разбираем все compose-файлы платформы,
+# а не один nginx.yaml: следующий такой же появится в другом.
+nested=""
+while IFS= read -r f; do
+  # Из строки-элемента volumes берём ЦЕЛЬ и режим: "<цель> <ro|rw>".
+  #
+  # Источник отрезаем по ПОСЛЕДНЕМУ ":/", а не по первому двоеточию: в
+  # источнике стоит ${Platform_Deploy_Dir:?}, и двоеточие внутри подстановки
+  # съедало половину строки. На этом гард сначала и промолчал.
+  mounts=$(grep -oE '^[[:space:]]*-[[:space:]]+[^[:space:]]+:/[^[:space:]]+' "$f" \
+           | sed -E 's|.*:(/[^:]+)(:([a-z]+))?$|\1 \2|; s/:ro$/ ro/; s/ $/ rw/' \
+           | sed -E 's/ :ro$/ ro/; s/  +/ /')
+  while IFS=' ' read -r ro_dst mode; do
+    [ "${mode:-}" = ro ] || continue
+    while IFS=' ' read -r o_dst _; do
+      [ -n "${o_dst:-}" ] || continue
+      case "$o_dst" in
+        "$ro_dst"/*) nested="$nested $(basename "$f"):$o_dst-внутри-$ro_dst" ;;
+      esac
+    done <<< "$mounts"
+  done <<< "$mounts"
+done < <(find "$REPO_DIR/platform/compose" "$REPO_DIR/profiles" -name '*.yaml' 2>/dev/null)
+check "внутрь :ro-каталога ничего не монтируется" "$nested" ""
+
 echo "== генерируемые файлы: имя одно на всех"
 
 # Переименование генерируемого файла обязано доходить до ВСЕХ, кто его
@@ -1115,11 +1149,26 @@ echo "== генерируемые файлы: имя одно на всех"
 #
 # В compose литерал неизбежен: подстановок с вызовом функции там нет. Поэтому
 # сверяем литерал с тем, что производит библиотека.
-inc_name="$(basename "$(stacks_include_file)")"
-check "compose монтирует тот же файл, что производит stacks_include_file" \
-  "$(grep -c "nginx-vhosts/$inc_name:/etc/nginx/conf.d/$inc_name" "$REPO_DIR/platform/compose/nginx.yaml")" "1"
-check "старого имени в compose не осталось" \
-  "$(grep -cE 'nginx-vhosts/[0-9]+-enabled\.conf' "$REPO_DIR/platform/compose/nginx.yaml")" "1"
+# Каталог, куда пишется генерируемый include, обязан быть смонтирован целиком.
+inc_dir="$(basename "$(dirname "$(stacks_include_file)")")"
+check "compose монтирует каталог генерируемых vhost'ов" \
+  "$(grep -cE "state/$inc_dir:/etc/nginx/[a-z-]+:ro" "$REPO_DIR/platform/compose/nginx.yaml")" "1"
+
+# И читается он ровно одной строкой из платформенного файла conf.d. Имя этого
+# файла задаёт порядок: зоны лимитов обязаны быть объявлены до server-блоков.
+inc_mount="$(grep -oE "state/$inc_dir:/etc/nginx/[a-z-]+:ro" "$REPO_DIR/platform/compose/nginx.yaml" | head -n 1)"
+inc_mount="${inc_mount#*:}"; inc_mount="${inc_mount%:ro}"
+check "платформа читает этот каталог одной строкой include" \
+  "$(grep -rlF "include $inc_mount/" "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | wc -l | tr -d ' ')" "1"
+# Обе стороны обязаны найтись. Пустое имя сравнивается как меньшее любого, то
+# есть исчезнувший файл зон выглядел бы как правильный порядок — проверка
+# одобрила бы ровно то, ради чего написана.
+reader=$(grep -rlF "include $inc_mount/" "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | head -n 1)
+limits=$(grep -rlE '^[[:space:]]*limit_req_zone' "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | head -n 1)
+check "зоны лимитов и читатель — оба на месте" \
+  "$([ -n "$reader" ] && [ -n "$limits" ] && echo да || echo нет)" "да"
+check "читатель сортируется ПОСЛЕ зон лимитов" \
+  "$([ -n "$reader" ] && [ -n "$limits" ] && [ "$(basename "$limits")" \< "$(basename "$reader")" ] && echo да || echo нет)" "да"
 
 # Имя генерируемого compose-файла в коде не пишется вовсе — спрашивается у
 # stacks_static_file. Комментарии не в счёт: гард про код, а объяснение
