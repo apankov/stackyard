@@ -464,7 +464,12 @@ leftovers=$(find "$TMP_DIR" -maxdepth 1 -type f ! -name '*.part' 2>/dev/null | w
 if [ "${leftovers:-0}" -gt 0 ]; then
   warn "в $TMP_DIR лежит невыгруженных дампов: $leftovers"
   warn "это остатки прогонов, где упала выгрузка в S3. Выгрузите вручную или удалите:"
-  find "$TMP_DIR" -maxdepth 1 -type f ! -name '*.part' -printf '           %s\t%p\n' 2>/dev/null >&2 || true
+  # Размер считаем сами, а не через `find -printf`: -printf есть у GNU find и
+  # нет у BSD, и там весь вызов падал целиком — счётчик выше говорил «дампов
+  # N», а список под ним оказывался пуст.
+  while IFS= read -r f; do
+    printf '           %s\t%s\n' "$(wc -c < "$f" | tr -d ' ')" "$f" >&2
+  done < <(find "$TMP_DIR" -maxdepth 1 -type f ! -name '*.part' 2>/dev/null)
 fi
 
 # ------------------------------------------------------------ 3. источники

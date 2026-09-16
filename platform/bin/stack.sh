@@ -1048,7 +1048,7 @@ verb_check() {
     # напечатав ни его имени, ни причины.
     hrc=0
     hout="$(cd "$ROOT_DIR" && STACK_DIR="$(stack_dir "$s")" ROOT_DIR="$ROOT_DIR" \
-            timeout "$HEALTH_TIMEOUT" "$hscript" 2>&1)" || hrc=$?
+            run_with_timeout "$HEALTH_TIMEOUT" "$hscript" 2>&1)" || hrc=$?
     case "$hrc" in
       0)   ok "$s: health.sh — стек отвечает" ;;
       124) bad "$s: health.sh не ответил за ${HEALTH_TIMEOUT} с" ;;

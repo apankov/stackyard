@@ -14,7 +14,12 @@ set -uo pipefail
 
 DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="${ROOT_DIR:-$( cd "$DIR0/../.." && pwd )}"
+LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 LOCK="$ROOT_DIR/.vendor.lock"
+
+# Нужен ровно ради sha256_file: голый `shasum` есть не везде.
+# shellcheck source=platform/lib/lib-env.sh
+. "$LIB_DIR/lib-env.sh"
 
 problems=0
 ok()   { printf '  [ok]   %s\n' "$1"; }
@@ -40,6 +45,15 @@ ok "платформа $(grep '^platform_version=' "$LOCK" | cut -d= -f2), пр�
 # Сверяем суммы. Читаем из lock, а не пересчитываем «как в vendor.sh»: вторая
 # копия формулы разъезжается с первой молча, и проверка начинает докладывать о
 # расхождении там, где его нет, — после чего её перестают читать.
+# Инструмент проверяем ОДИН раз и до цикла. Иначе на каждый файл печатается и
+# ошибка «нечем считать», и [FAIL] «изменён на месте»: отчёт на сотню строк, в
+# котором настоящая причина стоит первой строкой и в нём тонет.
+sha256_file /dev/null >/dev/null || {
+  echo "Ошибка: проверить вендорную копию нечем." >&2
+  echo "  Поставьте coreutils (sha256sum) или perl (shasum)." >&2
+  exit 2
+}
+
 changed=0; missing=0
 while read -r sum path; do
   case "$sum" in \#*|platform_version=*|profile_version=*|---) continue ;; esac
@@ -48,7 +62,7 @@ while read -r sum path; do
   if [ ! -f "$f" ]; then
     bad "файл пропал: $path"; missing=$((missing + 1)); continue
   fi
-  if [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" != "$sum" ]; then
+  if [ "$(sha256_file "$f")" != "$sum" ]; then
     bad "изменён на месте: $path"; changed=$((changed + 1))
   fi
 done < "$LOCK"

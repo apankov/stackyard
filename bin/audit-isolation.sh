@@ -23,6 +23,10 @@
 set -uo pipefail
 
 ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+# Нужен ради sha256_file: голого `shasum` может не оказаться.
+# shellcheck source=platform/lib/lib-env.sh
+. "$ROOT/platform/lib/lib-env.sh"
 PROBLEMS=0
 WARNINGS=0
 
@@ -110,8 +114,12 @@ pairs=$(
 
 shared=0
 for key in $MUST_DIFFER; do
+  # `$2 != prevm` — не придирка: один и тот же ключ у одной машины лежит сразу
+  # в двух файлах (например, Mysql_Root_Password в .env и в stacks/mysql/.env),
+  # и без этого условия аудит докладывал «ключ одинаков у машин X и X». Ложная
+  # тревога в проверке изоляции хуже отсутствия проверки: её учатся не читать.
   dupes=$(printf '%s\n' "$pairs" | awk -F'\t' -v k="$key" '$1 == k { print $2 "\t" $3 }' \
-          | sort | awk -F'\t' '{ if ($1 == prev) print prev "\t" prevm "\t" $2; prev = $1; prevm = $2 }')
+          | sort | awk -F'\t' '{ if ($1 == prev && $2 != prevm) print prev "\t" prevm "\t" $2; prev = $1; prevm = $2 }')
   [ -n "$dupes" ] || continue
   while IFS=$'\t' read -r val m1 m2; do
     bad "$key одинаков у машин $m1 и $m2 (значение: ${val:0:24}…)"
@@ -150,9 +158,9 @@ for m in "${machines[@]}"; do
     warn "$m: ключа ACME-аккаунта ещё нет (заведёт getssl при первом выпуске)"
     continue
   fi
-  sums="$sums$(shasum -a 256 "$k" | cut -d' ' -f1)	$m"$'\n'
+  sums="$sums$(sha256_file "$k")	$m"$'\n'
 done
-dupes=$(printf '%s' "$sums" | sort | awk -F'\t' '{ if ($1 == prev) print prevm "\t" $2; prev = $1; prevm = $2 }')
+dupes=$(printf '%s' "$sums" | sort | awk -F'\t' '{ if ($1 == prev && $2 != prevm) print prevm "\t" $2; prev = $1; prevm = $2 }')
 if [ -n "$dupes" ]; then
   while IFS=$'\t' read -r m1 m2; do
     bad "машины $m1 и $m2 используют ОДИН ключ ACME-аккаунта — общие лимиты и общий отзыв"

@@ -21,6 +21,10 @@
 set -euo pipefail
 
 ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+# Нужен ради sha256_file: голого `shasum` может не оказаться.
+# shellcheck source=platform/lib/lib-env.sh
+. "$ROOT/platform/lib/lib-env.sh"
 MACHINE=""; DRY=0; UNLINK=0
 
 while [ $# -gt 0 ]; do
@@ -54,7 +58,7 @@ fi
 manifest() {
   local dir="$1" prefix="$2"
   ( cd "$dir" && find . -type f -not -name '.DS_Store' | sort \
-      | while IFS= read -r f; do printf '%s  %s/%s\n' "$(shasum -a 256 "$f" | cut -d' ' -f1)" "$prefix" "${f#./}"; done )
+      | while IFS= read -r f; do printf '%s  %s/%s\n' "$(sha256_file "$f")" "$prefix" "${f#./}"; done )
 }
 
 echo "== вендоринг в $DEST"

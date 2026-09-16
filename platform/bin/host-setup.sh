@@ -67,7 +67,7 @@ step() { echo; echo "== $1"; }
 # Имена ОБЩИЕ; в имена дистрибутива их переводит pkg_name ниже. Общий список
 # здесь потому, что предусловие — это возможность (шифровать, сжимать), а не
 # строка из каталога пакетов конкретного дистрибутива.
-PACKAGES=(logrotate openssl bzip2 gnupg sqlite)
+PACKAGES=(logrotate openssl bzip2 gnupg sqlite curl git)
 
 # Менеджер пакетов. Определяем, а не предполагаем: платформа раздаётся, и
 # зашитый dnf означает, что на Debian/Ubuntu первая же установка упирается в
@@ -276,6 +276,70 @@ else
       for pkg in "${MISSING_PKGS[@]}"; do ok "$pkg (установлен)"; done
     fi
   fi
+fi
+
+# Пакеты поставлены — но проверять надо КОМАНДЫ. Имя пакета у каждого
+# дистрибутива своё и уже один раз подвело (gnupg против gnupg2), а `gpg`,
+# которого нет, ломает шифрование дампов одинаково везде. Список ровно
+# соответствует тому, что зовут скрипты platform/bin.
+#
+# Отсутствие — предупреждение, а не отказ: sqlite3 нужен только машине с
+# sqlite-источниками, curl — только машине с оповещениями, и [FAIL] там, где
+# возможности просто не пользуются, быстро учит не читать отчёт. Исключение —
+# openssl и git: без первого не выпустить даже заглушку сертификата, без
+# второго не обновить слои через ./bootstrap.
+step "Команды платформы"
+
+# Команда и пакет зовутся по-разному чаще, чем кажется: gpg приезжает в gnupg,
+# sqlite3 — в sqlite. Подсказка «поставьте пакет gpg» невыполнима, а выглядит
+# как рабочая, и человек тратит время на несуществующий пакет.
+pkg_for_cmd() {
+  case "$1" in
+    gpg)     echo gnupg ;;
+    sqlite3) echo sqlite ;;
+    *)       echo "$1" ;;
+  esac
+}
+
+check_cmd() {
+  local cmd="$1" sev="$2" why="$3" hint
+  hint="$(pkg_install_cmd) $(pkg_name "$(pkg_for_cmd "$cmd")")"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    ok "$cmd — $why"
+  elif [ "$sev" = bad ]; then
+    bad "нет $cmd — $why ($hint)"
+  else
+    warn "нет $cmd — $why ($hint)"
+  fi
+}
+
+check_cmd openssl bad  "заглушки сертификатов и dhparam (certs.sh)"
+check_cmd git     bad  "обновление слоёв (./bootstrap)"
+check_cmd gpg     warn "шифрование дампов (backup.sh)"
+check_cmd bzip2   warn "сжатие дампов (backup.sh)"
+check_cmd gzip    warn "чтение и запись дампов (backup.sh, backup-restore.sh)"
+check_cmd tar     warn "архивы файловых источников (backup.sh)"
+check_cmd sqlite3 warn "снятие копии sqlite-баз (backup.sh)"
+check_cmd curl    warn "оповещения (notify.sh)"
+
+# aws — единственная команда, надобность которой объявлена, а не постоянна.
+# Спрашиваем у стеков и у .env-backup, а не держим свой список: иначе второй
+# стек с образом из ECR потребовал бы правки здесь, и про неё бы забыли.
+#
+# Отвечает ли роль инстанса — вопрос отдельный, его задаёт registry.sh --check:
+# наличие команды и наличие прав не одно и то же, и второе без сети не узнать.
+# shellcheck disable=SC2119  # список стеков у stacks_registries необязателен
+REGISTRIES="$(stacks_registries 2>/dev/null | tr '\n' ' ')"
+if [ -n "${REGISTRIES// /}" ]; then
+  command -v aws >/dev/null 2>&1 \
+    && ok "aws — образы из реестров: $REGISTRIES" \
+    || bad "нет aws, а стеки тянут образы из ECR ($REGISTRIES) — pull не пройдёт"
+elif [ -f "$ROOT_DIR/.env-backup" ]; then
+  command -v aws >/dev/null 2>&1 \
+    && ok "aws — выгрузка бэкапов в S3" \
+    || bad "нет aws, а .env-backup настроен — backup.sh не выгрузит дампы"
+else
+  ok "aws не нужен: ни реестров образов, ни .env-backup"
 fi
 
 # --------------------------------------------------- 5. хостовая часть стеков

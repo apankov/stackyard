@@ -56,16 +56,6 @@ aws_cli() {
   fi
 }
 
-# BSD date (macOS) и GNU date (Linux) разбирают ISO-8601 по-разному — та же
-# развилка, что и в check-certs.sh.
-to_epoch() {
-  local s="$1"
-  date -d "$s" +%s 2>/dev/null && return 0
-  s="${s%%+*}"; s="${s%%.*}"
-  date -j -f '%Y-%m-%dT%H:%M:%S' "$s" +%s 2>/dev/null && return 0
-  return 1
-}
-
 command -v aws >/dev/null 2>&1 || { echo "Ошибка: нет команды 'aws'" >&2; exit 2; }
 aws_cli s3api head-bucket --bucket "$S3_BUCKET" >/dev/null 2>&1 \
   || { echo "Ошибка: бакет '$S3_BUCKET' недоступен" >&2; exit 2; }
@@ -144,7 +134,7 @@ for src in "${EXPECTED[@]}"; do
   size=$(printf '%s' "$newest" | awk '{print $1}')
   modified=$(printf '%s' "$newest" | awk '{print $2}')
 
-  if ! ts=$(to_epoch "$modified"); then
+  if ! ts=$(iso_to_epoch "$modified"); then
     printf '%-34s ОШИБКА: не разобрана дата "%s"\n' "$src" "$modified"
     problems=$((problems + 1))
     continue

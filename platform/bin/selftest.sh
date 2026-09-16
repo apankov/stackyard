@@ -729,6 +729,11 @@ echo "== гигиена платформы"
 
 # Классы дефектов, на которых я уже попадался. Проверяем не конкретные места, а
 # сам класс: конкретное чинится один раз, класс возвращается.
+#
+# Везде -I: без него любой бинарный файл, случайно оказавшийся в дереве
+# (например, .swp от открытого редактора), даёт строку «Binary file ... matches»
+# и роняет сразу несколько гардов — то есть тесты падают из-за постороннего
+# файла, а не из-за кода.
 
 # 1. Путь к стеку, собранный строкой, слеп к профильному корню: такой стек
 #    просто не находится, и его preflight/health/stack.conf молча не читаются.
@@ -744,11 +749,11 @@ echo "== гигиена платформы"
 #    их два вида — определение самих корней и .env стека, который по замыслу
 #    ВСЕГДА машинный. Пометка грепается, то есть исключение видно и его можно
 #    пересчитать; молчаливого исключения быть не должно.
-built=$(grep -rnE '/stacks/\$' \
+built=$(grep -rInE '/stacks/\$' \
           "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin \
           "$REPO_DIR"/profiles 2>/dev/null \
         | grep -v 'stack-path-ok' \
-        | grep -v 'selftest\.sh:' || true)
+        | grep -vE '(selftest|mutate)\.sh:' || true)
 check "путь к стеку нигде не собирается строкой" "$built" ""
 
 # 2. Запись в platform/ или profile/: это общие слои, bootstrap перезаписывает
@@ -756,19 +761,19 @@ check "путь к стеку нигде не собирается строко�
 #    лежит в слое, который раздаётся всем машинам.
 #    Ищем любую запись, а не только `>`: cp, tee и >> туда же. И смотрим все
 #    каталоги, где может оказаться пишущий код, а не только два.
-writes=$(grep -rnE '(>>?|tee|cp|mkdir -p|install) +[^|#]*\$\{?(ROOT_DIR|REPO_DIR|Platform_Deploy_Dir)[^ "]*/(platform|profile)/' \
+writes=$(grep -rInE '(>>?|tee|cp|mkdir -p|install) +[^|#]*\$\{?(ROOT_DIR|REPO_DIR|Platform_Deploy_Dir)[^ "]*/(platform|profile)/' \
            "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin \
            "$REPO_DIR"/profiles 2>/dev/null \
-        | grep -v 'stack-path-ok' | grep -v 'selftest\.sh:' || true)
+        | grep -v 'stack-path-ok' | grep -vE '(selftest|mutate)\.sh:' || true)
 check "в общие слои никто не пишет" "$writes" ""
 
 # 3. `sudo -u` обязан пробрасывать ROOT_DIR через env: sudo сбрасывает
 #    окружение, и скрипт платформы вычислит корень от своего пути — а лежит он
 #    в .stackyard/platform/bin, то есть корнем станет .stackyard. Отказ
 #    выглядит как «нет .env» на машине, где .env есть.
-badsudo=$(grep -rn 'sudo -u' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
+badsudo=$(grep -rIn 'sudo -u' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
           | grep -vE ':[0-9]+:[[:space:]]*#' \
-          | grep -v 'selftest\.sh:' \
+          | grep -vE '(selftest|mutate)\.sh:' \
           | grep -v 'env ROOT_DIR=' || true)
 check "sudo -u пробрасывает ROOT_DIR" "$badsudo" ""
 
@@ -780,7 +785,7 @@ check "sudo -u пробрасывает ROOT_DIR" "$badsudo" ""
 #    Сама абстракция (она обязана перечислить менеджеры) помечена в коде
 #    # pkg-mgr-ok — как и другие законные исключения: пометка грепается, то
 #    есть исключение видно и его можно пересчитать.
-hardpm=$(grep -rnE '(^|[^_[:alnum:]])(dnf|yum|apt-get|apk add|zypper) ' \
+hardpm=$(grep -rInE '(^|[^_[:alnum:]])(dnf|yum|apt-get|apk add|zypper) ' \
            "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin 2>/dev/null \
          | grep -vE ':[0-9]+:[[:space:]]*#' \
          | grep -v 'pkg-mgr-ok' || true)
@@ -800,7 +805,7 @@ while IFS= read -r line; do
 #    Ищем НАСТОЯЩУЮ форму директивы (строка целиком — комментарий шеллчека), а
 #    не подстроку: иначе проверка ловит собственный образец поиска и рассказ о
 #    том, что она проверяет. На этом я попался трижды подряд.
-done < <(grep -rnE '^[[:space:]]*# shellcheck source=' "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib \
+done < <(grep -rInE '^[[:space:]]*# shellcheck source=' "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib \
            "$REPO_DIR"/bin "$REPO_DIR"/tests "$REPO_DIR"/profiles 2>/dev/null)
 check "директивы shellcheck source= резолвятся" "$badsrc" ""
 
@@ -812,7 +817,7 @@ check "директивы shellcheck source= резолвятся" "$badsrc" ""
 #    прошлого дефекта неизбежно содержит имя файла, которого больше нет, и
 #    ловить его — значит заставлять стирать объяснения.
 badref=""
-for ref in $(grep -rhE 'platform/compose/[A-Za-z0-9_.-]+\.yaml' \
+for ref in $(grep -rIhE 'platform/compose/[A-Za-z0-9_.-]+\.yaml' \
                "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
              | grep -vE '^[[:space:]]*#' \
              | grep -oE 'platform/compose/[A-Za-z0-9_.-]+\.yaml' | sort -u); do
@@ -824,7 +829,7 @@ check "ссылок на несуществующие файлы платфор�
 # 4. Скрипты стеков подключают библиотеки по пути platform/lib/. Путь из
 #    devbox6 (scripts/lib-env.sh) переживал перенос незамеченным, потому что
 #    его следствие выглядело как «стек не отвечает», а не как сломанный скрипт.
-badlib=$(grep -rn 'ROOT_DIR[^"]*}\?/scripts/lib-' "$REPO_DIR"/profiles "$REPO_DIR"/platform 2>/dev/null \
+badlib=$(grep -rIn 'ROOT_DIR[^"]*}\?/scripts/lib-' "$REPO_DIR"/profiles "$REPO_DIR"/platform 2>/dev/null \
          | grep -vE ':[0-9]+:[[:space:]]*#' || true)
 check "стеки подключают библиотеки из platform/lib" "$badlib" ""
 
@@ -835,6 +840,85 @@ names=$(grep -rniE 'devbox6|devbox-asstnt|12devs|my-new-site|pankov\.me|filinn|p
         | grep -v '^Binary' | grep -v 'selftest\.sh:[0-9]*:names=' \
         | grep -vE ':[0-9]+:[[:space:]]*#' || true)
 check "имён машин и клиентов в платформе нет" "$names" ""
+
+# 5. Команда, которой на чужой машине может не быть, либо ведущая себя там
+#    иначе. Пять отказов подряд на первом реальном сервере были именно такими,
+#    и ни один не поймали тесты: у меня всё стояло. Поэтому ловим класс —
+#    прямой вызов в обход обёртки из lib-env.sh, — а не конкретный вызов.
+#    Законное место обёрток одно, оно помечено # portable-ok.
+
+#    5a. shasum/sha256sum. Отсутствие первого давало ПУСТУЮ сумму, она не
+#        совпадала ни с чем, и check-vendor докладывал, что на месте правили
+#        каждый файл платформы: отсутствие инструмента выглядело как диверсия.
+badsha=$(grep -rInE '(^|[^_[:alnum:]])(shasum|sha256sum)[[:space:]]' \
+           "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin "$REPO_DIR"/tests 2>/dev/null \
+         | grep -vE ':[0-9]+:[[:space:]]*#' \
+         | grep -vE '(selftest|mutate)\.sh:' | grep -v 'portable-ok' || true)
+check "суммы считаются через sha256_file" "$badsha" ""
+
+#    5b. timeout — из GNU coreutils, в macOS и BSD его нет вовсе. Без него
+#        сторож просто не запускается, и --check зависает ровно там, где
+#        сторож и был нужен: на неотвечающем health.sh.
+badto=$(grep -rInE '(^|[^_[:alnum:]-])timeout[[:space:]]+"?\$' \
+          "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin 2>/dev/null \
+        | grep -vE ':[0-9]+:[[:space:]]*#' \
+        | grep -vE '(selftest|mutate)\.sh:' | grep -v 'portable-ok' || true)
+check "сторож времени идёт через run_with_timeout" "$badto" ""
+
+#    5c. `find -printf` — расширение GNU; BSD find на нём падает целиком.
+#        Вызов был обёрнут в 2>/dev/null || true, поэтому падал молча: счётчик
+#        выше говорил «невыгруженных дампов N», а список под ним был пуст.
+badfp=$(grep -rIn -- '-printf' "$REPO_DIR"/platform "$REPO_DIR"/bin "$REPO_DIR"/tests 2>/dev/null \
+        | grep -v 'platform/getssl' | grep -vE '(selftest|mutate)\.sh:' \
+        | grep -vE ':[0-9]+:[[:space:]]*#' || true)
+check "find -printf (только GNU) не используется" "$badfp" ""
+
+#    5d. `date -j -f` без -u и без %z в формате разбирает строку как ЛОКАЛЬНОЕ
+#        время. Метки S3 приходят в UTC, поэтому к востоку от Гринвича свежий
+#        бэкап выглядел устаревшим, а к западу — устаревший проходил проверку.
+#        Второе хуже: проверка свежести бэкапов, которая молча одобряет старый.
+badtz=""
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  case "$line" in *'%z'*|*'date -j -u'*|*'%Z'*) continue ;; esac
+  badtz="$badtz${line%%:*} "
+done < <(grep -rIn 'date -j' "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin 2>/dev/null \
+         | grep -v 'platform/getssl' | grep -vE '(selftest|mutate)\.sh:' \
+         | grep -vE ':[0-9]+:[[:space:]]*#')
+check "разбор времени BSD-датой не считает UTC локальным" "$badtz" ""
+
+# 6. `declare -gA` — это bash >= 4.2, а штатный /bin/bash в macOS остался 3.2.
+#    Без явной проверки версии библиотека молча загружалась с пустым ENV_VARS:
+#    каждый env_get возвращал умолчание, и скрипт делал не то, о чём просили.
+#    Попасть на 3.2 легче всего через sudo — он чистит PATH.
+badbv=""
+for f in $(grep -rIl 'declare -gA' "$REPO_DIR"/platform/lib 2>/dev/null); do
+  grep -q 'BASH_VERSINFO' "$f" || badbv="$badbv $f"
+done
+check "declare -gA прикрыт проверкой версии bash" "$badbv" ""
+
+# 7. Разбор аргументов: `WANT="$2"; shift 2` под set -u на забытом значении
+#    даёт «$2: unbound variable» — сообщение про внутренности скрипта вместо
+#    сообщения про то, чего не хватает в командной строке.
+badsh=$(grep -rIn 'shift 2' "$REPO_DIR"/bin "$REPO_DIR"/platform/bin 2>/dev/null \
+        | grep -vE ':[0-9]+:[[:space:]]*#' \
+        | grep -vE '(selftest|mutate)\.sh:' | grep -v '${2-}' || true)
+check "необязательный аргумент читается как \${2-}" "$badsh" ""
+
+# 8. Поиск дубликатов через `prev` в awk обязан требовать, чтобы вторая строка
+#    была от ДРУГОЙ машины. Один и тот же ключ у одной машины лежит сразу в
+#    двух файлах (Mysql_Root_Password в .env и в stacks/mysql/.env), и без
+#    этого условия аудит изоляции докладывал «ключ одинаков у машин X и X».
+#    Ложная тревога в проверке безопасности хуже её отсутствия: её учатся не
+#    читать, а вместе с ней перестают читать и настоящую находку.
+#    Смотрим на ФАЙЛ, а не на строку: сравнение источников стоит строкой ниже,
+#    внутри того же awk-выражения, и построчный греп его не видит.
+baddup=""
+for f in $(grep -rIl '$1 == prev' "$REPO_DIR"/bin "$REPO_DIR"/platform 2>/dev/null \
+           | grep -vE '(selftest|mutate)\.sh$'); do
+  grep -qE '\$2 (==|!=) prev' "$f" || baddup="$baddup $f"
+done
+check "поиск дубликатов отличает источник от самого себя" "$baddup" ""
 
 echo "== порядок и зоны лимитов"
 
@@ -929,6 +1013,60 @@ printf 'Enabled_Stacks="papa lima november sierra"\n' > "$WORK/.env-stacks"
 check "путь сертификата профильного стека виден" \
   "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+
+echo "== переносимость: время, суммы, сторож"
+
+# Метка S3 разбирается в ОДНО И ТО ЖЕ независимо от часового пояса машины, на
+# которой запущена проверка. Иначе check-backups.sh считает возраст бэкапа со
+# сдвигом на величину пояса: к востоку от Гринвича свежий дамп выглядит
+# устаревшим (ложная тревога), к западу — устаревший проходит проверку.
+# Второе тише и потому хуже.
+#
+# Гоняем в трёх поясах намеренно: в UTC неверный разбор даёт верный ответ, то
+# есть тест, написанный только под UTC, был бы вечнозелёным.
+for tz in UTC Asia/Tokyo America/New_York; do
+  for form in '2026-01-02T03:04:05+00:00' '2026-01-02T03:04:05Z' \
+              '2026-01-02T03:04:05.123456+00:00' '2026-01-02T06:04:05+03:00'; do
+    check "iso_to_epoch $form в TZ=$tz" "$(TZ="$tz" iso_to_epoch "$form")" "1767323045"
+  done
+done
+check "iso_to_epoch без смещения считает UTC" "$(TZ=Asia/Tokyo iso_to_epoch '2026-01-02T03:04:05')" "1767323045"
+check "iso_to_epoch отвергает мусор" "$(iso_to_epoch 'не дата' >/dev/null 2>&1 && echo принял || echo отверг)" "отверг"
+
+# Гарда версии bash проверяется НА ДЕЛЕ, а не наличием слова BASH_VERSINFO в
+# файле: проверка «слово на месте» проходит и на обезвреженной гарде, и именно
+# так она первую же мутацию и пропустила. Нужен настоящий старый bash — в macOS
+# это штатный /bin/bash 3.2. Там, где его нет (Linux), проверять нечем и блок
+# пропускается: лучше честный пропуск, чем тест, который ничего не значит.
+old_bash=""
+for b in /bin/bash /usr/bin/bash; do
+  [ -x "$b" ] || continue
+  v=$("$b" -c 'echo ${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}' 2>/dev/null)
+  [ -n "$v" ] && [ "$v" -lt 42 ] 2>/dev/null && { old_bash="$b"; break; }
+done
+if [ -n "$old_bash" ]; then
+  check "библиотека отказывается работать на bash < 4.2" \
+    "$("$old_bash" -c ". '$REPO_DIR/platform/lib/lib-env.sh'; echo загрузилась" 2>/dev/null)" ""
+  check "и называет причину" \
+    "$("$old_bash" -c ". '$REPO_DIR/platform/lib/lib-env.sh'" 2>&1 | grep -c 'bash >= 4.2')" "1"
+else
+  printf '  [--]   bash < 4.2 на этой машине нет — гарду версии проверить нечем\n'
+fi
+
+# Сумма — известного содержимого, а не «что-нибудь непустое»: пустая строка
+# ровно так и появилась бы при отсутствии обеих команд, а сравнение с непустым
+# ожиданием её ловит.
+printf 'stackyard' > "$WORK/сумма.txt"
+check "sha256_file считает сумму" "$(sha256_file "$WORK/сумма.txt")" \
+  "660b926bc79186f63660911f660e1a187daf9fafd1700148d43fb7e02f909bb0"
+
+# Сторож обязан отдавать 124 (как GNU timeout), сохранять уже напечатанное и
+# пропускать чужой код возврата. Проверяем ФОЛБЭК — путь, который включается
+# там, где timeout'а нет: штатный путь и без теста работает у всех.
+guard_out=$(PATH=/usr/bin:/bin run_with_timeout 1 bash -c 'echo раньше; sleep 5; echo позже' 2>/dev/null); guard_rc=$?
+check "сторож обрывает зависшее" "$guard_rc" "124"
+check "сторож сохраняет напечатанное до обрыва" "$guard_out" "раньше"
+PATH=/usr/bin:/bin run_with_timeout 5 bash -c 'exit 7' >/dev/null 2>&1; check "сторож пропускает чужой код возврата" "$?" "7"
 
 echo "== распознавание дампа"
 
