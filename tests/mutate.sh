@@ -77,6 +77,10 @@ MUTATIONS=(
   'htpasswd: -b вместе с -i (usage вместо пароля)@@platform/bin/htpasswd.sh@@FLAGS="-iB"@@FLAGS="-ibB"'
   'htpasswd: права ставит хост, а не контейнер@@platform/bin/htpasswd.sh@@  sh -c "$IN_CONTAINER"@@  sh -c "$IN_CONTAINER"\n\nchmod 640 "$FILE"'
   'nginx: образ зашит мимо nginx_image@@platform/bin/htpasswd.sh@@"$(nginx_image)"@@nginx:1.30-alpine'
+
+  # --- устаревший bind-mount после ./bootstrap.
+  'mount: пустой хост тоже считается уликой@@platform/lib/lib-stacks.sh@@  [ "${1:-0}" -gt 0 ] \&\& [ "${2:-0}" -eq 0 ]@@  [ "${2:-0}" -eq 0 ]'
+  'mount: улика не распознаётся вовсе@@platform/lib/lib-stacks.sh@@  [ "${1:-0}" -gt 0 ] \&\& [ "${2:-0}" -eq 0 ]@@  false'
 )
 
 pass=0; miss=0

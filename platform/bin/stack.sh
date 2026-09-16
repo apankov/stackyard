@@ -915,6 +915,30 @@ verb_check() {
         bad "монтирования разошлись со спекой ($mismatch) — ./dc up -d nginx"
         printf '%s' "$detail"
       fi
+
+      # Путь монтирования и то, что по нему видно, — разные вещи, и сравнения
+      # путей выше недостаточно. ./bootstrap заменяет .stackyard целиком
+      # (rm -rf), а platform/ — симлинк туда: живой контейнер остаётся с
+      # bind-mount'ом на УДАЛЁННЫЙ каталог. В docker inspect путь прежний, а
+      # файлов внутри ноль.
+      #
+      # Снаружи это выглядит как ошибка во vhost'е — «open() snippets/
+      # letsencrypt.conf failed (2: No such file or directory)», — и чинить
+      # идут vhost, который ни при чём. Поэтому спрашиваем у контейнера, а не
+      # у docker inspect.
+      local src dst host_n cont_n empty=0
+      while IFS= read -r pair; do
+        [ -n "$pair" ] || continue
+        src="${pair%% -> *}"; dst="${pair##* -> }"
+        [ -d "$src" ] || continue
+        host_n=$(ls -A "$src" 2>/dev/null | wc -l | tr -d ' ')
+        cont_n=$(docker exec nginx sh -c "ls -A '$dst' 2>/dev/null | wc -l" 2>/dev/null | tr -d ' \r')
+        if mount_looks_stale "$host_n" "$cont_n"; then
+          bad "контейнер не видит $dst — каталог на хосте подменили после запуска: ./dc up -d nginx"
+          empty=$((empty + 1))
+        fi
+      done <<< "$spec_mounts"
+      [ "$empty" -eq 0 ] && ok "контейнер видит содержимое смонтированных каталогов"
     fi
 
     served="$(docker exec nginx nginx -T 2>/dev/null | nginx_served_names)"
