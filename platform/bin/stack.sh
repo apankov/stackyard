@@ -221,9 +221,18 @@ databases_apply() {
 # битом конфиге nginx просто не применяет его и продолжает жить со старым, а
 # вот следующий рестарт контейнера по любой причине уже не поднимется.
 nginx_apply() {
-  local file backup content static_file static_content
+  local file backup content static_file static_content junk
   file="$(stacks_include_file)"
   content="$(stacks_include_content)"
+
+  # До всего остального: посторонний каталог рядом с include'ом читается nginx
+  # по маске *.conf и роняет его в краш-луп. Писать конфиги поверх этого
+  # бессмысленно — nginx -t не пройдёт, и причина утонет в откате.
+  junk="$(check_vhost_dir "$(dirname "$file")")"
+  if [ -n "$junk" ]; then
+    printf '%s' "$junk" | while IFS= read -r l; do [ -n "$l" ] && bad "$l"; done
+    die "в каталоге vhost'ов лежит не файл — уберите и повторите"
+  fi
 
   # Статика — первой. Она попадает в СПЕКУ nginx, то есть её изменение
   # заставляет следующий `up -d` пересоздать контейнер; include'ы читает уже
@@ -720,7 +729,7 @@ verb_sync() {
 }
 
 verb_check() {
-  local s line fn up pair missing include_file awk_svc cfg_svc decl_problems_before
+  local s line fn up pair missing include_file junk_line awk_svc cfg_svc decl_problems_before
   local db_file perm init_state init_svc img_problem zone_problem
 
   step "Манифест"
@@ -845,6 +854,9 @@ verb_check() {
 
   step "vhost'ы nginx"
   include_file="$(stacks_include_file)"
+  while IFS= read -r junk_line; do
+    [ -n "$junk_line" ] && bad "$junk_line"
+  done < <(check_vhost_dir "$(dirname "$include_file")")
   if [ ! -f "$include_file" ]; then
     bad "нет $(basename "$include_file") — nginx после следующей перезагрузки останется без ВСЕХ vhost'ов; ./stack sync"
   elif [ "$(cat "$include_file")" != "$(stacks_include_content)" ]; then

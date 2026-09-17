@@ -1101,6 +1101,37 @@ check "путь сертификата профильного стека вид�
   "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
 
+echo "== посторонний каталог среди vhost'ов"
+
+# Docker, не найдя файла для bind-mount, заводит на его месте КАТАЛОГ от root.
+# Он попадает под маску *.conf, по которой nginx читает включённые vhost'ы, и
+# роняет его: «pread() ... failed (21: Is a directory)». С restart: always это
+# краш-луп, уносящий все сайты, а сообщение говорит про pread — то есть отказ
+# выглядит как поломка nginx, а не как мусор в каталоге.
+#
+# Пережить обновление платформы он может: state/ машинный, bootstrap его не
+# трогает. Так и случилось — каталог от прежней спеки дождался версии, где
+# маска стала его читать.
+vh="$WORK/state/nginx-vhosts"
+mkdir -p "$vh"
+: > "$vh/10-enabled.conf"
+check "нормальный каталог vhost'ов претензий не вызывает" "$(check_vhost_dir "$vh")" ""
+
+mkdir -p "$vh/00-enabled.conf"
+check "посторонний каталог найден" \
+  "$(check_vhost_dir "$vh" | wc -l | tr -d ' ')" "1"
+check "в сообщении есть выполнимая команда с sudo" \
+  "$(check_vhost_dir "$vh" | grep -c 'sudo rm -rf')" "1"
+rmdir "$vh/00-enabled.conf"
+
+check "несуществующий каталог — не находка" "$(check_vhost_dir "$WORK/нет-такого")" ""
+
+# Функция проверена выше, но она бесполезна, если её не зовут. Мест ровно два:
+# перед записью в каталог (иначе nginx -t падает, и причина тонет в откате) и
+# в --check (иначе про мусор узнают от краш-лупа).
+check "проверка каталога вызывается и при записи, и при --check" \
+  "$(grep -c 'check_vhost_dir "\$(dirname' "$REPO_DIR/platform/bin/stack.sh")" "2"
+
 echo "== вложенные монтирования"
 
 # Точку монтирования для вложенного пути docker создаёт ВНУТРИ уже

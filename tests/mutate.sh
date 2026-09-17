@@ -84,6 +84,8 @@ MUTATIONS=(
 
   # --- переименование генерируемого файла, не дошедшее до потребителей (A15).
   'compose: файл монтируется внутрь :ro-каталога@@platform/compose/nginx.yaml@@      - ${Platform_Deploy_Dir:?}/state/nginx-vhosts:/etc/nginx/enabled:ro@@      - ${Platform_Deploy_Dir:?}/state/nginx-vhosts/10-enabled.conf:/etc/nginx/conf.d/10-enabled.conf:ro'
+  'vhost: посторонний каталог не замечается@@platform/lib/lib-stacks.sh@@    [ -f "$e" ] \&\& continue@@    continue'
+  'vhost: проверка каталога не вызывается перед записью@@platform/bin/stack.sh@@  junk="$(check_vhost_dir "$(dirname "$file")")"@@  junk=""'
   'compose: каталог состояния не монтируется вовсе@@platform/compose/nginx.yaml@@      - ${Platform_Deploy_Dir:?}/state/nginx-vhosts:/etc/nginx/enabled:ro@@      - ${Platform_Deploy_Dir:?}/nginx:/etc/nginx/enabled:ro'
   'nginx: платформа не читает каталог состояния@@platform/nginx-vhosts/05-enabled.conf@@include /etc/nginx/enabled/*.conf;@@# include убран'
   'генератор: имя сверяется образцом@@platform/bin/docker-compose.sh@@  if [ "$gen" = "$(stacks_static_file)" ]; then@@  case "$gen" in *00-enabled.conf) :;; esac\n  if [ "$gen" = "$(stacks_static_file)" ]; then'
