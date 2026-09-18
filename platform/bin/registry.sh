@@ -122,7 +122,7 @@ registry_login() {
 verb_login() {
   local soft=0 host any=0 hosts
   if [ "${1:-}" = "--soft" ]; then soft=1; fi
-  # Разбиение на слова здесь намеренное: stacks_enabled отдаёт список стеков.
+  # Word splitting is deliberate here: stacks_enabled returns a list of stacks.
   # shellcheck disable=SC2046
   hosts="$(stacks_registries $(stacks_enabled 2>/dev/null) 2>/dev/null)"
   while IFS= read -r host; do
@@ -131,7 +131,7 @@ verb_login() {
     registry_login "$host" "$soft" || true
   done <<< "$hosts"
   if [ "$any" -eq 0 ] && [ "$soft" -eq 0 ]; then
-    ok "ни один включённый стек не тянет образы из внешнего реестра"
+    ok "no enabled stack pulls images from an external registry"
   fi
   if [ "$soft" -eq 1 ]; then return 0; fi
   return $(( problems > 0 ))
