@@ -1,6 +1,6 @@
 [Unit]
 Description=Daily database backup
-Documentation=file:@DEPLOY_DIR@/docs/architecture/backup-design.md
+Documentation=file:@DEPLOY_DIR@/platform/bin/backup.sh
 
 [Timer]
 # 03:40 and NOT 05:23: that is the getssl-renew window. Two heavy processes at

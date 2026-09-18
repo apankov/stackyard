@@ -1,6 +1,6 @@
 [Unit]
 Description=Back up devbox databases to S3
-Documentation=file:@DEPLOY_DIR@/docs/architecture/backup-design.md
+Documentation=file:@DEPLOY_DIR@/platform/bin/backup.sh
 # Dumps are taken through `docker exec` and uploaded to S3 -- both docker and
 # the network are needed.
 Wants=network-online.target
