@@ -1,24 +1,24 @@
-# Навигатор по документации
+# Documentation navigator
 
-Порядок чтения для нового человека: [README.md](../README.md) — что это,
-как развернуть машину и как обновить платформу. Дальше по нужде.
+Reading order for someone new: [README.md](../README.md) — what this is, how to
+deploy a machine and how to update the platform. The rest as needed.
 
-## Корень
+## Root
 
-- [README.md](../README.md) — три слоя, стек как каталог, копировать или
-  подключать, изоляция машин, доставка платформы, работа с машиной.
+- [README.md](../README.md) — the three layers, a stack as a directory, copy or
+  link, machine isolation, platform delivery, working with a machine.
 
-## Архитектура
+## Architecture
 
 - [decisions/0001-delivery-mechanism.md](architecture/decisions/0001-delivery-mechanism.md)
-  — почему платформа скачивается по версии и `lock`, а не вендорится, не
-  submodule и не subtree. Отвергнутые варианты и цена выбранного.
-- [k8s-assessment.md](architecture/k8s-assessment.md) — стоит ли переводить
-  машины на Kubernetes (нет, и почему), и шесть идей из его устройства,
-  которые стоит взять. Оценка от 2026-09-15.
+  — why the platform is downloaded by version and `lock` rather than vendored,
+  submoduled or subtreed. The rejected options and the price of the chosen one.
+- [k8s-assessment.md](architecture/k8s-assessment.md) — whether the machines
+  should move to Kubernetes (no, and why), and six ideas from its design worth
+  taking. Assessed 2026-09-15.
 
-## Планы
+## Plans
 
-- [devel/plans/extraction-backlog.md](devel/plans/extraction-backlog.md) — что
-  осталось после извлечения платформы: непортированные бэкап и оповещения,
-  предположения, мешающие раздаче, долги по секретам.
+- [devel/plans/extraction-backlog.md](devel/plans/extraction-backlog.md) — what
+  is left after extracting the platform: the unported backup and notifications,
+  assumptions that get in the way of distributing it, secret-handling debts.

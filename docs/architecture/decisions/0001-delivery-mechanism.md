@@ -1,113 +1,120 @@
-# 0001. Как платформа попадает на машину
+# 0001. How the platform reaches a machine
 
-Статус: принято, реализовано (см. «Как машина получает платформу» в README).
-Дата: 2026-09-15.
+Status: accepted, implemented (see "How a machine gets the platform" in the
+README).
+Date: 2026-09-15.
 
-Эта запись фиксирует **почему** выбран именно такой механизм. Сам механизм
-описан в README; здесь — отвергнутые альтернативы и причины, чтобы через
-полгода не пришлось выводить их заново.
+This record fixes **why** this particular mechanism was chosen. The mechanism
+itself is described in the README; here are the rejected alternatives and the
+reasons, so that in six months nobody has to derive them again.
 
-## Контекст
+## Context
 
-Один общий движок обслуживает несколько машин, каждая из которых принадлежит
-своему клиенту. Требования, из которых всё следует:
+One shared engine serves several machines, each belonging to a different
+client. The requirements everything follows from:
 
-1. **Изоляция.** На машине клиента A не должно быть инвентаря клиента B. Это
-   исключает монорепозиторий со всеми машинами.
-2. **Самодостаточность машины.** Репозиторий машины уезжает клиенту; чем
-   меньше внешних зависимостей для его развёртывания, тем лучше.
-3. **Расхождение не должно быть тихим.** Исходная задача формулировалась
-   именно так: «скоро всё начнёт расходиться». К моменту оценки это уже
-   произошло — `ledger-devbox` разошёлся с эталоном на сотни строк, ещё не
-   начав работать.
-4. **Видимость парка.** На вопрос «доехал ли фикс до всех машин» должен быть
-   быстрый ответ.
+1. **Isolation.** Client A's machine must not hold client B's inventory. That
+   rules out a monorepo with all the machines in it.
+2. **A self-contained machine.** The machine's repository goes to the client;
+   the fewer external dependencies its deployment has, the better.
+3. **Divergence must not be silent.** The original problem was stated exactly
+   that way: "everything is about to start drifting apart". By the time of the
+   assessment it already had — `ledger-devbox` had drifted hundreds of lines
+   from the reference before it even started working.
+4. **Fleet visibility.** "Did the fix reach every machine" must have a quick
+   answer.
 
-## Решение
+## Decision
 
-Платформа — **версионированный артефакт, который машина скачивает**, а в
-репозитории машины лежит только объявление версии и `lock` с хешем. Скачивание
-выполняет маленький коммитнутый `bootstrap`; распакованная платформа в git
-машины не лежит.
+The platform is a **versioned artifact the machine downloads**, and the
+machine's repository holds only a version declaration and a `lock` with a hash.
+The download is performed by a small committed `bootstrap`; the unpacked
+platform is not in the machine's git.
 
-Так устроены `terraform init`, `helm dependency update`,
-`ansible-galaxy install -r`, `npm ci`, `dbt deps`. Общее у всех: **в git лежит
-lock, а не код зависимости**.
+That is how `terraform init`, `helm dependency update`,
+`ansible-galaxy install -r`, `npm ci` and `dbt deps` work. What they have in
+common: **git holds the lock, not the dependency's code**.
 
-## Отвергнутые альтернативы
+## Rejected alternatives
 
-### Вендоринг (копия платформы, закоммиченная в репозиторий машины)
+### Vendoring (a copy of the platform committed into the machine's repository)
 
-Был реализован первым и отвергнут после того, как стало видно, что он **не
-решает исходную задачу**. Контрольные суммы делают правку на месте заметной, а
-`VERSION` — видимой, но копий по-прежнему N, соблазн поправить на месте на
-месте, а обновление — N операций с диффом на десятки файлов. Видимость парка
-требует сравнения содержимого, а не чтения одной строки.
+Implemented first and rejected once it became clear it **does not solve the
+original problem**. Checksums make an in-place edit visible and `VERSION` makes
+the version visible, but there are still N copies, the temptation to patch in
+place is still there, and an update is N operations with a diff across dozens
+of files. Fleet visibility requires comparing contents rather than reading one
+line.
 
-Оставлен как **автономный режим** для машины без сети или клиента, требующего
-полностью замкнутый репозиторий. `check-vendor.sh` осмыслен только в нём.
+Kept as an **offline mode** for a machine without network or a client who
+requires a fully self-contained repository. `check-vendor.sh` only makes sense
+there.
 
 ### git submodule
 
-Требует доступа к платформенному репозиторию при клонировании и отдельного
-шага `--recursive`. Машины уезжают клиентам; давать клиенту доступ к
-платформе ради того, чтобы у него собирался конфиг, — плохая сделка. Плюс
-классическая ловушка забытого коммита указателя.
+Requires access to the platform repository at clone time and a separate
+`--recursive` step. Machines go to clients; giving a client access to the
+platform just so their config assembles is a bad trade. Plus the classic trap
+of a forgotten pointer commit.
 
 ### git subtree
 
-Копия остаётся, но git знает её происхождение, и обновление становится
-merge'ем: расхождение всплывает конфликтом там, где оно есть, а не постфактум
-чек-суммой. Честная альтернатива, и если публиковать релизы окажется неудобно
-— возвращаться стоит именно к ней.
+The copy remains, but git knows where it came from, and an update becomes a
+merge: divergence surfaces as a conflict where it actually is, not after the
+fact via a checksum. An honest alternative, and if publishing releases turns
+out to be inconvenient, this is the thing to come back to.
 
-Проигрывает по видимости парка: «какая версия у клиента» по-прежнему не
-читается одной строкой.
+It loses on fleet visibility: "which version is the client on" still does not
+read as one line.
 
-### copier / cruft (шаблон с прослеживанием апстрима)
+### copier / cruft (a template that tracks its upstream)
 
-Инструменты ровно для «сгенерировал проект из шаблона, хочу подтянуть
-обновления шаблона»; `update` делает трёхстороннее слияние. Для **платформы**
-не подходит: машине не полагается править платформу, а трёхстороннее слияние
-именно это и поощряет.
+Tools for exactly "I generated a project from a template and want to pull the
+template's updates"; `update` performs a three-way merge. Not a fit for the
+**platform**: a machine is not supposed to edit the platform, and a three-way
+merge encourages precisely that.
 
-Для **генерации репозитория новой машины** — подходит, и если `new-machine.sh`
-начнёт обрастать логикой, `copier` стоит рассмотреть вместо него.
+For **generating a new machine's repository** it is a fit, and if
+`new-machine.sh` starts growing logic, `copier` is worth considering in its
+place.
 
-## Последствия
+## Consequences
 
-**Цена, и она ровно одна:** пропадает «один clone и всё работает» — появляется
-шаг `bootstrap`. Ровно та цена, которую платят `npm install`, `terraform init`
-и `ansible-galaxy install`; шаг понятен любому, а коммитнутый lock с хешем
-закрывает вопрос доверия к скачанному.
+**The price, and there is exactly one:** "one clone and it works" is gone —
+there is now a `bootstrap` step. Exactly the price `npm install`,
+`terraform init` and `ansible-galaxy install` charge; the step is obvious to
+anyone, and a committed lock with a hash settles the question of trusting what
+was downloaded.
 
-**Что выиграли:**
+**What was gained:**
 
-- обновление машины — правка одной строки версии, а не диффа на десятки файлов;
-- откат — возврат той же строки;
-- «кто на какой версии» читается одной строкой на машину (`bin/fleet.sh`);
-- правка платформы на месте не переживает `bootstrap`, то есть чинить надо в
-  источнике — что и требовалось.
+- updating a machine is editing one version line, not a diff across dozens of
+  files;
+- rolling back is restoring that same line;
+- "who is on which version" reads as one line per machine (`bin/fleet.sh`);
+- an in-place platform edit does not survive `bootstrap`, so fixes have to
+  happen at the source — which was the point.
 
-**Что осталось незакрытым:** версионируется код платформы, но не **контракт
-деклараций**. `stack.conf` не несёт `apiVersion`, поэтому несовместимое
-изменение формата платформа прочитает молча и неверно. Подробнее — идея 3 в
+**What is left open:** the platform's code is versioned, but the **declaration
+contract** is not. `stack.conf` carries no `apiVersion`, so an incompatible
+format change will be read silently and wrongly. More in idea 3 of
 `../k8s-assessment.md`.
 
-## Отраслевые аналоги
+## Industry analogues
 
-Наша сборка — «фреймворк плюс конфигурация на развёртывание». Ближайшие
-родственники, у которых стоит подсматривать:
+Our build is "a framework plus per-deployment configuration". The closest
+relatives, worth watching:
 
-- **Ansible** — та же предметная область (провижининг шеллом и конфигами):
-  движок пакетом, роли в `requirements.yml` с версиями, плейбуки свои.
-- **Helm** — та же структура: чарт плюс `values.yaml`. Наш `profiles/` — это
-  чарты, наш `.env` — values.
-- **NixOS с несколькими хостами во флейке** — буквально наша задача: общий
-  набор модулей, конфиг на машину, `flake.lock` фиксирует источник по хешу.
-- **Terraform** — модули из реестра с ограничением версии, lock в git, код
-  провайдеров — нет.
-- **Create React App / Next.js** — паттерн «eject»: пользуешься зависимостью,
-  а разойтись можно единожды и явно, забрав копию себе. У нас это уже есть в
-  виде двух корней стеков: скопировал из `profile/stacks/` в `stacks/` —
-  перекрыл и владеешь.
+- **Ansible** — the same domain (provisioning with shell and configs): the
+  engine as a package, roles in `requirements.yml` with versions, your own
+  playbooks.
+- **Helm** — the same structure: a chart plus `values.yaml`. Our `profiles/`
+  are the charts, our `.env` is values.
+- **NixOS with several hosts in a flake** — literally our problem: a shared set
+  of modules, a per-machine config, `flake.lock` pinning the source by hash.
+- **Terraform** — modules from the registry with a version constraint, the lock
+  in git, the providers' code not.
+- **Create React App / Next.js** — the "eject" pattern: you consume a
+  dependency, and you may diverge once, explicitly, by taking a copy. We
+  already have that as the two stack roots: copy from `profile/stacks/` into
+  `stacks/` and you shadow it and own it.

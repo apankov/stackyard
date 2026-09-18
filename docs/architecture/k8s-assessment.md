@@ -1,136 +1,142 @@
-# Стоит ли переводить машины на Kubernetes
+# Should the machines move to Kubernetes
 
-Оценка от 2026-09-15. Вопрос был поставлен так: получилось бы поднять
-`devbox6`, `devbox-asstnt` и `ledger-devbox` через k8s на небольших машинках,
-что бы мы выиграли и потеряли, и что можно взять из того, как k8s спроектирован.
+Assessed 2026-09-15. The question was put like this: could `devbox6`,
+`devbox-asstnt` and `ledger-devbox` be run through k8s on small machines, what
+would we gain and lose, and what can be taken from the way k8s is designed.
 
-Короткий ответ: **переезжать не стоит**, но несколько идей из его устройства
-стоит взять, и они перечислены в конце — это главная ценность этой записки.
+Short answer: **do not move**, but several ideas from its design are worth
+taking, and they are listed at the end — that is the main value of this note.
 
-## Факты, на которых всё держится
+## The facts everything rests on
 
-Все три машины одного класса: Amazon Linux, **~1 ГБ RAM, 25 ГБ диска**.
-У `devbox-asstnt` задокументировано ~916 МБ, из них **свободно ~200 МБ** при
-всех поднятых стеках.
+All three machines are of one class: Amazon Linux, **~1 GB RAM, 25 GB disk**.
+`devbox-asstnt` is documented at ~916 MB, of which **~200 MB is free** with
+every stack up.
 
-`ledger-devbox` на момент оценки — копия движка `devbox-asstnt`, разошедшаяся
-на 430 строк в `lib-stacks.sh`, 138 в `lib-env.sh` и 185 в `stack.sh`. Его
-`CLAUDE.md` при этом описывает стеки `sanya-next` и `bod-assistant-2`, которых
-на той машине нет: копия утащила с собой чужую документацию. Это не довод за
-или против k8s, но это доказательство, что расхождение копий — не гипотеза.
+`ledger-devbox` at the time of the assessment was a copy of the `devbox-asstnt`
+engine that had drifted by 430 lines in `lib-stacks.sh`, 138 in `lib-env.sh`
+and 185 in `stack.sh`. Its `CLAUDE.md` meanwhile described the stacks
+`sanya-next` and `bod-assistant-2`, which do not exist on that machine: the
+copy dragged someone else's documentation along with it. That is not an
+argument for or against k8s, but it is proof that copies drifting is not a
+hypothesis.
 
-## Влезет ли
+## Would it fit
 
-Нет. k3s — самый лёгкий из вариантов — в реальности держит под контрольным
-слоем 350–600 МБ (apiserver, controller-manager, scheduler, kubelet,
-containerd, coredns). Раздетый (`--disable traefik,servicelb,metrics-server,
-local-storage`, sqlite вместо etcd) — 300–400 МБ. Свободно ~200 МБ.
-Получится «кластер есть, приложений нет».
+No. k3s — the lightest option — in practice holds 350-600 MB under the control
+plane (apiserver, controller-manager, scheduler, kubelet, containerd, coredns).
+Stripped down (`--disable traefik,servicelb,metrics-server,local-storage`,
+sqlite instead of etcd) it is 300-400 MB. Free memory is ~200 MB. The result
+would be "we have a cluster and no applications".
 
-Порог входа — 2 ГБ минимум, реалистично 4 ГБ на машину, и это умножается на
-число клиентов.
+The entry threshold is 2 GB minimum, realistically 4 GB per machine, and that
+multiplies by the number of clients.
 
-## Что бы выиграли
+## What we would gain
 
-- **Исчез бы главный класс отказа.** Пересоздание nginx при опущенном
-  upstream'е даёт краш-луп и уносит все сайты машины. В k8s это закрыто
-  readiness-пробами и тем, что Service не шлёт трафик в неготовый под. Мы
-  лечим это порядком операций в `stack.sh`, и остаточная гонка остаётся.
-- **Лимиты памяти стали бы принудительными.** Сейчас смотреть остаток памяти
-  перед запуском контейнера — ритуал, который надо вспомнить.
-- **cert-manager вместо getssl + таймер + reload.** Продление, хранение и
-  перезагрузка — чужая забота, проверенная на несопоставимо большем числе
-  установок.
-- **Задача распространения решена Helm'ом**: чарт (версионированный,
-  опубликованный) + `values.yaml` на установку + `helm list`, отвечающий
-  «какая версия где». Мы пришли к той же тройке своими силами.
+- **The main failure class would disappear.** Recreating nginx while an
+  upstream is down gives a crash loop and takes down every site on the machine.
+  In k8s that is closed by readiness probes and by a Service not sending
+  traffic to a pod that is not ready. We treat it with the order of operations
+  in `stack.sh`, and a residual race remains.
+- **Memory limits would be enforced.** Today, checking free memory before
+  starting a container is a ritual you have to remember.
+- **cert-manager instead of getssl + timer + reload.** Renewal, storage and
+  reloading become someone else's concern, tested on an incomparably larger
+  number of installations.
+- **The distribution problem is solved by Helm**: a chart (versioned,
+  published) + a per-install `values.yaml` + `helm list` answering "which
+  version is where". We arrived at the same three things on our own.
 
-## Что бы потеряли
+## What we would lose
 
-- **Память.** Решающее.
-- **Платили бы за планировщик, которым не пользуемся.** Ценность k8s —
-  раскладывать нагрузку по узлам и переезжать при падении узла. На одном узле
-  смерть узла означает смерть сайта в обоих случаях.
-- **Легаси не стало бы лучше.** PHP 5.6, MySQL 5.5 и docroot'ы вне
-  репозитория превратились бы в `hostPath`-тома — то, от чего документация
-  k8s прямо предостерегает, — плюс YAML сверху.
-- **Хостовая часть не переезжает вовсе**: шим `/usr/local/bin/php`, тулкит
-  `_db`, ручные дампы.
-- **Появилась бы постоянная обязанность** обновлять кластер и следить за
-  депрекациями API. Сейчас её нет.
-- **Изоляция клиентов не улучшилась бы.** Namespace не является границей
-  безопасности между клиентами; потребовался бы кластер на клиента, то есть
-  контрольный слой на каждого — хуже, чем сейчас.
-- **Эргономика рассчитана на команду платформы**, а не на одного человека.
+- **Memory.** Decisive.
+- **We would pay for a scheduler we do not use.** The value of k8s is spreading
+  load across nodes and moving work when a node dies. On a single node, the
+  node dying means the site is dead either way.
+- **The legacy would not get better.** PHP 5.6, MySQL 5.5 and docroots outside
+  the repository would turn into `hostPath` volumes — the very thing the k8s
+  documentation warns against — plus YAML on top.
+- **The host-side part does not move at all**: the `/usr/local/bin/php` shim,
+  the `_db` toolkit, manual dumps.
+- **We would take on a standing duty** to upgrade the cluster and track API
+  deprecations. Today there is none.
+- **Client isolation would not improve.** A namespace is not a security
+  boundary between clients; we would need a cluster per client, i.e. a control
+  plane each — worse than now.
+- **The ergonomics assume a platform team**, not one person.
 
-## Что уже взято из k8s, не называя это так
+## What we have already taken from k8s without calling it that
 
-Три решения в `stackyard` — прямые аналоги, и это подтверждает, что
-направление выбрано верно:
+Three decisions in `stackyard` are direct analogues, which confirms the
+direction is right:
 
-| У нас | В k8s |
+| Ours | In k8s |
 |---|---|
-| `Provides_DB` у стека-поставщика | capability-декларация, идея CRD: новый тип ресурса объявляется данными, контроллер прилагается |
-| «Наличие каталога есть объявление» | static pods kubelet'а: ресурсы читаются из каталога, без реестра |
-| `scripts/check-decl.sh` у поставщика | validating admission webhook: проверяем в момент объявления и тем, кто владеет семантикой |
+| `Provides_DB` on a provider stack | a capability declaration; the CRD idea: a new resource type is declared as data, with a controller attached |
+| "the presence of a directory is a declaration" | kubelet's static pods: resources read from a directory, with no registry |
+| a provider's `scripts/check-decl.sh` | a validating admission webhook: validate at declaration time, by whoever owns the semantics |
 
-## Что стоит взять, по убыванию ценности
+## What is worth taking, most valuable first
 
-### 1. Requests как декларация плюс отказ при нехватке
+### 1. Requests as a declaration, plus refusal when short
 
-`Resources_Memory=256M` в `stack.conf`, и `stack.sh enable` отказывается
-включать стек, если сумма по включённым превышает RAM машины минус запас.
+`Resources_Memory=256M` in `stack.conf`, and `stack.sh enable` refuses to
+enable a stack if the sum over the enabled ones exceeds the machine's RAM minus
+a reserve.
 
-На машинах по 1 ГБ это переводит «не забыть посмотреть свободную память» из
-ритуала в правило. Самая дешёвая и самая полезная идея списка.
+On 1 GB machines that turns "do not forget to check free memory" from a ritual
+into a rule. The cheapest and most useful idea on the list.
 
-### 2. `spec` против `status`, явно и везде
+### 2. `spec` versus `status`, explicitly and everywhere
 
-У каждого объекта k8s есть желаемое и наблюдаемое, и они никогда не
-смешиваются. Наши лучшие проверки уже устроены так — блок «Живой nginx против
-спеки», `health.sh`, спрашивающий работающий сервер, а не файл на диске.
+Every k8s object has a desired state and an observed one, and they are never
+mixed. Our best checks already work that way — the "live nginx versus the spec"
+block, and `health.sh` asking the running server rather than a file on disk.
 
-Стоит сделать это правилом: **у каждой декларации обязана быть парная проверка
-наблюдением**, а `--check` — это их разность. Несколько наших ошибок такое
-правило поймало бы.
+This is worth making a rule: **every declaration must have a paired check by
+observation**, and `--check` is their difference. Several of our own bugs would
+have been caught by that rule.
 
-### 3. Версия контракта, а не только кода
+### 3. A version for the contract, not only for the code
 
-k8s версионирует API объектов и гарантирует, что старые манифесты продолжат
-читаться. Нам не хватает именно этого: `stack.conf` должен нести `apiVersion`,
-а платформа — отказываться или конвертировать, а не молча читать неверно.
+k8s versions the API of its objects and guarantees that old manifests keep
+being readable. That is exactly what we lack: `stack.conf` should carry an
+`apiVersion`, and the platform should refuse or convert rather than silently
+read it wrong.
 
-`VERSION` платформы отвечает «что стоит»; `apiVersion` декларации отвечает
-«совместимо ли». Второго сейчас нет, и это недостающий кусок в обновлении
-парка машин.
+The platform's `VERSION` answers "what is installed"; a declaration's
+`apiVersion` answers "is it compatible". The second does not exist yet, and it
+is the missing piece in fleet updates.
 
-### 4. Цикл сверки вместо разового `sync`
+### 4. A reconciliation loop instead of a one-shot `sync`
 
-`stack.sh sync` — это `kubectl apply`, запущенный руками. В k8s контроллер
-применяет непрерывно, поэтому дрейф самозалечивается. Дешёвый вариант: таймер,
-гоняющий сверку и сообщающий при расхождении. Бьёт прямо в «кто-то поправил
-на месте».
+`stack.sh sync` is `kubectl apply` run by hand. In k8s a controller applies
+continuously, so drift heals itself. The cheap version: a timer that runs the
+comparison and reports a divergence. It hits "somebody patched it in place"
+directly.
 
-### 5. Readiness отдельно от liveness
+### 5. Readiness separate from liveness
 
-`health.sh` у нас — скорее liveness. k8s добавляет: не пускать трафик, пока не
-готов. Наш аналог — `stack.sh enable` должен **дождаться** готовности
-upstream'а перед записью vhost'а, а не только соблюсти порядок операций.
+Our `health.sh` is closer to liveness. k8s adds: do not send traffic until it
+is ready. Our analogue is that `stack.sh enable` should **wait** for the
+upstream to be ready before writing the vhost, not merely keep the order of
+operations.
 
-### 6. Три сущности Helm
+### 6. Helm's three entities
 
-Чарт (версионированный, опубликованный), values (на установку) и **release** —
-запись о том, что реально развёрнуто и где. Первые две у нас есть; третья
-появилась в виде `bin/fleet.sh`, и стоит смотреть на неё именно как на
-release-реестр.
+The chart (versioned, published), the values (per install) and the **release** —
+the record of what is actually deployed and where. We have the first two; the
+third appeared as `bin/fleet.sh`, and it is worth looking at exactly as a
+release registry.
 
-## Что с этим делать
+## What to do about it
 
-Идеи 1–3 стоят в очереди первыми: первая чинит реальную боль этих машин,
-третья закрывает дыру в обновлении парка. Идеи 4–6 дешевле обсуждать, когда
-будет решено, сколько машин мы обслуживаем.
+Ideas 1-3 come first in the queue: the first fixes real pain on these machines,
+the third closes the hole in fleet updates. Ideas 4-6 are cheaper to discuss
+once we have decided how many machines we serve.
 
-`ledger-devbox` полезнее считать не третьей машиной, а первым доказательством:
-он разошёлся, ещё не начав работать. Любой механизм, который мы выберем,
-осмысленно проверять именно на нём — сможем ли вернуть его к общему движку, не
-потеряв сделанного там осмысленно.
+`ledger-devbox` is more useful seen not as a third machine but as the first
+piece of evidence: it drifted before it even started working. Whatever
+mechanism we choose is meaningfully tested on it — can we bring it back to the
+shared engine without losing what was deliberately done there.
