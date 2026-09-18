@@ -62,7 +62,7 @@ MUTATIONS=(
   'время: BSD-дата разбирает UTC как локальное (B3)@@platform/lib/lib-env.sh@@  date -j -f '"'"'%Y-%m-%dT%H:%M:%S%z'"'"' "$s" +%s 2>/dev/null \&\& return 0@@  date -j -f '"'"'%Y-%m-%dT%H:%M:%S'"'"' "${s%%%%[+-][0-9][0-9][0-9][0-9]}" +%s 2>/dev/null \&\& return 0'
   'суммы: голый shasum вместо обёртки (B4)@@platform/bin/check-vendor.sh@@  if [ "$(sha256_file "$f")" != "$sum" ]; then@@  if [ "$(shasum -a 256 "$f" | cut -d'"'"' '"'"' -f1)" != "$sum" ]; then'
   'bash: гарда версии снята (B5)@@platform/lib/lib-env.sh@@if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] ||@@if false \&\& [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] ||'
-  'аргументы: $2 без ${2-} под set -u (B8)@@bin/pin.sh@@    --version) WANT="${2-}"; [ -n "$WANT" ] || { echo "Ошибка: --version требует значение" >\&2; exit 2; }; shift 2 ;;@@    --version) WANT="$2"; shift 2 ;;'
+  'аргументы: $2 без ${2-} под set -u (B8)@@bin/pin.sh@@    --version) WANT="${2-}"; [ -n "$WANT" ] || { echo "Error: --version requires a value" >\&2; exit 2; }; shift 2 ;;@@    --version) WANT="$2"; shift 2 ;;'
   'сторож: timeout зовётся напрямую@@platform/bin/stack.sh@@            run_with_timeout "$HEALTH_TIMEOUT" "$hscript" 2>\&1)" || hrc=$?@@            timeout "$HEALTH_TIMEOUT" "$hscript" 2>\&1)" || hrc=$?'
   'сторож: фолбэк не отдаёт 124@@platform/lib/lib-env.sh@@  [ "$rc" -eq 143 ] \&\& rc=124@@  true'
   'find: снова -printf (только GNU)@@platform/bin/backup.sh@@  done < <(find "$TMP_DIR" -maxdepth 1 -type f ! -name '"'"'*.part'"'"' 2>/dev/null)@@  done < <(find "$TMP_DIR" -maxdepth 1 -type f -printf '"'"'%p '"'"' 2>/dev/null)'
