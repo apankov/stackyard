@@ -1,11 +1,11 @@
-# Точки входа в корне машины: <имя обёртки>:<скрипт в platform/bin>.
+# The entry points in a machine's root: <wrapper name>:<script in platform/bin>.
 #
-# Список здесь один на всех. Раньше он стоял двумя копиями — в new-machine.sh и
-# в pin.sh, — и завести обёртку означало не забыть про вторую: тогда новые
-# машины получали бы её, а существующие при обновлении версии нет.
+# One list for everyone. Held as two copies, adding a wrapper would mean
+# remembering the second one: new machines would get it while existing machines
+# would not, even after a version update.
 #
-# Обёртка нужна не для краткости. Она задаёт ROOT_DIR явно, и это единственное,
-# что отличает `./stack` от `./platform/bin/stack.sh`.
+# A wrapper is not about brevity. It sets ROOT_DIR explicitly, and that is the
+# only thing distinguishing `./stack` from `./platform/bin/stack.sh`.
 stack:stack.sh
 dc:docker-compose.sh
 host-setup:host-setup.sh
