@@ -1,98 +1,102 @@
 # shellcheck shell=bash
-# Состав стеков девбокса и то, какие из них включены. Подключается через
-# `source`, самостоятельно не запускается.
+# Which stacks a machine has and which of them are enabled. Sourced, never run
+# on its own.
 #
-# Источник правды один — Enabled_Stacks в .env-stacks, всё остальное выводится
-# отсюда: набор compose-файлов, include'ы vhost'ов, юниты, домены. Второй
-# список «какие стеки включены» где бы то ни было означает разъезд между
-# compose и nginx, то есть `host not found in upstream` и краш-луп nginx,
-# уносящий ВСЕ vhost'ы (CLAUDE.md §3.1).
+# There is exactly one source of truth — Enabled_Stacks in .env-stacks — and
+# everything else is derived from it: the set of compose files, the vhost
+# includes, the systemd units, the certificate domains. A second list of
+# "which stacks are enabled" anywhere means compose and nginx can disagree,
+# which surfaces as `host not found in upstream`: nginx refuses to start, and
+# with restart: always that becomes a crash loop taking down EVERY vhost.
 #
-# Ни от чего не зависит: манифест читается построчным grep'ом, поэтому файл
-# подключается и из docker-compose.sh, который lib-env.sh не грузит.
+# This file depends on nothing: the manifest is read with a line-by-line grep,
+# so it can also be sourced from docker-compose.sh, which does not load
+# lib-env.sh.
 
-# Межстековые зависимости: те стеки, без которых этот не работает.
+# Inter-stack dependencies: the stacks this one cannot work without.
 #
-# Это не косметика, и для этой машины особенно. PHP-сайт не имеет своих
-# контейнеров вовсе: он живёт на платформенном php-fpm и ходит в общий mysqld
-# по имени. Без Requires="php mysql" такой стек включается «успешно» и отдаёт
-# 502 или «Access denied» — то есть отказ переезжает из момента включения в
-# рантайм, где его ловит уже посетитель.
+# Not cosmetic. A stack may have no containers of its own at all — a PHP site
+# runs on the platform's php-fpm and reaches the shared database by service
+# name. Without Requires="php-fpm mysql" such a stack enables "successfully"
+# and then serves 502 or "Access denied": the failure moves from the moment of
+# enabling into runtime, where a visitor finds it first.
 #
-# Объявляет это сам стек в stack.conf: список внутри библиотеки означал бы, что
-# стек с зависимостью не добавить, не правя её.
+# The stack declares this in its own stack.conf. A list inside this library
+# would mean a stack with a dependency cannot be added without editing the
+# library.
 stack_requires() { stack_conf_get "$1" Requires; }
 
-# ------------------------------------------------------------------ пути
+# ------------------------------------------------------------------ paths
 
 stacks_root() {
-  # ROOT_DIR задаёт вызывающий скрипт; здесь только страховка.
-  printf '%s' "${ROOT_DIR:?ROOT_DIR не задан вызывающим скриптом}"
+  # ROOT_DIR is set by the calling script; this is only a safety net.
+  printf '%s' "${ROOT_DIR:?ROOT_DIR was not set by the calling script}"
 }
 
-# Корни, в которых ищутся стеки, в порядке приоритета.
+# The roots searched for stacks, in priority order.
 #
-# Их два, и это весь механизм «копировать или подключать»:
+# There are two, and together they are the whole "copy or link" mechanism:
 #
-#   stacks/          — стеки ЭТОЙ машины. Правятся свободно.
-#   profile/stacks/  — библиотека переиспользуемых стеков, приехавшая вместе с
-#                      профилем. Обновляется целиком, вместе с ним.
+#   stacks/          — stacks belonging to THIS machine. Edited freely.
+#   profile/stacks/  — a library of reusable stacks that arrives with the
+#                      profile. Updated as a whole, together with it.
 #
-# Машинный корень идёт первым, поэтому стек, скопированный из профиля в
-# stacks/, перекрывает профильный. Это и есть «отцепиться»: копия становится
-# машинной, обновления профиля её больше не касаются, и видно это по одному
-# `ls stacks/`, а не по записи в конфиге.
+# The machine root comes first, so a stack copied from the profile into
+# stacks/ shadows the profile's copy. That is how a machine detaches from the
+# profile: the copy becomes the machine's, profile updates no longer touch it,
+# and a single `ls stacks/` shows this — no config entry to look up.
 #
-# Обратный порядок означал бы, что профиль молча перебивает машинную правку —
-# худший исход: человек правит файл, который не читают.
+# The reverse order would mean the profile silently overrides a local edit,
+# which is the worse failure: someone edits a file that nothing reads.
 stack_roots() {
-  printf '%s/stacks\n' "$(stacks_root)"   # stack-path-ok: здесь корни и определяются
+  printf '%s/stacks\n' "$(stacks_root)"   # stack-path-ok: this is where the roots are defined
   [ -d "$(stacks_root)/profile/stacks" ] && printf '%s/profile/stacks\n' "$(stacks_root)"
   return 0
 }
 
-# Каталог стека: первый корень, где лежит его stack.conf.
+# A stack's directory: the first root that holds its stack.conf.
 #
-# Именно stack.conf, а не просто каталог. Разница не теоретическая: у ЛЮБОГО
-# включённого стека, в том числе профильного, машина заводит
-# stacks/<стек>/.env — секреты принадлежат машине. Считай мы такой каталог
-# объявлением, профильный стек оказался бы перекрыт каталогом, в котором
-# ничего, кроме .env, нет: compose-файл не нашёлся бы, а `stack.sh list`
-# бодро докладывал бы «ок».
+# stack.conf specifically, not merely a directory of that name. The difference
+# is not theoretical: for ANY enabled stack, profile ones included, the machine
+# creates stacks/<stack>/.env, because secrets belong to the machine. If a bare
+# directory counted as a declaration, a profile stack would be shadowed by a
+# directory containing nothing but .env: the compose file would not be found,
+# while `stack.sh list` cheerfully reported everything fine.
 #
-# Отсюда правило: объявляет стек тот каталог, где лежит stack.conf.
-# Скопировать стек из профиля — значит скопировать его целиком, вместе с
-# декларацией; половина копии стеком не становится.
+# Hence the rule: a stack is declared by the directory that holds its
+# stack.conf. Copying a stack out of the profile means copying it whole,
+# declaration included; half a copy is not a stack.
 stack_dir() {
   local r
   while IFS= read -r r; do
     [ -f "$r/$1/stack.conf" ] && { printf '%s/%s' "$r" "$1"; return 0; }
   done < <(stack_roots)
-  printf '%s/stacks/%s' "$(stacks_root)" "$1"   # stack-path-ok: путь для сообщения об ошибке
+  printf '%s/stacks/%s' "$(stacks_root)" "$1"   # stack-path-ok: path used only in the error message
 }
 
 stack_compose_file() { printf '%s/compose.yaml' "$(stack_dir "$1")"; }
 stack_vhost_dir()    { printf '%s/nginx' "$(stack_dir "$1")"; }
 stack_conf_file()    { printf '%s/stack.conf' "$(stack_dir "$1")"; }
 
-# .env стека — ВСЕГДА в машинном корне, даже у профильного стека.
+# A stack's .env is ALWAYS in the machine root, even for a profile stack.
 #
-# Секреты принадлежат машине, а не профилю: профиль приезжает вендорингом и
-# обновляется целиком, и положить пароль внутрь него значило бы, что следующее
-# обновление его затрёт, а git профиля его увидит.
-# stack-path-ok: .env стека ВСЕГДА в машинном корне, даже у профильного стека —
-# это и есть замысел, см. комментарий выше.
+# Secrets belong to the machine, not to the profile: the profile is delivered
+# as a whole and updated as a whole, so putting a password inside it would mean
+# the next update wipes it, and the profile's git history sees it.
+# stack-path-ok: a stack's .env is ALWAYS in the machine root, even for a
+# profile stack — that is the intent, see the comment above.
 stack_env_file()     { printf '%s/stacks/%s/.env' "$(stacks_root)" "$1"; }
 
-# Каталог стеков ВНУТРИ контейнера nginx. Значение обязано совпадать с целью
-# монтирования $Platform_Deploy_Dir/stacks в platform/compose/nginx.yaml:
-# генерируемый 10-enabled.conf читает nginx, а не хост.
+# The stacks directory INSIDE the nginx container. The value must match the
+# mount target for $Platform_Deploy_Dir/stacks in platform/compose/nginx.yaml:
+# the generated include file is read by nginx, not by the host.
 STACKS_DIR_IN_CONTAINER="/etc/nginx/stacks"
 STACKS_PROFILE_DIR_IN_CONTAINER="/etc/nginx/profile-stacks"
 
-# Каталог стека ВНУТРИ контейнера nginx. Корня два, и include обязан указывать
-# в тот же, где стек лежит на самом деле: иначе после копирования стека из
-# профиля в машинный stacks/ nginx продолжал бы читать профильную копию.
+# A stack's directory INSIDE the nginx container. There are two roots, and the
+# include must point at the one the stack actually lives in: otherwise, after a
+# stack is copied from the profile into the machine's stacks/, nginx would keep
+# reading the profile's copy.
 stack_dir_in_container() {
   case "$(stack_dir "$1")" in
     "$(stacks_root)/profile/stacks/"*) printf '%s/%s' "$STACKS_PROFILE_DIR_IN_CONTAINER" "$1" ;;
@@ -100,73 +104,71 @@ stack_dir_in_container() {
   esac
 }
 
-# Сгенерированный файл с include'ами включённых стеков. Лежит в conf.d рядом с
-# vhost'ами платформы; префикс 00- задаёт предсказуемый порядок чтения, но на
-# выбор сервера по умолчанию не влияет: default_server проставлен явно в
-# default.conf.
-# Префикс 10-, а не 00-: файлы conf.d читаются по алфавиту, и 00-enabled.conf
-# оказывался ПЕРЕД 00-limits.conf. nginx разрешает имя зоны в момент разбора
-# server-блока, поэтому vhost'ы стеков ссылались на зоны, которых ещё не
-# существует, — "unknown limit_req_zone" и отказ старта, то есть краш-луп по
-# restart: always. Ни один vhost фикстур этого не показывал, потому что nginx
-# на машине разработчика не запускается вовсе.
+# The generated file of includes for the enabled stacks. It lives in the
+# machine's state/, and nginx reads it through a single include line in
+# platform/nginx-vhosts/05-enabled.conf.
+#
+# The numeric prefix keeps the reading order predictable but does not decide
+# the default server: default_server is set explicitly in default.conf.
 stacks_include_file() { printf '%s/state/nginx-vhosts/10-enabled.conf' "$(stacks_root)"; }
 
-# Генерируемый файл с томами статики стеков. Тоже в git не лежит: описывает
-# конкретную машину и выводится из Static= в stacks/*/stack.conf.
+# The generated file of static-content volumes. Also kept out of git: it
+# describes one particular machine and is derived from Static= in
+# stacks/*/stack.conf.
 stacks_static_file()  { printf '%s/state/nginx-static.generated.yaml' "$(stacks_root)"; }
 
-# Завести каталоги состояния машины. Идемпотентно.
+# Create the machine's state directories. Idempotent.
 #
-# Существует одной функцией, а не строкой mkdir по месту, из-за конкретной
-# истории: `> ""` при отсутствующем поставщике чинили в docker-compose.sh и не
-# починили в stack.sh, потому что то же знание лежало в двух местах. Здесь оно
-# одно, и оба входа зовут его первым делом.
+# One function rather than an mkdir at each call site: the same knowledge in
+# two places drifts, and a fix applied to one entry point silently misses the
+# other. Both entry points call this first.
 #
-# Что чинится. На свежей машине после ./bootstrap не существует ни state/, ни
-# его подкаталогов: bootstrap приносит платформу, а состояние — дело машины.
-# Первая же команда (`./stack sync`) писала в state/nginx-vhosts/ и умирала
-# сырой ошибкой оболочки, а databases.yaml не создавался вовсе — и `--check`
-# требовал `sync`, который его не создаёт. Замкнутый круг на первой минуте
-# знакомства с платформой.
+# What it prevents. On a fresh machine, right after ./bootstrap, neither state/
+# nor its subdirectories exist: bootstrap delivers the platform, while state is
+# the machine's own. The first command would write into state/nginx-vhosts/ and
+# die with a raw shell error, and databases.yaml would never be created — while
+# --check demanded a `sync` that does not create it either. A closed loop in
+# the first minute of using the platform.
 ensure_state_dirs() {
   local root p
   root="$(stacks_root)"
   mkdir -p "$root/state/nginx-vhosts" "$root/state/certs" \
            "$root/state/htpasswd" "$root/state/getssl-config" 2>/dev/null || true
-  # Каталог поставщика — только когда поставщик включён: пустой state/pg на
-  # машине с MySQL вводил бы в заблуждение не меньше, чем его отсутствие там,
-  # где он нужен.
+  # The provider's directory only when a provider is enabled: an empty state/pg
+  # on a MySQL machine would be as misleading as a missing one where it is
+  # needed.
   p="$(stacks_db_provider)"
   [ -n "$p" ] && mkdir -p "$root/state/$p" 2>/dev/null
   return 0
 }
 
-# ------------------------------------------------------- поставщик БД
+# ------------------------------------------------------- the DB provider
 #
-# Движок НЕ знает, какая на машине СУБД. Он знает только роль: некий включённый
-# стек объявляет себя поставщиком общей базы, и тогда остальные стеки могут
-# заказывать у него базу и пользователя.
+# The engine does NOT know which DBMS a machine runs. It knows only the role:
+# some enabled stack declares itself the provider of the shared database, and
+# then other stacks can order a database and a user from it.
 #
-# Раньше здесь стояли имена — `mysql`, `Mysql_DB`, контейнер `mysql-initializer`.
-# Из-за этого машина на Postgres требовала форка движка: тот же код с заменой
-# семи слов. Имя в движке там, где смысл — роль, и есть механизм расхождения
-# платформы между машинами.
+# Naming a specific DBMS here would fork the engine per machine: a Postgres
+# machine would need the same code with seven words replaced. A name written
+# where the meaning is a role is exactly how a shared platform starts to
+# diverge between machines.
 #
-# Стек-поставщик объявляет себя в своём stack.conf:
+# The provider stack declares itself in its own stack.conf:
 #
-#   Provides_DB="Mysql"                 префикс ключей, которые он понимает
-#   DB_Init_Service="mysql-initializer" одноразовый контейнер, заводящий базы
+#   Provides_DB="Mysql"                 the prefix of the keys it understands
+#   DB_Init_Service="mysql-initializer" the one-shot container that creates them
 #
-# Потребитель пишет ключи с этим префиксом: Mysql_DB, Mysql_User, Mysql_Password
-# (и что ещё поставщик понимает — Mysql_Grants, Mysql_Dump). Движку эти ключи
-# непрозрачны: он их только собирает и отдаёт поставщику.
+# A consumer writes keys with that prefix: Mysql_DB, Mysql_User, Mysql_Password
+# (plus whatever else the provider understands — Mysql_Grants, Mysql_Dump).
+# These keys are opaque to the engine: it only collects them and hands them to
+# the provider.
 
-# Имя включённого стека-поставщика, либо пусто.
+# The name of the enabled provider stack, or empty.
 #
-# Двух поставщиков на машине быть не может: ключи потребителей различаются
-# префиксом, а не адресатом, и второй поставщик с тем же префиксом тихо
-# перехватывал бы чужие декларации. Проверяет check_db_providers_unique.
+# A machine cannot have two providers: consumer keys are distinguished by
+# prefix, not by addressee, so a second provider with the same prefix would
+# quietly intercept declarations meant for the first. Enforced by
+# check_db_providers_unique.
 stacks_db_provider() {
   local s
   while IFS= read -r s; do
@@ -175,44 +177,45 @@ stacks_db_provider() {
   return 0
 }
 
-# Префикс ключей поставщика (Mysql, Postgres, ...).
+# The provider's key prefix (Mysql, Postgres, ...).
 stacks_db_prefix() {
   local p; p="$(stacks_db_provider)"
   [ -n "$p" ] && stack_conf_get "$p" Provides_DB
   return 0
 }
 
-# Имя одноразового контейнера, заводящего базы. Нужно `--check`: у него нет
-# restart: always, поэтому его падение снаружи выглядит просто как `exited`.
+# The name of the one-shot container that creates the databases. Needed by
+# --check: it has no restart: always, so from the outside its failure looks
+# merely like `exited`.
 stacks_db_init_service() {
   local p; p="$(stacks_db_provider)"
   [ -n "$p" ] && stack_conf_get "$p" DB_Init_Service
   return 0
 }
 
-# Генерируемый список баз. Лежит ВНУТРИ каталога поставщика, потому что оттуда
-# его читает инициализатор, — но пишет его платформа, из деклараций всех
-# включённых стеков. Ровно так же state/nginx-vhosts/10-enabled.conf лежит
-# рядом с nginx: место определяет потребитель, а не автор.
+# The generated list of databases. It lives inside the provider's state
+# directory because that is where the initializer reads it from — but it is
+# written by the platform, from the declarations of all enabled stacks. The
+# consumer decides the location, not the author.
 #
-# Профильный поставщик — исключение из «генерируемое лежит у потребителя»:
-# писать внутрь profile/ нельзя, его затрёт следующее обновление профиля.
-# Поэтому файл всегда в машинном корне, под именем стека-поставщика.
+# The file is always under the machine root, named after the provider stack:
+# writing inside profile/ is not allowed, because the next profile update would
+# overwrite it.
 #
-# СОДЕРЖИТ ПАРОЛИ: chmod 600, в git не лежит.
+# CONTAINS PASSWORDS: chmod 600, kept out of git.
 stacks_databases_file() {
   local p; p="$(stacks_db_provider)"
   [ -n "$p" ] || return 0
   printf '%s/state/%s/databases.yaml' "$(stacks_root)" "$p"
 }
 
-# Два поставщика сразу — это спор за префикс и почти наверняка недосмотр при
-# включении стека.
+# Two providers at once is a fight over the prefix and almost certainly an
+# oversight when enabling a stack.
 check_db_providers_unique() {
   local s found=""
   while IFS= read -r s; do
     [ -n "$(stack_conf_get "$s" Provides_DB)" ] || continue
-    [ -n "$found" ] && printf 'поставщиков общей БД включено больше одного: %s и %s\n' "$found" "$s"
+    [ -n "$found" ] && printf 'more than one shared-DB provider is enabled: %s and %s\n' "$found" "$s"
     found="$s"
   done < <(stacks_enabled 2>/dev/null)
   return 0
@@ -220,22 +223,22 @@ check_db_providers_unique() {
 
 # ------------------------------------------------------------- stack.conf
 
-# stack_conf_get <стек> <ключ> [<по умолчанию>]
+# stack_conf_get <stack> <key> [<default>]
 #
-# Разбор построчным grep'ом, БЕЗ lib-env.sh и без разворачивания ${...}.
-# Причины две, и обе важные:
+# Parsed with a line-by-line grep, WITHOUT lib-env.sh and without expanding
+# ${...}. Two reasons, both load-bearing:
 #
-#   1. lib-stacks.sh подключает docker-compose.sh, который lib-env.sh не грузит
-#      (см. заголовок файла). Зависимость появиться здесь не должна.
-#   2. stack.conf обязан читаться у стека, который ВЫКЛЮЧЕН и у которого .env
-#      на этой машине нет вовсе. Разворачивать в такой ситуации нечем, а
-#      подставить пустую строку — худший исход: пустой host-путь в томе
-#      означает каталог-пустышку от root и молчаливые 404.
+#   1. docker-compose.sh sources lib-stacks.sh but not lib-env.sh (see the file
+#      header). That dependency must not appear here.
+#   2. stack.conf must be readable for a stack that is DISABLED and whose .env
+#      does not exist on this machine at all. There is nothing to expand from,
+#      and substituting an empty string is the worse outcome: an empty host
+#      path in a volume gives a root-owned empty directory and silent 404s.
 #
-# Значения с ${...} — это только Static — уходят в генерируемый compose-файл
-# дословно, и разворачивает их сам compose из корневого .env. Ключи Backup_*
-# читает backup.sh: он работает лишь по включённым стекам, грузит lib-env.sh и
-# разворачивает подстановки штатно.
+# Values containing ${...} — only Static does — go into the generated compose
+# file verbatim, and compose expands them itself from the root .env. The
+# Backup_* keys are read by backup.sh, which works only on enabled stacks,
+# loads lib-env.sh and expands substitutions normally.
 stack_conf_get() {
   local s="$1" key="$2" default="${3-}" file val=""
   file="$(stack_conf_file "$s")"
@@ -245,17 +248,18 @@ stack_conf_get() {
   if [ -z "$val" ]; then printf '%s' "$default"; else printf '%s' "$val"; fi
 }
 
-# ------------------------------------------------------- список стеков
+# ------------------------------------------------------- the list of stacks
 
-# Все стеки — это каталоги в stacks/. Имя каталога и есть имя стека, вычитать
-# из списка нечего: в stacks/ по определению лежат только стеки.
+# Every stack is a directory under a stack root. The directory name is the
+# stack name; there is nothing to subtract from the list, because only stacks
+# live there.
 stacks_available() {
   local r d
   while IFS= read -r r; do
     for d in "$r"/*/; do
       d="${d%/}"
-      # stack.conf, а не просто каталог — см. stack_dir. Каталог с одним .env
-      # стеком не является и в списке появляться не должен.
+      # stack.conf, not merely a directory — see stack_dir. A directory holding
+      # only .env is not a stack and must not appear in the list.
       [ -f "$d/stack.conf" ] || continue
       printf '%s\n' "${d##*/}"
     done
@@ -268,19 +272,18 @@ stack_exists() {
   return 1
 }
 
-# Включённые стеки — из Enabled_Stacks в .env-stacks, в порядке из файла.
+# The enabled stacks come from Enabled_Stacks in .env-stacks, in file order.
 #
-# Отсутствующий .env-stacks НЕ является отказом: свежий `git pull` на сервере
-# не должен ронять все compose-команды на машине — это ровно тот класс
-# поломок, который здесь лечится. Поэтому предупреждение в stderr и откат к
-# «все стеки, для которых есть все файлы».
+# A missing .env-stacks is NOT a failure: a fresh `git pull` on a server must
+# not break every compose command on the machine. Hence a warning on stderr and
+# a fallback to "every stack that has all of its files".
 stacks_enabled() {
   local manifest="$(stacks_root)/.env-stacks" raw s
 
-  # Переопределение из stack.sh: он уже знает, каким станет манифест, и под
-  # --dry-run файл не пишет. Без этого dry-run сравнивал бы include'ы со СТАРЫМ
-  # составом и бодро докладывал «уже соответствуют» — то есть врал ровно в том
-  # режиме, который существует, чтобы не врать.
+  # An override from stack.sh: it already knows what the manifest is about to
+  # become, and under --dry-run it does not write the file. Without this,
+  # dry-run would compare the includes against the OLD set and report "already
+  # up to date" — lying in the very mode that exists in order not to lie.
   if [ -n "${STACKS_ENABLED_OVERRIDE+x}" ]; then
     for s in $STACKS_ENABLED_OVERRIDE; do printf '%s\n' "$s"; done
     return 0
@@ -292,14 +295,14 @@ stacks_enabled() {
       if stack_exists "$s"; then
         printf '%s\n' "$s"
       else
-        echo "Предупреждение: в .env-stacks указан стек '$s', но каталога stacks/$s нет — пропускаю" >&2
+        echo "Warning: .env-stacks lists stack '$s', but there is no stacks/$s directory — skipping" >&2
       fi
     done
     return 0
   fi
 
-  echo "Предупреждение: нет .env-stacks — считаю включёнными все стеки с полным набором файлов." >&2
-  echo "  Заведите манифест: cp .env-stacks.example .env-stacks && ./scripts/stack.sh sync" >&2
+  echo "Warning: no .env-stacks — treating every stack with a complete file set as enabled." >&2
+  echo "  Create the manifest: cp .env-stacks.example .env-stacks && ./stack sync" >&2
   while IFS= read -r s; do
     [ -z "$(stack_missing_files "$s")" ] && printf '%s\n' "$s"
   done < <(stacks_available)
@@ -311,7 +314,7 @@ stack_is_enabled() {
   return 1
 }
 
-# Включённые стеки, которым нужен указанный стек.
+# The enabled stacks that require the given stack.
 stack_dependents() {
   local target="$1" s req
   while IFS= read -r s; do
@@ -321,43 +324,47 @@ stack_dependents() {
   done < <(stacks_enabled 2>/dev/null)
 }
 
-# Чего не хватает стеку, чтобы его можно было включить. Пустой вывод — всё есть.
+# What a stack is missing before it can be enabled. Empty output means it is
+# complete.
 stack_missing_files() {
   local s="$1"
-  # compose.yaml обязателен у стека, у которого есть СВОИ контейнеры.
+  # compose.yaml is required for a stack that has containers OF ITS OWN.
   #
-  # Стек без контейнеров — не редкость: статический сайт живёт на платформенных
-  # nginx и php-fpm, а прокси-стек только описывает vhost к чужому приложению.
-  # Но отсутствие compose.yaml само по себе объявлением НЕ считается: забытый
-  # файл у обычного стека выглядел бы точно так же и давал бы рабочий конфиг, в
-  # котором ничего не запускается.
+  # A stack without containers is common: a static site runs on the platform's
+  # nginx and php-fpm, and a proxy stack only describes a vhost pointing at
+  # someone else's application. But a missing compose.yaml is NOT itself a
+  # declaration: a forgotten file in an ordinary stack would look exactly the
+  # same and would produce a valid config in which nothing starts.
   #
-  # Поэтому объявление явное — Containers="no" в stack.conf.
+  # So the declaration is explicit — Containers="no" in stack.conf.
   if [ "$(stack_conf_get "$s" Containers yes)" != "no" ] && [ ! -f "$(stack_compose_file "$s")" ]; then
-    printf 'stacks/%s/compose.yaml (либо Containers="no" в stack.conf, если своих контейнеров нет)\n' "$s"
+    printf 'stacks/%s/compose.yaml (or Containers="no" in stack.conf if it has no containers of its own)\n' "$s"
   fi
-  # .env стека обязателен только там, где есть образец: статические сайты и
-  # redis обходятся корневым .env, и требовать от них env-файл значило бы
-  # выдумать поломку.
-  # Образец ищем РЯДОМ СО СТЕКОМ, а сам .env — в машинном корне. Для машинного
-  # стека это один каталог, для профильного — разные, и проверять оба места
-  # одинаково нельзя: у профильного стека образец лежит в profile/, и поиск
-  # образца по машинному пути не нашёл бы его никогда. Стек mysql тогда
-  # считался бы укомплектованным без пароля root, а mysqld не поднялся бы —
-  # с отказом интерполяции из середины compose вместо внятной строки здесь.
+  # A stack's .env is required only where an example exists: a static site
+  # needs no env file of its own, and demanding one would invent a failure.
+  #
+  # The example is looked for NEXT TO THE STACK, while the .env itself is in
+  # the machine root. For a machine stack that is the same directory; for a
+  # profile stack they differ, and the two places cannot be probed the same
+  # way. A profile stack's example lives under profile/, so looking for it
+  # along the machine path would never find it — and a database stack would
+  # then count as complete without its root password, failing later with an
+  # interpolation error from the middle of compose instead of one clear line
+  # here.
   if [ -f "$(stack_dir "$s")/.env.example" ] && [ ! -f "$(stack_env_file "$s")" ]; then
     printf 'stacks/%s/.env\n' "$s"
   fi
 }
 
-# --------------------------------------------------------------- проверки
+# --------------------------------------------------------------- checks
 #
-# Каждая печатает по строке на найденную проблему и молчит, когда её нет. Так
-# они одинаково годятся и для selftest.sh, и для stack.sh --check, и ни одна не
-# решает сама, что делать с находкой.
+# Each prints one line per problem found and stays silent when there is none.
+# That makes them equally usable from selftest.sh and from stack.sh --check,
+# and none of them decides on its own what to do about a finding.
 
-# Один домен у двух стеков — это гарантированный отказ nginx на старте
-# ("conflicting server name") и спор двух конфигов getssl за один сертификат.
+# One domain claimed by two stacks is a guaranteed nginx failure at startup
+# ("conflicting server name") and two getssl configs fighting over one
+# certificate.
 check_domains_unique() {
   local s d a
   while IFS= read -r s; do
@@ -366,52 +373,53 @@ check_domains_unique() {
       for a in $(domain_sans "$d"); do printf '%s\t%s\n' "$a" "$s"; done
     done
   done < <(stacks_available) | sort | awk -F'\t' '
-    # Соседние строки могут быть от ОДНОГО стека: Domains="a.test a.test" или
-    # a.test+a.test — такая же ошибка, но называть её «объявлен и в papa, и в
-    # papa» нельзя: сообщение выглядит сломанным, и его перестают читать.
+    # Adjacent lines can come from ONE stack: Domains="a.test a.test" or
+    # a.test+a.test is the same mistake, but calling it "declared by both papa
+    # and papa" would read as a broken check, and a broken-looking check stops
+    # being read.
     { if ($1 == prev) {
-        if ($2 == prevs) print "домен " $1 " объявлен в стеке " $2 " дважды"
-        else             print "домен " $1 " объявлен и в " prevs ", и в " $2
+        if ($2 == prevs) print "domain " $1 " is declared twice by stack " $2
+        else             print "domain " $1 " is declared by both " prevs " and " $2
       }
       prev = $1; prevs = $2 }'
 }
 
-# Домен в stack.conf без server_name во vhost'ах стека означает сертификат,
-# который выпускается и никому не служит; обратное — vhost, работающий до тех
-# пор, пока кто-нибудь не заметит, что сертификата у него нет.
+# A domain in stack.conf with no matching server_name in the stack's vhosts
+# means a certificate that is issued and serves nobody; the reverse means a
+# vhost that works until someone notices it has no certificate.
 check_domains_match() {
   local s="$1" declared served d
   declared=$(for d in $(stack_conf_get "$s" Domains); do
                printf '%s\n' "$(domain_primary "$d")"
                for a in $(domain_sans "$d"); do printf '%s\n' "$a"; done
              done | sed '/^$/d' | sort -u)
-  # `|| true` по той же причине, что и в stacks_upstreams: у стека, объявившего
-  # Domains и не заведшего nginx/, grep возвращает ненулевой код, и под `set -e`
-  # из stack.sh функция умирала ровно здесь — не напечатав той единственной
-  # находки, ради которой её и зовут («домен объявлен, vhost'а нет»).
+  # `|| true` for the same reason as in stacks_upstreams: for a stack that
+  # declares Domains but has no nginx/ directory, grep exits non-zero, and
+  # under `set -e` the function would die right here — without printing the one
+  # finding it is called for ("domain declared, no vhost").
   served=$(grep -rhE '^[[:space:]]*server_name[[:space:]]' "$(stack_vhost_dir "$s")" 2>/dev/null \
            | awk '{for (i = 2; i <= NF; i++) print $i}' | tr -d ';' | sed '/^$/d' | sort -u || true)
   for d in $(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$served")); do
-    printf 'стек %s: домен %s объявлен в stack.conf, но ни один vhost его не обслуживает\n' "$s" "$d"
+    printf 'stack %s: domain %s is declared in stack.conf, but no vhost serves it\n' "$s" "$d"
   done
   for d in $(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$served")); do
-    printf 'стек %s: vhost обслуживает %s, но домена нет в stack.conf — сертификат ему не выпускается\n' "$s" "$d"
+    printf 'stack %s: a vhost serves %s, but the domain is absent from stack.conf — no certificate is issued for it\n' "$s" "$d"
   done
 }
 
-# Относительный host-путь резолвится от каталога проекта, а не от файла стека.
-# Каталог проекта задан явно (--project-directory в docker-compose.sh), но
-# полагаться на него из файлов стеков не следует: путь становится верным по
-# совпадению, а не по объявлению.
+# A relative host path resolves against the project directory, not against the
+# stack's own file. The project directory is set explicitly
+# (--project-directory in docker-compose.sh), but stack files must not rely on
+# it: the path would then be correct by coincidence rather than by declaration.
 #
-# Именованные тома (`- somevolume:/data`) двоеточие тоже содержат, но их
-# host-часть путём не выглядит и сюда не попадает: проверяются только
-# кандидаты, начинающиеся с точки.
+# Named volumes (`- somevolume:/data`) also contain a colon, but their host
+# part does not look like a path and never reaches here: only candidates
+# starting with a dot are examined.
 check_paths_absolute() {
   local s="$1"
   awk -v s="$s" '
-    # Выход из блока: первая непустая строка с отступом не глубже самого
-    # volumes:. Комментарии и пустые строки внутри блока его не закрывают.
+    # Leaving the block: the first non-empty line indented no deeper than
+    # volumes: itself. Comments and blank lines inside do not close it.
     in_vol && !/^[[:space:]]*-[[:space:]]/ {
       match($0, /^[[:space:]]*/)
       if ($0 ~ /[^[:space:]]/ && RLENGTH <= vol_indent) in_vol = 0
@@ -424,16 +432,16 @@ check_paths_absolute() {
       sub(/[[:space:]]*(#.*)?$/, "", v)
       gsub(/^["'"'"']|["'"'"']$/, "", v)
       if (v ~ /^\.{1,2}\//) {
-        print "стек " s ": относительный host-путь в томе: " v
+        print "stack " s ": relative host path in a volume: " v
       } else if (v ~ /^\// && v !~ /\$/) {
-        print "стек " s ": захардкоженный host-путь в томе (нужна переменная): " v
+        print "stack " s ": hardcoded host path in a volume (use a variable): " v
       }
     }
   ' "$(stack_compose_file "$s")" 2>/dev/null
 }
 
-# /etc/systemd/system плоский. Без префикса два стека подерутся за имя, и
-# победит тот, чьи юниты поставили последними.
+# /etc/systemd/system is flat. Without a prefix, two stacks fight over a name,
+# and whichever was installed last wins.
 check_unit_names() {
   local s="$1" u n
   while IFS= read -r u; do
@@ -441,14 +449,14 @@ check_unit_names() {
     n=$(basename "$u")
     case "$n" in
       devbox-"$s"-*) ;;
-      *) printf 'стек %s: юнит %s без префикса devbox-%s-\n' "$s" "$n" "$s" ;;
+      *) printf 'stack %s: unit %s lacks the devbox-%s- prefix\n' "$s" "$n" "$s" ;;
     esac
   done < <(stack_units "$s")
 }
 
-# CLAUDE.md §5: задача, переставшая выполняться, выглядит ровно как задача,
-# которой нечего делать. Отличить одно от другого может только независимая
-# проверка результата, поэтому таймер без неё — неполная задача.
+# A job that has stopped running looks exactly like a job with nothing to do.
+# Only an independent check of the RESULT can tell them apart, so a timer
+# without one is an incomplete job.
 check_timer_has_check() {
   local s="$1" u n base
   while IFS= read -r u; do
@@ -457,21 +465,21 @@ check_timer_has_check() {
     base="${n#devbox-"$s"-}"
     [ -f "$(stack_dir "$s")/scripts/check-$base.sh" ] && continue
     [ -f "$(stack_dir "$s")/systemd/$n-check.timer" ] && continue
-    printf 'стек %s: у таймера %s нет проверки (scripts/check-%s.sh или %s-check.timer)\n' \
+    printf 'stack %s: timer %s has no result check (scripts/check-%s.sh or %s-check.timer)\n' \
       "$s" "$n" "$base" "$n"
   done < <(stack_units "$s")
 }
 
-# Сервисы платформы: всё, что объявлено в platform/compose/*.yaml, кроме
-# генерируемого файла статики (он домешивает том в уже объявленный nginx и
-# новых сервисов не заводит).
+# The platform's services: everything declared in platform/compose/*.yaml,
+# except the generated statics file (it merges a volume into the already
+# declared nginx and introduces no new services).
 #
-# Их два — nginx и php-fpm, и второй здесь не для симметрии. PHP-сайты ходят в
-# него через `fastcgi_pass php-fpm:9000`, а этот адрес nginx резолвит при
-# ЧТЕНИИ конфига, ровно как proxy_pass: нет контейнера — нет старта nginx —
-# `restart: always` превращает это в краш-луп, уносящий все сайты машины.
-# Поэтому php-fpm подчиняется тем же правилам, что и nginx: спека постоянна,
-# стеки в неё ничего не домешивают.
+# php-fpm is here for the same reason as nginx, not for symmetry. PHP sites
+# reach it through `fastcgi_pass php-fpm:9000`, and nginx resolves that address
+# while READING the config, exactly as it does proxy_pass: no container means
+# nginx does not start, and `restart: always` turns that into a crash loop
+# taking down every site on the machine. So php-fpm follows the same rule as
+# nginx: its spec is constant, and stacks merge nothing into it.
 platform_services() {
   local f
   for f in "$(stacks_root)"/platform/compose/*.yaml; do
@@ -481,26 +489,27 @@ platform_services() {
   done
 }
 
-# Стек, домешивающий что-либо в сервис платформы, делает её спеку зависящей от
-# набора включённых стеков — то есть возвращает ровно ту поломку, ради которой
-# существует генератор статики.
+# A stack that merges anything into a platform service makes that service's
+# spec depend on which stacks are enabled — reintroducing exactly the failure
+# the statics generator exists to prevent.
 check_no_base_service_merge() {
   local s="$1" base svc
   base=$(platform_services)
   while IFS= read -r svc; do
     [ -n "$svc" ] || continue
-    # `if`, а не `&&`: список с `&&` в конце тела цикла отдаёт наружу код
-    # последнего grep'а, то есть функция «падает» ровно тогда, когда претензий
-    # НЕТ. Само по себе это безобидно, пока её зовут через подстановку
-    # процесса, но первый же вызов вида `check_... || die` сработал бы наоборот.
+    # `if` rather than `&&`: with `&&` at the end of the loop body the
+    # function's exit status becomes that of the last grep, so it "fails"
+    # precisely when there is NOTHING to report. Harmless while it is called
+    # through process substitution, but the first `check_... || die` call site
+    # would behave backwards.
     if printf '%s\n' "$base" | grep -qx -- "$svc"; then
-      printf 'стек %s: домешивает в общий сервис %s — объявите статику через Static= в stack.conf\n' "$s" "$svc"
+      printf 'stack %s: merges into shared service %s — declare static content via Static= in stack.conf\n' "$s" "$svc"
     fi
   done < <(_stacks_yaml_keys "$(stack_compose_file "$s")" services)
 }
 
-# Цикл в Requires означает, что enable и disable зациклятся на разрешении
-# зависимостей и не завершатся никогда.
+# A cycle in Requires means enable and disable loop forever while resolving
+# dependencies.
 check_requires_cycle() {
   local s="$1" seen=" $1 " queue next r depth=0
   queue=$(stack_requires "$s")
@@ -508,7 +517,7 @@ check_requires_cycle() {
     next=""
     for r in $queue; do
       case "$seen" in
-        *" $r "*) printf 'цикл в Requires: %s → ... → %s\n' "$s" "$r"; return 0 ;;
+        *" $r "*) printf 'cycle in Requires: %s -> ... -> %s\n' "$s" "$r"; return 0 ;;
       esac
       seen="$seen$r "
       next="$next $(stack_requires "$r")"
@@ -518,24 +527,24 @@ check_requires_cycle() {
   done
 }
 
-# Upstream'ы, на которые ссылаются vhost'ы включённых стеков.
+# The upstreams referenced by the vhosts of enabled stacks.
 #
-# Каталога nginx/ у стека может не быть законно (mysql, redis), и находок в нём
-# может не быть тоже — но `grep` в обоих случаях возвращает ненулевой код, а
-# stack.sh работает под `set -e`. Подоболочка цикла умирала на ПЕРВОМ таком
-# стеке, и функция отдавала пусто: в манифесте первым идёт pg, поэтому
-# проверка upstream'ов не проверяла ничего и никогда — молча, с пустым блоком
-# вместо строк. Отсюда и `[ -d ]`, и `|| true`: одного мало, они закрывают
-# разные половины (нет каталога / нет совпадений).
+# A stack may legitimately have no nginx/ directory (a database, a cache), and
+# a directory may legitimately contain no matches — but grep exits non-zero in
+# both cases, and stack.sh runs under `set -e`. Without guarding both, the loop
+# subshell dies on the FIRST such stack and the function returns nothing: the
+# upstream check would then verify nothing at all, silently, showing an empty
+# block instead of lines. Hence both `[ -d ]` and `|| true`: each covers a
+# different half (no directory / no matches).
 stacks_upstreams() {
   local s dir
   while IFS= read -r s; do
     dir="$(stack_vhost_dir "$s")"
     [ -d "$dir" ] || continue
-    # fastcgi_pass наравне с proxy_pass, и это не мелочь: PHP-сайтов на этой
-    # машине большинство, а `fastcgi_pass php-fpm:9000` nginx резолвит при
-    # чтении конфига ровно так же. Опущенный php-fpm при пересоздании nginx
-    # уносит ВСЕ сайты, включая статические, которым PHP не нужен вовсе.
+    # fastcgi_pass alongside proxy_pass, and that is not a detail: nginx
+    # resolves `fastcgi_pass php-fpm:9000` while reading the config in exactly
+    # the same way. A stopped php-fpm therefore takes down EVERY site when
+    # nginx is recreated, including static ones that need no PHP at all.
     grep -rhE '^[[:space:]]*(proxy_pass|fastcgi_pass)[[:space:]]' "$dir" 2>/dev/null || true
   done < <(stacks_enabled 2>/dev/null) \
     | sed -E 's|^[[:space:]]*fastcgi_pass[[:space:]]+|//|' \
@@ -545,32 +554,33 @@ stacks_upstreams() {
   return 0
 }
 
-# host.docker.internal исключён намеренно: это не контейнер, а алиас самого
-# хоста, который даёт `extra_hosts: host-gateway`. Проверка ищет upstream среди
-# запущенных контейнеров, и для него она всегда докладывала бы «не запущен» —
-# то есть машина с апстримом вне docker-сети имела бы вечный красный блок.
-# Вечно красная проверка перестаёт читаться целиком, вместе с настоящими
-# находками.
+# host.docker.internal is excluded on purpose: it is not a container but an
+# alias for the host itself, provided by `extra_hosts: host-gateway`. The check
+# looks for upstreams among running containers, so it would always report this
+# one as "not running" — a machine with an upstream outside the docker network
+# would have a permanently red block. A permanently red check stops being read
+# at all, together with its genuine findings.
 #
-# Живо ли то, что слушает на хосте, отсюда не видно вовсе. Это забота стека:
-# см. scripts/health.sh.
+# Whether the thing listening on the host is alive is not visible from here.
+# That is the stack's business: see scripts/health.sh.
 
-# ------------------------------------------------------- реестры образов
+# ------------------------------------------------------- image registries
 #
-# Смысл: стек запускается от DIGEST'а, а
-# не от подвижного тега. `:master` означает, что `up -d` берёт то, что уже лежит
-# локально, молча расходится с реестром, и откатиться некуда — предыдущего тега
-# не существует.
+# The point: a stack runs from a DIGEST, not from a moving tag. With `:master`,
+# `up -d` uses whatever is already cached locally, drifts from the registry
+# silently, and leaves nowhere to roll back to — the previous tag no longer
+# exists.
 
 
-# Согласованность того, чем стек тянет образ, с тем, что он объявляет.
+# Whether how a stack pulls its image agrees with what it declares.
 #
-# Вопрос ровно один: как стек выбирает версию образа. Digest (`repo@${ПЕРЕМЕННАЯ}`)
-# отвечает «что сейчас запущено» и хранится в .env стека, `Image_Tag=` в
-# stack.conf — «за каким подвижным тегом следим», и это работа scripts/registry.sh.
-# Половина этой пары бесполезна: тег без digest'а некуда записать, digest без
-# тега неоткуда обновить. Разъезжается такое молча — pin просто перестаёт
-# делать то, зачем его зовут.
+# There is exactly one question: how the stack chooses an image version. A
+# digest (`repo@${VARIABLE}`) answers "what is running right now" and lives in
+# the stack's .env; `Image_Tag=` in stack.conf answers "which moving tag we
+# follow", and resolving one into the other is registry.sh's job. Half of that
+# pair is useless: a tag with no digest has nowhere to be written, a digest
+# with no tag has nothing to be refreshed from. Such a mismatch is silent —
+# pinning simply stops doing what it is called for.
 check_image_decl() {
   local s="$1" img tag has_reg=0 digest=0
   tag="$(stack_image_tag "$s")"
@@ -581,24 +591,24 @@ check_image_decl() {
   done < <(stack_registry_images "$s")
 
   if [ -n "$tag" ] && [ "$has_reg" -eq 0 ]; then
-    printf 'стек %s: объявлен Image_Tag=%s, но ни один образ не тянется из внешнего реестра\n' "$s" "$tag"
+    printf 'stack %s: Image_Tag=%s is declared, but no image is pulled from an external registry\n' "$s" "$tag"
   fi
   if [ -n "$tag" ] && [ "$has_reg" -eq 1 ] && [ "$digest" -eq 0 ]; then
-    printf 'стек %s: Image_Tag=%s объявлен, а образ задан не через digest — пинить нечего\n' "$s" "$tag"
+    printf 'stack %s: Image_Tag=%s is declared, but the image is not pinned by digest — nothing to pin\n' "$s" "$tag"
   fi
   if [ -z "$tag" ] && [ "$digest" -eq 1 ]; then
-    printf 'стек %s: образ пинится digest'"'"'ом, но Image_Tag= не объявлен — обновлять его нечем\n' "$s"
+    printf 'stack %s: the image is pinned by digest, but no Image_Tag= is declared — nothing to refresh it from\n' "$s"
   fi
 }
 
 
-# --------------------------------------------------------------- реестры
+# --------------------------------------------------------------- registries
 
-# Хост реестра у ссылки на образ, либо пусто для Docker Hub.
+# The registry host of an image reference, or empty for Docker Hub.
 #
-# Правило докера, а не эвристика: реестром считается первый сегмент пути, если
-# в нём есть точка или двоеточие (либо это localhost). Без этого `team/app`
-# (образ Hub'а) и `реестр.example/app` неразличимы.
+# This is Docker's own rule, not a heuristic: the first path segment is a
+# registry if it contains a dot or a colon, or is localhost. Without it,
+# `team/app` (a Hub image) and `registry.example/app` are indistinguishable.
 image_registry() {
   local v="${1%%/*}"
   [ "$v" = "$1" ] && return 0
@@ -608,12 +618,12 @@ image_registry() {
 }
 
 
-# Ссылки на образы стека, лежащие во ВНЕШНЕМ реестре (не Docker Hub).
+# A stack's image references that live in an EXTERNAL registry (not Docker Hub).
 #
-# Значения с ${...} внутри возвращаются дословно: подстановку разворачивает
-# compose, а имя хоста и репозитория стоит в compose-файле литералом именно
-# затем, чтобы его можно было прочитать отсюда — у выключенного стека .env на
-# машине нет вовсе (см. stack_conf_get).
+# Values containing ${...} are returned verbatim: compose expands them, and the
+# host and repository are written as literals in the compose file precisely so
+# they can be read from here — a disabled stack has no .env on the machine at
+# all (see stack_conf_get).
 stack_registry_images() {
   local img
   while IFS= read -r img; do
@@ -623,12 +633,12 @@ stack_registry_images() {
 }
 
 
-# stacks_registries [<стек>...]
+# stacks_registries [<stack>...]
 #
-# Хосты внешних реестров, которые упоминают перечисленные стеки; без аргументов
-# — все стеки в stacks/. Логин нужен только тем реестрам, откуда сейчас могут
-# тянуть, поэтому scripts/registry.sh передаёт сюда включённые; вопрос «ходит
-# ли эта машина в реестры вообще» задаётся без аргументов.
+# The external registry hosts mentioned by the listed stacks; with no arguments,
+# by every available stack. Only registries that can be pulled from right now
+# need a login, so registry.sh passes the enabled stacks; the question "does
+# this machine use registries at all" is asked with no arguments.
 stacks_registries() {
   local s img
   { if [ $# -gt 0 ]; then printf '%s\n' "$@"; else stacks_available; fi; } | {
@@ -642,27 +652,26 @@ stacks_registries() {
 }
 
 
-# Подвижный тег, за которым стек следит в реестре (`Image_Tag=` в stack.conf).
+# The moving tag a stack follows in the registry (`Image_Tag=` in stack.conf).
 #
-# Нужен только scripts/registry.sh: он резолвит этот тег в digest, а запускается
-# стек всегда от digest'а. Тег и digest — разные вопросы и живут врозь: тег
-# отвечает «за чем следим» и одинаков на всех машинах, поэтому лежит в
-# декларации; digest отвечает «что сейчас запущено», меняется каждым деплоем и
-# поэтому лежит в .env стека, рядом с остальным серверным состоянием.
+# Needed only by registry.sh: it resolves that tag into a digest, and a stack
+# always runs from the digest. Tag and digest answer different questions and
+# live apart: the tag says "what we follow", is the same on every machine and
+# therefore belongs in the declaration; the digest says "what is running now",
+# changes with every deploy and therefore belongs in the stack's .env, next to
+# the rest of the server-side state.
 stack_image_tag() { stack_conf_get "$1" Image_Tag; }
 
-# Пути сертификатов, на которые ссылаются vhost'ы ВСЕХ стеков — из обоих
-# корней — плюс платформенные.
+# The certificate paths referenced by the vhosts of ALL stacks — from both
+# roots — plus the platform's own.
 #
-# Через stack_vhost_dir, а не глобом "$ROOT_DIR/stacks"/*/nginx: глоб слеп к
-# профильному корню, и заглушка профильному стеку не создавалась. При этом
-# домен его виден (stacks_domains смотрит оба корня), поэтому getssl для него
-# исправно настраивался. Итог: домен объявлен, конфиг getssl есть, файла
-# заглушки нет — nginx не открывает ssl_certificate, не стартует, и с
-# restart: always уходит в краш-луп, уносящий ВСЕ сайты машины.
-#
-# 2>/dev/null здесь тоже мешал: он глушил промах глоба, то есть ту самую
-# слепоту, которую нужно было заметить.
+# Via stack_vhost_dir rather than a glob over the machine root: a glob is blind
+# to the profile root, so no placeholder certificate would be created for a
+# profile stack. Its domain is still visible (domain enumeration looks at both
+# roots), so getssl would be configured for it correctly. The result: domain
+# declared, getssl config present, placeholder file absent — nginx cannot open
+# ssl_certificate, does not start, and with restart: always goes into a crash
+# loop taking down EVERY site on the machine.
 stacks_cert_paths() {
   local s dir
   while IFS= read -r s; do
@@ -675,27 +684,6 @@ stacks_cert_paths() {
 }
 
 # ------------------------------------------------------------------ nginx
-
-# Строки include для включённых стеков, у которых есть непустой каталог
-# vhost'ов.
-#
-# Порядок — по наименьшему имени файла внутри каталога, а не по алфавиту имён
-# стеков. Причина конкретная: в default.conf нет `default_server`, поэтому
-# сервером по умолчанию nginx считает ПЕРВЫЙ прочитанный vhost (сегодня это
-# 01-webhooks). Алфавит по стекам поменял бы это молча.
-stacks_include_lines() {
-  local s dir first
-  while IFS= read -r s; do
-    dir="$(stack_vhost_dir "$s")"
-    [ -d "$dir" ] || continue
-    first=$(ls -1 "$dir"/*.conf 2>/dev/null | sed 's:.*/::' | sort | head -n 1)
-    [ -n "$first" ] || continue
-    printf '%s\t%s\n' "$first" "$s"
-  done < <(stacks_enabled) | sort | while IFS=$'\t' read -r _ s; do
-    printf 'include %s/%s/nginx/*.conf;\n' "$STACKS_DIR_IN_CONTAINER" "$s"
-  done
-}
-
 
 # --------------------------------------------------------------- systemd
 
@@ -851,13 +839,12 @@ stack_images() {
 
 # ------------------------------------------------------------------ nginx
 
-# Строки include для включённых стеков, у которых есть непустой каталог
-# vhost'ов.
+# The include lines for enabled stacks that have a non-empty vhost directory.
 #
-# Порядок — по наименьшему имени файла внутри каталога, а не по алфавиту имён
-# стеков. Причина конкретная: в default.conf нет `default_server`, поэтому
-# сервером по умолчанию nginx считает ПЕРВЫЙ прочитанный vhost (сегодня это
-# 01-webhooks). Алфавит по стекам поменял бы это молча.
+# Ordered by the smallest file name inside each directory, not alphabetically
+# by stack name. The vhost files carry numeric prefixes precisely so that their
+# reading order is stated rather than inherited from whatever the stacks happen
+# to be called; ordering by stack name would change it silently.
 stacks_include_lines() {
   local s dir first
   while IFS= read -r s; do

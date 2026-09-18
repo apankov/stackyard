@@ -351,7 +351,7 @@ printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
 
 check "дубль домена найден" "$(check_domains_unique | wc -l | tr -d ' ')" "1"
 check "дубль домена назван двумя разными стеками" \
-  "$(check_domains_unique | grep -cE 'объявлен и в .*, и в ' | tr -d ' ')" "1"
+  "$(check_domains_unique | grep -cE 'is declared by both .* and ' | tr -d ' ')" "1"
 
 # Тот же домен ДВАЖДЫ В ОДНОМ стеке — такая же ошибка, но сообщение «объявлен и
 # в hotel, и в hotel» читается как поломка проверки, а не как находка, и её
@@ -360,9 +360,9 @@ fixture hotel stack.conf 'Domains="hotel.test hotel.test"
 Containers="no"'
 printf 'Enabled_Stacks="golf delta hotel"\n' > "$WORK/.env-stacks"
 check "дубль внутри одного стека назван своими словами" \
-  "$(check_domains_unique | grep -c 'в стеке hotel дважды' | tr -d ' ')" "1"
+  "$(check_domains_unique | grep -c 'declared twice by stack hotel' | tr -d ' ')" "1"
 check "про «и в hotel, и в hotel» не сообщается" \
-  "$(check_domains_unique | grep -c 'и в hotel, и в hotel' | tr -d ' ')" "0"
+  "$(check_domains_unique | grep -c 'both hotel and hotel' | tr -d ' ')" "0"
 rm -rf "$WORK/stacks/hotel"
 printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
 check "домен без vhost и vhost без домена — обе стороны" \
@@ -373,7 +373,7 @@ check "домен без vhost и vhost без домена — обе стор�
 check "относительный и захардкоженный host-пути найдены, оба вида корректных — нет" \
   "$(check_paths_absolute golf | wc -l | tr -d ' ')" "2"
 check "захардкоженный путь назван именно захардкоженным" \
-  "$(check_paths_absolute golf | grep -c 'захардкоженный')" "1"
+  "$(check_paths_absolute golf | grep -c 'hardcoded host path')" "1"
 check "имя юнита без префикса найдено" "$(check_unit_names golf | wc -l | tr -d ' ')" "1"
 check "таймер без проверки найден" \
   "$(check_timer_has_check golf | grep -c 'devbox-golf-job')" "1"
@@ -978,6 +978,19 @@ while IFS=: read -r name target; do
   [ -f "$REPO_DIR/platform/bin/$target" ] || badwrap="$badwrap $name->$target"
 done < "$REPO_DIR/templates/machine/wrappers"
 check "цели обёрток машины существуют" "$badwrap" ""
+
+# 13. Одна функция, определённая дважды. В bash побеждает ПОСЛЕДНЕЕ
+#     определение, а первое остаётся мёртвым кодом, который выглядит живым:
+#     правку в нём вносят, тестируют — и ничего не меняется. Хуже, если копии
+#     разошлись: тогда перестановка блоков местами молча возвращает старое
+#     поведение.
+dupfn=""
+while IFS= read -r f; do
+  while IFS= read -r fn; do
+    [ "$(grep -cE "^${fn}\(\) \{" "$f")" -gt 1 ] && dupfn="$dupfn $(basename "$f"):$fn"
+  done < <(grep -oE '^[a-z_][a-z_0-9]*\(\) \{' "$f" | sed 's/() {//' | sort -u)
+done < <(find "$REPO_DIR/platform/lib" "$REPO_DIR/platform/bin" "$REPO_DIR/bin" -name '*.sh' 2>/dev/null)
+check "ни одна функция не определена дважды" "$dupfn" ""
 
 # 13. Имя образа nginx — одно на всех, кто его называет. Копий было три, и
 #     htpasswd.sh про Platform_Nginx_Image вовсе не знал: на машине с
