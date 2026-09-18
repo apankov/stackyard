@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 
-# Проверка, что бэкапы действительно есть.
+# Checking that backups actually exist.
 #
-# Существует по той же причине, что и check-certs.sh: скрипт, отработавший
-# успешно, и скрипт, решивший что источников ноль и честно вышедший с кодом 0,
-# выглядят одинаково. Поэтому здесь ожидаемый список источников строится
-# ЗАНОВО — у самой СУБД, — а результат спрашивается у S3, а не у backup.sh.
+# This exists for the same reason as check-certs.sh: a script that did its work
+# and a script that decided there were zero sources and honestly exited 0 look
+# identical. So the expected list of sources is rebuilt HERE — from the DBMS
+# itself — and the result is asked of S3 rather than of backup.sh.
 #
-# Коды возврата (как в check-certs.sh):
-#   0 — все источники свежие и непустые
-#   1 — есть проблемные: устарел, пуст или отсутствует
-#   2 — проверить не удалось (нет конфига, S3 или СУБД недоступны)
+# Exit codes (as in check-certs.sh):
+#   0 — every source is fresh and non-empty
+#   1 — some are not: stale, empty or missing
+#   2 — the check could not be performed (no config, S3 or the DBMS unreachable)
 #
-# Ненулевой код -> юнит в состоянии failed -> виден в `systemctl --failed`,
-# а не тонет в журнале. Внешнего канала оповещений пока нет; этот скрипт —
-# точка, к которой он будет подключён.
+# A non-zero code puts the unit into the failed state, so it is visible in
+# `systemctl --failed` rather than sinking into the journal.
 
 set -uo pipefail
 
@@ -37,19 +36,18 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 
 # shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
-# lib-stacks нужен с самого начала: поставщика БД спрашиваем ещё при разборе
-# конфига. Раньше на его месте стояла константа с именем контейнера postgres,
-# и библиотека подключалась сильно позже, по месту первой надобности.
+# lib-stacks is needed from the very start: the DB provider is asked for while
+# the config is still being parsed.
 # shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
 
 ENV_BACKUP="$ROOT_DIR/.env-backup"
-[ -f "$ENV_BACKUP" ] || { echo "Ошибка: нет $ENV_BACKUP" >&2; exit 2; }
+[ -f "$ENV_BACKUP" ] || { echo "Error: no $ENV_BACKUP" >&2; exit 2; }
 
 env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
 
 S3_BUCKET=$(env_get Backup_S3_Bucket)
-[ -n "$S3_BUCKET" ] || { echo "Ошибка: Backup_S3_Bucket не задан" >&2; exit 2; }
+[ -n "$S3_BUCKET" ] || { echo "Error: Backup_S3_Bucket is not set" >&2; exit 2; }
 S3_PREFIX=$(backup_s3_prefix)
 AWS_REGION=$(env_get Backup_AWS_Region us-east-1)
 AWS_KEY=$(env_get Backup_AWS_Access_Key_Id)
@@ -67,18 +65,19 @@ aws_cli() {
   fi
 }
 
-command -v aws >/dev/null 2>&1 || { echo "Ошибка: нет команды 'aws'" >&2; exit 2; }
+command -v aws >/dev/null 2>&1 || { echo "Error: no 'aws' command" >&2; exit 2; }
 aws_cli s3api head-bucket --bucket "$S3_BUCKET" >/dev/null 2>&1 \
-  || { echo "Ошибка: бакет '$S3_BUCKET' недоступен" >&2; exit 2; }
+  || { echo "Error: bucket '$S3_BUCKET' is not reachable" >&2; exit 2; }
 
-# ---------------------------------------------- ожидаемый список источников
+# ---------------------------------------------- the expected source list
 
 EXPECTED=()
 DEGRADED=0
 
-# Список баз строим ЗАНОВО, у самой СУБД, а не берём у backup.sh: проверка,
-# спрашивающая у проверяемого, подтверждает только его собственное мнение.
-# Спрашиваем через хук поставщика — про pg_dump и mysqldump платформа не знает.
+# The database list is rebuilt from the DBMS itself rather than taken from
+# backup.sh: a check that asks the thing being checked only confirms its own
+# opinion. It is asked through the provider's hook — the platform knows nothing
+# about any particular dump command.
 DB_PROVIDER="$(stacks_db_provider)"
 databases=""
 if [ -n "$DB_PROVIDER" ]; then
@@ -91,11 +90,11 @@ if [ -n "$DB_PROVIDER" ]; then
   fi
 
   if [ -z "$databases" ]; then
-    # Список не построить — значит нельзя утверждать, что все базы охвачены.
-    # Свежесть того, что есть, всё равно проверяем: это полезнее молчания. Но
-    # итоговый код будет 2, потому что «не смогли проверить» — не то же самое,
-    # что «всё хорошо».
-    echo "ВНИМАНИЕ: список баз у поставщика '$DB_PROVIDER' получить не удалось — полнота не проверена." >&2
+    # If the list cannot be built, nobody can claim every database is covered.
+    # The freshness of what does exist is still checked — that is more useful
+    # than silence. But the final exit code will be 2, because "could not
+    # verify" is not the same as "all is well".
+    echo "NOTE: could not obtain the database list from provider '$DB_PROVIDER' — completeness was not verified." >&2
     DEGRADED=1
     while IFS= read -r p; do
       [ -n "$p" ] && EXPECTED+=("$DB_PREFIX/$p")
@@ -108,10 +107,10 @@ if [ -n "$DB_PROVIDER" ]; then
   fi
 fi
 
-# Ожидаемый набор строится из ТЕХ ЖЕ деклараций, из которых backup.sh строит
-# фактический, и той же формулой префикса из общего lib-env.sh. Две копии одной
-# формулы разъезжаются легко, а замечается это как «нет ни одного бэкапа» при
-# исправных бэкапах — так уже было.
+# The expected set is built from THE SAME declarations backup.sh builds the
+# actual one from, using the same prefix formula out of the shared lib-env.sh.
+# Two copies of one formula drift easily, and the symptom is "no backups at
+# all" while backups are healthy.
 while IFS= read -r stack; do
   [ -n "$stack" ] || continue
   while IFS= read -r src; do
@@ -125,7 +124,7 @@ while IFS= read -r stack; do
   ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
 done < <(stacks_enabled 2>/dev/null)
 
-# --------------------------------------------------------------- проверка
+# --------------------------------------------------------------- the check
 
 now=$(date -u +%s)
 problems=0
@@ -137,7 +136,7 @@ for src in "${EXPECTED[@]}"; do
              --output text 2>/dev/null)
 
   if [ -z "$newest" ] || [ "$newest" = "None" ] || [ "$newest" = "None	None" ]; then
-    printf '%-34s НЕТ НИ ОДНОГО БЭКАПА\n' "$src"
+    printf '%-34s NO BACKUP AT ALL\n' "$src"
     problems=$((problems + 1))
     continue
   fi
@@ -146,7 +145,7 @@ for src in "${EXPECTED[@]}"; do
   modified=$(printf '%s' "$newest" | awk '{print $2}')
 
   if ! ts=$(iso_to_epoch "$modified"); then
-    printf '%-34s ОШИБКА: не разобрана дата "%s"\n' "$src" "$modified"
+    printf '%-34s ERROR: could not parse the date "%s"\n' "$src" "$modified"
     problems=$((problems + 1))
     continue
   fi
@@ -154,28 +153,28 @@ for src in "${EXPECTED[@]}"; do
   age_h=$(( (now - ts) / 3600 ))
 
   if [ "$size" -lt "$MIN_OBJ_BYTES" ]; then
-    # Оборванный дамп почти всегда крошечный. Без этой проверки «файл есть»
-    # неотличимо от «бэкап есть».
-    printf '%-34s ПУСТОЙ: %s б при пороге %s б\n' "$src" "$size" "$MIN_OBJ_BYTES"
+    # A truncated dump is almost always tiny. Without this check "a file
+    # exists" is indistinguishable from "a backup exists".
+    printf '%-34s EMPTY: %s B against a %s B threshold\n' "$src" "$size" "$MIN_OBJ_BYTES"
     problems=$((problems + 1))
   elif [ "$age_h" -ge "$MAX_AGE_HOURS" ]; then
-    printf '%-34s УСТАРЕЛ: %s ч назад (порог %s ч)\n' "$src" "$age_h" "$MAX_AGE_HOURS"
+    printf '%-34s STALE: %sh old (threshold %sh)\n' "$src" "$age_h" "$MAX_AGE_HOURS"
     problems=$((problems + 1))
   else
-    printf '%-34s ok, %s ч назад, %s КиБ\n' "$src" "$age_h" "$((size / 1024))"
+    printf '%-34s ok, %sh old, %s KiB\n' "$src" "$age_h" "$((size / 1024))"
   fi
 done
 
 echo
 if [ "$problems" -gt 0 ]; then
-  echo "Проблемных источников: $problems из ${#EXPECTED[@]}." >&2
-  echo "Разбор: journalctl -u devbox-backup --since '-3 days'" >&2
+  echo "Problem sources: $problems of ${#EXPECTED[@]}." >&2
+  echo "Investigate with: journalctl -u devbox-backup --since '-3 days'" >&2
   exit 1
 fi
 
 if [ "$DEGRADED" -eq 1 ]; then
-  echo "Все найденные источники свежие, но список баз не проверен — см. предупреждение выше." >&2
+  echo "Every source found is fresh, but the database list was not verified — see the note above." >&2
   exit 2
 fi
 
-echo "Проверено источников: ${#EXPECTED[@]}. Все свежее $MAX_AGE_HOURS ч и непустые."
+echo "Sources checked: ${#EXPECTED[@]}. All fresher than ${MAX_AGE_HOURS}h and non-empty."
