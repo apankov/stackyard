@@ -40,7 +40,7 @@ MUTATIONS=(
   'missing_files: compose не обязателен@@platform/lib/lib-stacks.sh@@  if [ "$(stack_conf_get "$s" Containers yes)" != "no" ] \&\&@@  if false \&\&'
   'missing_files: образец ищется по машинному пути@@platform/lib/lib-stacks.sh@@  if [ -f "$(stack_dir "$s")/.env.example" ]@@  if [ -f "$(stacks_root)/stacks/$s/.env.example" ]'
   'юниты: @STACK_DIR@ теряет корень@@platform/lib/lib-stacks.sh@@${DEPLOY_DIR:?}$(_stack_dir_suffix "$stack")@@${DEPLOY_DIR:?}/stacks/$stack'
-  'бэкап: gzip опознаётся как SQLite (A2)@@platform/lib/lib-env.sh@@    1f8b*) ;;                                                          # gzip — смотрим внутрь@@    1f8b*) printf sqlite_gz; return 0 ;;'
+  'бэкап: gzip опознаётся как SQLite (A2)@@platform/lib/lib-env.sh@@    1f8b*) ;;                                                          # gzip — look inside@@    1f8b*) printf sqlite_gz; return 0 ;;'
   'бэкап: tar под gzip не отличается@@platform/lib/lib-env.sh@@    7573746172*) printf '"'"'tar_gz'"'"'; return 0 ;;@@    7573746172*) printf unknown; return 0 ;;'
   'seed: инициализатор читает другой ключ (A3)@@profiles/stacks/mysql/db-init/initializer.sh@@yq e '"'"'.dump // ""'"'"' -@@yq e '"'"'.dump_file // ""'"'"' -'
   'свежая машина: state/ не заводится (B1)@@platform/lib/lib-stacks.sh@@  mkdir -p "$root/state/nginx-vhosts"@@  mkdir -p "$root/state/NOPE"  #'

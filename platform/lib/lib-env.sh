@@ -1,54 +1,53 @@
 # shellcheck shell=bash
-# Чтение .env-файлов девбокса. Подключается через `source`, самостоятельно не
-# запускается.
+# Reading the machine's .env files. Sourced, never run on its own.
 #
-# Зачем отдельный файл: `.env`-файлы читает добрый десяток скриптов, и
-# однострочник `grep | cut | tr -d` в каждом из них разбирает их по-разному.
-# Новый код читает env только отсюда.
+# Why a shared file: a dozen scripts read .env, and a `grep | cut | tr -d`
+# one-liner in each of them parses it slightly differently. All env reading
+# goes through here.
 #
-# Чего этот загрузчик НЕ делает: не исполняет содержимое файла. `source .env`
-# выглядит проще, но значение вроде `Pass=a b c` или обратные кавычки в пароле
-# превращаются в исполняемый код. Здесь разбор построчный.
+# What this loader does NOT do: execute the file. `source .env` looks simpler,
+# but a value such as `Pass=a b c`, or a backtick inside a password, becomes
+# executable code. Parsing here is line by line.
 #
-# Что он умеет сверх однострочника — разворачивать `${ДРУГАЯ_ПЕРЕМЕННАЯ}`, как
-# это делает docker compose. Без этого `Tsh_Host_DB_Dir=${Tsh_Host_Home_Dir}/db`
-# из stacks/timesheets/.env читается буквально, вместе со скобками, и путь к базе
-# получается несуществующим.
+# What it adds over a one-liner is expanding `${OTHER_VARIABLE}`, the way
+# docker compose does. Without that, `Db_Dir=${Home_Dir}/db` is read
+# literally, braces and all, and the resulting path does not exist.
 
-# `declare -gA` — это bash >= 4.2. Штатный /bin/bash в macOS — 3.2, и под ним
-# строка ниже падает с `declare: -g: invalid option`, после чего подключивший
-# библиотеку скрипт продолжает работу с пустым ENV_VARS: все env_get возвращают
-# умолчания, и скрипт делает не то, о чём его просили, ничего не сказав.
-# Попасть на 3.2 легче всего через sudo: он чистит PATH, и `/usr/bin/env bash`
-# находит системный, а не тот, которым скрипт запускали руками.
+# `declare -gA` requires bash >= 4.2. The stock /bin/bash on macOS is 3.2, and
+# there the line below fails with `declare: -g: invalid option`; the sourcing
+# script then continues with an empty ENV_VARS, every env_get returns its
+# default, and the script quietly does something other than what was asked.
+# The easiest way to land on 3.2 is sudo: it sanitises PATH, so `/usr/bin/env
+# bash` finds the system one rather than the bash used to launch the script.
 if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] ||
    { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -lt 2 ]; }; then
-  echo "Ошибка: нужен bash >= 4.2, запущен ${BASH_VERSION:-не bash}." >&2
-  echo "        В macOS /bin/bash — это 3.2; поставьте свежий bash и вызывайте" >&2
-  echo "        скрипт им явно (sudo чистит PATH: sudo \"\$(command -v bash)\" <скрипт>)." >&2
+  echo "Error: bash >= 4.2 required, running ${BASH_VERSION:-not bash}." >&2
+  echo "       On macOS /bin/bash is 3.2; install a current bash and invoke" >&2
+  echo "       the script with it explicitly (sudo sanitises PATH, so use" >&2
+  echo "       sudo \"\$(command -v bash)\" <script>)." >&2
   exit 1
 fi
 
 declare -gA ENV_VARS=()
 
-# env_load_files <файл> [<файл>...]
-# Загружает файлы по порядку; более поздний перебивает более ранний.
-# Отсутствующий файл пропускается молча — вызывающий сам решает, обязателен ли он.
+# env_load_files <file> [<file>...]
+# Loads files in order; a later file overrides an earlier one.
+# A missing file is skipped silently — the caller decides whether it is required.
 env_load_files() {
   local file line key val
   for file in "$@"; do
     [ -f "$file" ] || continue
     while IFS= read -r line || [ -n "$line" ]; do
-      line="${line%$'\r'}"                       # CRLF, если файл правили в Windows
+      line="${line%$'\r'}"                       # CRLF, if the file was edited on Windows
       [[ "$line" =~ ^[[:space:]]*# ]] && continue
       [[ "$line" =~ ^[[:space:]]*$ ]] && continue
       [[ "$line" == *=* ]] || continue
       key="${line%%=*}"
-      key="${key#"${key%%[![:space:]]*}"}"       # обрезать пробелы слева
-      key="${key%"${key##*[![:space:]]}"}"       # и справа
+      key="${key#"${key%%[![:space:]]*}"}"       # trim leading whitespace
+      key="${key%"${key##*[![:space:]]}"}"       # and trailing
       [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
       val="${line#*=}"
-      # Кавычки вокруг значения снимаем: docker compose их тоже не сохраняет.
+      # Quotes around a value are stripped: docker compose does not keep them either.
       if [[ "$val" == \"*\" && ${#val} -ge 2 ]]; then val="${val:1:${#val}-2}"
       elif [[ "$val" == \'*\' && ${#val} -ge 2 ]]; then val="${val:1:${#val}-2}"
       fi
@@ -58,9 +57,9 @@ env_load_files() {
   env_expand
 }
 
-# Разворачивает ${VAR} внутри значений. Итеративно, потому что ссылка может
-# указывать на значение, которое само содержит ссылку. Потолок в 10 проходов —
-# защита от `A=${A}`: такой файл не должен вешать скрипт бэкапа намертво.
+# Expands ${VAR} inside values. Iteratively, because a reference may point at a
+# value that itself contains a reference. The ceiling of 10 passes guards
+# against `A=${A}`: such a file must not hang the backup script forever.
 env_expand() {
   local pass key val ref sub changed
   for (( pass = 0; pass < 10; pass++ )); do
@@ -70,7 +69,7 @@ env_expand() {
       while [[ "$val" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
         ref="${BASH_REMATCH[1]}"
         sub="${ENV_VARS[$ref]-}"
-        # Ссылка на саму себя не раскроется никогда — обрываем, оставив как есть.
+        # A self-reference never resolves — stop and leave it as written.
         [ "$ref" = "$key" ] && break
         [[ "$sub" == *"\${$ref}"* ]] && break
         val="${val//\$\{$ref\}/$sub}"
@@ -82,39 +81,41 @@ env_expand() {
   done
 }
 
-# env_get <ключ> [<значение по умолчанию>]
+# env_get <key> [<default>]
 env_get() {
   local key="$1" default="${2-}"
   local val="${ENV_VARS[$key]-}"
   if [ -z "$val" ]; then printf '%s' "$default"; else printf '%s' "$val"; fi
 }
 
-# env_require <ключ> <пояснение для человека>
-# Пустое значение — это НЕ «не задано по умолчанию»: см. раздел про
-# emptyStringAsUndefined в README. Здесь пустая строка считается отсутствием.
+# env_require <key> <human-readable hint>
+# An empty value counts as absent: a key present but blank is a half-filled
+# config, not a deliberate default.
 env_require() {
   local key="$1" hint="${2-}"
   local val="${ENV_VARS[$key]-}"
   if [ -z "$val" ]; then
-    echo "Ошибка: в .env-backup не задано $key${hint:+ — $hint}" >&2
+    echo "Error: $key is not set in .env-backup${hint:+ — $hint}" >&2
     return 1
   fi
   printf '%s' "$val"
 }
 
 # ---------------------------------------------------------------------------
-# Производные значения, которые считают НЕСКОЛЬКО скриптов.
+# Derived values computed by SEVERAL scripts.
 #
-# Живут здесь, а не в каждом по копии, из-за конкретного отказа: backup.sh
-# кладёт дамп по одному префиксу, check-backups.sh ищет по другому — и вечно
-# докладывает «нет ни одного бэкапа» при исправных бэкапах. Разъехаться двум
-# копиям одной формулы легко, а заметить это трудно.
+# They live here rather than as a copy in each one because two copies of one
+# formula drift apart quietly: backup.sh would store an object under one path
+# while check-backups.sh looks under another, and the check would report "no
+# backups at all" while backups are being taken correctly. Both sides look
+# healthy in isolation.
 
-# Все ли ${...} из сырого значения ключа заданы. Печатает недостающие в stderr.
+# Whether every ${...} in a key's raw value is defined. Prints the missing ones
+# to stderr.
 #
-# Отдельной функцией, потому что сырое значение надо читать из stack.conf в
-# обход env_get: тот отдаёт уже развёрнутое, где незаданная переменная
-# неотличима от заданной пустой.
+# A separate function because the raw value has to be read from stack.conf
+# bypassing env_get: env_get returns the already-expanded value, where an unset
+# variable is indistinguishable from one set to the empty string.
 _env_check_refs() {
   local key="$1" s="$2" raw ref missing=""
   raw=$(grep -E "^[[:space:]]*${key}=" "$(stack_conf_file "$s")" 2>/dev/null \
@@ -126,57 +127,60 @@ _env_check_refs() {
     raw="${raw//\$\{$ref\}/}"
   done
   [ -z "$missing" ] && return 0
-  echo "Ошибка: $key стека '$s' ссылается на незаданные переменные:$missing" >&2
-  echo "  Задайте их в stacks/$s/.env (образец — .env.example рядом)." >&2
+  echo "Error: $key of stack '$s' references undefined variables:$missing" >&2
+  echo "  Define them in stacks/$s/.env (see .env.example next to it)." >&2
   return 1
 }
 
-# ----------------------------------------------------------- база у поставщика
+# --------------------------------------------- databases at the provider stack
 
-# YAML-строка в одинарных кавычках. Внутри них спецсимволов нет вовсе — кроме
-# самой одинарной кавычки, которая удваивается.
+# A YAML single-quoted string. Inside single quotes there are no escapes at
+# all, except the single quote itself, which is doubled.
 #
-# Нужно потому, что здесь проходят ПАРОЛИ: обрезанный на кавычке пароль дал бы
-# пользователя, под которым приложение не подключится, — ровно ту поломку, ради
-# устранения которой этот генератор и существует.
+# This matters because PASSWORDS go through here: a password truncated at a
+# quote would produce a user the application cannot authenticate as — exactly
+# the failure this generator exists to prevent.
 _yaml_sq() { printf "'%s'" "${1//\'/\'\'}"; }
 
-# Ключи, которые движок собирает у потребителя и отдаёт поставщику.
+# The keys the engine collects from consumers and hands to the provider.
 #
-# DB, User и Password обязательны — без них заказ базы бессмыслен. Остальные
-# необязательны, и что они значат, решает поставщик: Grants понимает стек
-# mysql, Dump — и mysql, и pg. Движок в их смысл не вникает и не проверяет их:
-# список допустимых прав MySQL в платформе означал бы, что платформа знает про
-# MySQL, то есть ровно то, от чего мы уходим. Проверку своих ключей поставщик
-# делает сам, в scripts/check-decl.sh.
+# DB, User and Password are required — without them ordering a database is
+# meaningless. The rest are optional, and their meaning is the provider's
+# business: Grants is understood by the mysql stack, Dump by both mysql and pg.
+# The engine does not interpret them and does not validate them: a list of
+# valid MySQL privileges inside the platform would mean the platform knows
+# about MySQL, which is precisely what this design avoids. The provider
+# validates its own keys, in scripts/check-decl.sh.
 DB_KEYS_REQUIRED="DB User Password"
 DB_KEYS_OPTIONAL="Grants Dump"
 
 # stacks_databases_content
 #
-# Содержимое databases.yaml: базы и пользователи, заказанные ВКЛЮЧЁННЫМИ
-# стеками у включённого поставщика.
+# The contents of databases.yaml: databases and users ordered by the ENABLED
+# stacks from the enabled provider.
 #
-# Почему из включённых, а не из всех — в отличие от генератора статики. Разница
-# в природе файла: nginx-static.generated.yaml входит в СПЕКУ контейнера, и её
-# изменение пересоздаёт nginx, поэтому она обязана не зависеть от набора
-# стеков. Этот файл — bind-mount, его содержимое не меняет ни одной
-# спецификации. А по смыслу выключенному стеку базу заводить незачем; обратной
-# поломки нет, потому что инициализатор не удаляет ничего и никогда.
+# Why enabled stacks rather than all of them, unlike the static generator. The
+# difference is in the nature of the file: nginx-static.generated.yaml is part
+# of the container SPEC, and changing it recreates nginx, so it must not depend
+# on which stacks are enabled. This file is a bind mount; its contents change
+# no specification. And a disabled stack has no use for a database. There is no
+# failure in the other direction because the initializer never deletes
+# anything.
 #
-# ФАЙЛ СОДЕРЖИТ ПАРОЛИ: пишется с chmod 600 и в git не лежит.
+# THE FILE CONTAINS PASSWORDS: written with chmod 600 and kept out of git.
 stacks_databases_content() {
   local root="${ROOT_DIR:?}" prefix s key val body=""
   prefix="$(stacks_db_prefix)"
   [ -n "$prefix" ] || return 0
 
   cat <<HDR
-# СГЕНЕРИРОВАННЫЙ ФАЙЛ — правки будут перезаписаны.
-# Создаётся stack.sh из ключей ${prefix}_* в stacks/*/stack.conf.
+# GENERATED FILE — edits will be overwritten.
+# Produced by stack.sh from the ${prefix}_* keys in stacks/*/stack.conf.
 #
-# Источник правды — .env стека. Вторая копия имени базы, пользователя и пароля
-# разъезжается с ним молча: приложение получает отказ аутентификации при живой
-# базе, и видно это только в его логах, часы спустя после \`up -d\`.
+# The source of truth is the stack's .env. A second copy of the database name,
+# user and password drifts from it silently: the application gets an
+# authentication failure against a healthy database, and it shows up only in
+# the application's own log, hours after \`up -d\`.
 HDR
 
   while IFS= read -r s; do
@@ -185,28 +189,28 @@ HDR
     env_load_files "$root/.env" "$(stack_env_file "$s")" "$(stack_conf_file "$s")"
     [ -n "$(env_get "${prefix}_DB")" ] || continue
     body="$body
-# стек $s"
+# stack $s"
     for key in $DB_KEYS_REQUIRED $DB_KEYS_OPTIONAL; do
       val="$(env_get "${prefix}_${key}")"
       [ -n "$val" ] || continue
-      # Ключ в файле — в нижнем регистре и без префикса: инициализатор
-      # поставщика читает СВОЙ файл и про наш префикс знать не обязан.
+      # The key in the file is lowercase and without the prefix: the provider's
+      # initializer reads ITS OWN file and need not know our prefix.
       body="$body
   $(printf '%s' "$key" | tr 'A-Z' 'a-z'): $(_yaml_sq "$val")"
     done
-    # Первый ключ записи должен нести дефис списка YAML. Проще дописать его
-    # здесь, чем ветвить цикл выше.
+    # The first key of an entry must carry the YAML list dash. Appending it
+    # here is simpler than branching inside the loop above.
     body="$(printf '%s' "$body" | sed 's/^  db:/- db:/')"
   done < <(stacks_enabled 2>/dev/null)
   printf '%s\n' "$body"
 }
 
-# Проверки декларации. Печатают по строке на проблему и молчат, когда её нет —
-# как остальные check_* в lib-stacks.sh.
+# Declaration checks. They print one line per problem and stay silent when
+# there is none, like the other check_* functions in lib-stacks.sh.
 
-# Неполный заказ базы. Пользователь без пароля был бы создан с ПУСТЫМ паролем и
-# пустил бы кого угодно, кто дотянется до порта СУБД; база без пользователя не
-# создастся вовсе.
+# An incomplete database order. A user without a password would be created with
+# an EMPTY password and would let in anyone who can reach the database port; a
+# database without a user would not be created at all.
 check_db_decl() {
   local s="$1" root="${ROOT_DIR:?}" prefix key missing="" any=""
   prefix="$(stacks_db_prefix)"
@@ -217,10 +221,11 @@ check_db_decl() {
     if [ -n "$(env_get "${prefix}_${key}")" ]; then any=1; else missing="$missing ${prefix}_${key}"; fi
   done
   [ -n "$any" ] || return 0
-  [ -z "$missing" ] || printf 'стек %s: заказ базы неполный, не хватает:%s\n' "$s" "$missing"
+  [ -z "$missing" ] || printf 'stack %s: incomplete database order, missing:%s\n' "$s" "$missing"
 
-  # Свои ключи проверяет поставщик: что такое Grants, знает он, а не движок.
-  # Наличие файла — и есть объявление, отдельного ключа для этого не нужно.
+  # The provider validates its own keys: what Grants means is known to it, not
+  # to the engine. The presence of the file is the declaration; no separate key
+  # is needed for it.
   local provider check
   provider="$(stacks_db_provider)"
   [ -n "$provider" ] || return 0
@@ -229,9 +234,10 @@ check_db_decl() {
   STACK_NAME="$s" DB_PREFIX="$prefix" "$check" 2>&1 || true
 }
 
-# Одно имя базы у двух стеков — спор за владельца и почти наверняка опечатка:
-# инициализатор заведёт базу первому и молча пропустит второго, а тот получит
-# чужую базу с чужими данными.
+# One database name ordered by two stacks is a fight over ownership and almost
+# certainly a typo: the initializer creates the database for the first stack
+# and silently skips the second, which then gets someone else's database with
+# someone else's data.
 check_databases_unique() {
   local root="${ROOT_DIR:?}" prefix s db
   prefix="$(stacks_db_prefix)"
@@ -243,39 +249,39 @@ check_databases_unique() {
     db="$(env_get "${prefix}_DB")"
     [ -n "$db" ] && printf '%s\t%s\n' "$db" "$s"
   done < <(stacks_enabled 2>/dev/null) | sort | awk -F'\t' '
-    # $2 != prevs — по той же причине, что в check_domains_unique: соседние
-    # строки могут прийти от одного стека, и «заказывают и papa, и papa»
-    # читается как поломка проверки, а не как находка.
+    # $2 != prevs for the same reason as in check_domains_unique: adjacent
+    # lines can come from one stack, and "ordered by papa and by papa" reads
+    # as a broken check rather than as a finding.
     { if ($1 == prev) {
-        if ($2 == prevs) print "базу " $1 " стек " $2 " заказывает дважды"
-        else             print "базу " $1 " заказывают и " prevs ", и " $2
+        if ($2 == prevs) print "database " $1 " is ordered twice by stack " $2
+        else             print "database " $1 " is ordered by both " prevs " and " $2
       }
       prev = $1; prevs = $2 }'
 }
 
-# stack_backup_sources <стек>
+# stack_backup_sources <stack>
 #
-# Печатает по строке на источник: "<вид>:<путь-или-имя>". Виды — db, sqlite,
-# files, volume. Какой именно СУБД принадлежит db, движок не знает: дампы
-# снимает поставщик.
+# Prints one line per source: "<kind>:<path-or-name>". Kinds are db, sqlite,
+# files, volume. Which DBMS a db source belongs to is unknown to the engine:
+# dumps are taken by the provider.
 #
-# Вызывается ТОЛЬКО для включённых стеков: у них .env есть по построению, иначе
-# на машине не запустилась бы ни одна compose-команда. Поэтому здесь подстановки
-# РАЗВОРАЧИВАЮТСЯ — в отличие от Static, который платформа отдаёт compose
-# дословно (см. stack_conf_get в lib-stacks.sh).
+# Called ONLY for enabled stacks: they have a .env by construction, otherwise
+# no compose command would run on the machine at all. That is why substitutions
+# are EXPANDED here — unlike Static, which the platform passes to compose
+# verbatim (see stack_conf_get in lib-stacks.sh).
 #
-# Список баз общего поставщика здесь не собирается намеренно: его спрашивают у
-# самой СУБД. Захардкоженный список означал бы, что следующая заведённая база
-# молча останется без бэкапа. Backup_DB — только дополнение, для базы, которой
-# в общем контейнере нет.
+# The list of databases in the shared provider is deliberately not assembled
+# here; it is asked of the DBMS itself. A hardcoded list would mean the next
+# database someone creates silently goes unbacked. Backup_DB is only an
+# addition, for a database that does not live in the shared container.
 #
-# Не-СУБД источники стек объявляет сам (Backup_Sqlite= в stack.conf).
-# Захардкоженный в движке путь означал бы правку backup.sh при каждом новом
-# таком стеке.
+# Non-DBMS sources are declared by the stack itself (Backup_Sqlite= in
+# stack.conf). A path hardcoded in the engine would mean editing backup.sh for
+# every new stack of that kind.
 stack_backup_sources() {
   local s="$1" root="${ROOT_DIR:?}" kind key v
-  # Свой набор переменных на стек: значения соседнего стека не должны протекать
-  # в подстановки этого.
+  # A fresh variable set per stack: values from a neighbouring stack must not
+  # leak into this one's substitutions.
   ENV_VARS=()
   env_load_files "$root/.env" "$(stack_env_file "$s")" "$(stack_conf_file "$s")"
   for kind in db sqlite files volume; do
@@ -285,23 +291,23 @@ stack_backup_sources() {
       files)    key=Backup_Files ;;
       volume)   key=Backup_Volume ;;
     esac
-    # Незаданная переменная — это отказ, а не источник.
+    # An undefined variable is a failure, not a source.
     #
-    # Так выглядит забытая строка в .env стека: значение
-    # "${Tsh_Host_DB_Dir}/${Tsh_DB_File}" при отсутствующей второй
-    # переменной свернулось бы в путь, оканчивающийся на слэш, и бэкап этого
-    # источника молча перестал бы сниматься. Молчание здесь — худший исход:
-    # отсутствующий бэкап выглядит ровно как источник, которого нет.
+    # That is what a forgotten line in a stack's .env looks like: a value of
+    # "${Host_Db_Dir}/${Db_File}" with the second variable missing would
+    # collapse into a path ending in a slash, and that source would silently
+    # stop being backed up. Silence is the worst outcome here: a missing backup
+    # looks exactly like a source that does not exist.
     #
-    # Имя недостающей переменной берём из СЫРОГО значения: env_expand к этому
-    # моменту уже подставил вместо неё пустую строку, и по развёрнутому
-    # значению не сказать, что именно чинить.
+    # The name of the missing variable is taken from the RAW value: by this
+    # point env_expand has already substituted an empty string for it, and the
+    # expanded value no longer says what needs fixing.
     if ! _env_check_refs "$key" "$s"; then return 1; fi
 
     for v in $(env_get "$key"); do
       case "$v" in
-        */) echo "Ошибка: $key стека '$s' оканчивается на слэш: $v" >&2
-            echo "  Похоже, имя файла подставилось пустым." >&2
+        */) echo "Error: $key of stack '$s' ends in a slash: $v" >&2
+            echo "  A file name was probably substituted as empty." >&2
             return 1 ;;
       esac
       printf '%s:%s\n' "$kind" "$v"
@@ -309,63 +315,64 @@ stack_backup_sources() {
   done
 }
 
-# ------------------------------------------------- распознавание дампа
+# ------------------------------------------------- recognising a dump
 #
-# backup_file_kind <файл> -> sqlite_plain | sqlite_gz | tar_gz | unknown
+# backup_file_kind <file> -> sqlite_plain | sqlite_gz | tar_gz | unknown
 #
-# Смотрит на СОДЕРЖИМОЕ, а не на обёртку. Прошлая версия объявляла SQLite'ом
-# любой gzip — а gzip'ом сжаты и дамп MySQL (.sql.gz), и tar источников files:
-# и volume:. То есть в аварийный день дамп базы опознавался как база SQLite,
-# восстановление шло не той веткой и в базу не попадало ничего.
+# Looks at the CONTENT, not at the wrapper. Treating every gzip as SQLite would
+# be wrong: a MySQL dump (.sql.gz) and a tar of files:/volume: sources are both
+# gzipped. On the day a restore is needed, a database dump would be recognised
+# as a SQLite database, the restore would take the wrong branch, and nothing
+# would land in the database.
 #
-# unknown означает «это не то, что платформа знает сама» — тогда спрашивают
-# поставщика БД: форматы своих дампов знает только он.
+# unknown means "not something the platform recognises on its own" — then the
+# DB provider is asked: only it knows the formats of its own dumps.
 backup_file_kind() {
   local f="$1" magic head
   magic=$(od -An -v -tx1 -N16 "$f" 2>/dev/null | tr -d ' \n')
   case "$magic" in
     53514c69746520666f726d6174*) printf 'sqlite_plain'; return 0 ;;   # "SQLite format"
-    1f8b*) ;;                                                          # gzip — смотрим внутрь
+    1f8b*) ;;                                                          # gzip — look inside
     *)     printf 'unknown'; return 0 ;;
   esac
 
-  # Внутрь gzip: 512 байт хватает и на заголовок SQLite, и на поле ustar в
-  # заголовке tar (смещение 257). Читаем через head, чтобы не разворачивать
-  # многогигабайтный дамп ради шестнадцати байт.
+  # Inside the gzip: 512 bytes is enough for both the SQLite header and the
+  # ustar field in a tar header (offset 257). Read through head so a
+  # multi-gigabyte dump is not decompressed for the sake of sixteen bytes.
   head=$(gunzip -c "$f" 2>/dev/null | head -c 512 | od -An -v -tx1 | tr -d ' \n')
   case "$head" in
     53514c69746520666f726d6174*) printf 'sqlite_gz'; return 0 ;;
   esac
-  # "ustar" на смещении 257 — 514-й символ шестнадцатеричной строки.
+  # "ustar" at offset 257 is character 514 of the hex string.
   case "${head:514:10}" in
     7573746172*) printf 'tar_gz'; return 0 ;;
   esac
   printf 'unknown'
 }
 
-# ---------------------------------------------------------- пути в S3
+# ---------------------------------------------------------- paths in S3
 #
-# Формулы живут ЗДЕСЬ, а не в скриптах, из-за конкретного отказа: backup.sh
-# кладёт объект по одному пути, check-backups.sh ищет по другому — и вечно
-# докладывает «нет ни одного бэкапа» при исправных бэкапах. Разъехаться двум
-# копиям одной формулы легко, а заметить это трудно: обе стороны выглядят
-# работающими.
+# The formulas live HERE rather than in the scripts because two copies drift:
+# backup.sh would store an object under one path while check-backups.sh looks
+# under another, and the check would report "no backups at all" while backups
+# are healthy. Both sides look correct in isolation, which makes it hard to
+# notice.
 
-# Префикс машины в бакете. ОБЯЗАТЕЛЕН, без умолчания.
+# The machine's prefix inside the bucket. REQUIRED, with no default.
 #
-# Умолчание здесь опаснее отсутствия: бакет может быть общим на несколько
-# машин, и забытое значение означало бы, что дампы уезжают в чужой каталог —
-# поверх чужих. Раньше на этом месте стояло имя конкретной машины.
-backup_s3_prefix() { env_require Backup_S3_Prefix "префикс этой машины в бакете, свой у каждой"; }
+# A default here is more dangerous than an absence: the bucket may be shared by
+# several machines, and a forgotten value would mean dumps land in another
+# machine's directory, on top of its dumps.
+backup_s3_prefix() { env_require Backup_S3_Prefix "this machine's prefix in the bucket, unique per machine"; }
 
-# Префикс для дампов общей СУБД внутри префикса машины.
+# The prefix for shared-DBMS dumps inside the machine's prefix.
 #
-# По умолчанию — имя стека-поставщика. Переопределяется потому, что смена
-# префикса на РАБОТАЮЩЕЙ машине означает: новые дампы уезжают в другое место, а
-# проверка смотрит туда же и докладывает «бэкапов нет» при исправном бэкапе.
+# Defaults to the provider stack's name. It is overridable because changing the
+# prefix on a RUNNING machine means new dumps go somewhere else while the check
+# keeps looking in the same place and reports "no backups" for healthy backups.
 backup_db_prefix() { env_get Backup_DB_Prefix "$(stacks_db_provider)"; }
 
-# Префикс в S3 для этого файла: sqlite/<имя без расширения>.
+# The S3 prefix for this file: sqlite/<name without extension>.
 sqlite_s3_subpath() {
   local base
   base=$(basename "${1-}")
@@ -374,21 +381,21 @@ sqlite_s3_subpath() {
 }
 
 # --------------------------------------------------------------------------
-# Три обёртки ниже — про одно и то же: команда, которая на машине разработчика
-# есть, а на машине заказчика нет, либо ведёт себя иначе. Каждая из них уже
-# ломалась на живом сервере, и каждый раз молча: посчиталась пустая сумма,
-# разобралось локальное время, не сработал сторож. Поэтому вызывать эти вещи
-# напрямую больше не надо — за этим следит selftest.
+# The three wrappers below are all about the same thing: a command that exists
+# on one machine and not on another, or behaves differently there. Each failure
+# of that kind is silent — an empty checksum, a timestamp read as local time, a
+# watchdog that never starts. Calling these things directly is therefore not
+# allowed, and selftest enforces that.
 # --------------------------------------------------------------------------
 
-# sha256_file <файл> -> шестнадцатеричная сумма без имени файла
+# sha256_file <file> -> hex digest without the file name
 #
-# Ни одна из двух команд не универсальна: sha256sum — из GNU coreutils, и в
-# macOS его нет; shasum — из perl, и в минимальном образе Linux его может не
-# быть. Раньше в check-vendor.sh стоял голый `shasum`: без него подстановка
-# давала пустую строку, она не совпадала ни с одной суммой из манифеста, и
-# проверка докладывала, что на машине правили КАЖДЫЙ файл платформы. Отсутствие
-# инструмента должно называться отсутствием инструмента, а не расхождением.
+# Neither command is universal: sha256sum comes from GNU coreutils and does not
+# exist on macOS; shasum comes from perl and may be absent from a minimal Linux
+# image. A bare `shasum` would substitute an empty string when missing, that
+# string would match no checksum in the manifest, and the check would report
+# that EVERY platform file had been edited in place. A missing tool must be
+# reported as a missing tool, not as a discrepancy.
 sha256_file() {
   local f="${1-}"
   if command -v sha256sum >/dev/null 2>&1; then  # portable-ok
@@ -396,45 +403,46 @@ sha256_file() {
   elif command -v shasum >/dev/null 2>&1; then  # portable-ok
     shasum -a 256 "$f" | cut -d' ' -f1  # portable-ok
   else
-    echo "Ошибка: нет ни sha256sum, ни shasum — нечем считать суммы." >&2  # portable-ok
+    echo "Error: neither sha256sum nor shasum is available — cannot compute checksums." >&2  # portable-ok
     return 2
   fi
 }
 
-# iso_to_epoch <метка ISO-8601> -> секунды эпохи
+# iso_to_epoch <ISO-8601 timestamp> -> epoch seconds
 #
-# GNU date разбирает такую строку сам; BSD date (macOS) не понимает ни
-# двоеточия в смещении (`+00:00`), ни суффикса `Z`, ни долей секунды. Соблазн —
-# отбросить смещение и разобрать остаток через `-f`; так здесь и было. Но `-f`
-# без `-u` и без `%z` считает строку ЛОКАЛЬНЫМ временем, а метки S3 приходят в
-# UTC: к востоку от Гринвича свежий бэкап выглядит устаревшим на величину
-# часового пояса, к западу — устаревший проходит проверку. Поэтому смещение не
-# отбрасываем, а приводим к виду, который BSD разбирает.
+# GNU date parses such a string directly; BSD date (macOS) understands neither
+# the colon in the offset (`+00:00`), nor a `Z` suffix, nor fractional seconds.
+# The tempting shortcut is to drop the offset and parse the rest with `-f`. But
+# `-f` without `-u` and without `%z` reads the string as LOCAL time, while S3
+# timestamps arrive in UTC: east of Greenwich a fresh backup looks stale by the
+# size of the timezone offset, west of it a stale backup passes the check. So
+# the offset is not dropped but normalised into a form BSD date accepts.
 iso_to_epoch() {
   local s="${1-}"
   date -d "$s" +%s 2>/dev/null && return 0
   s=$(printf '%s' "$s" | sed -E 's/\.[0-9]+//; s/[Zz]$/+0000/; s/([+-][0-9]{2}):([0-9]{2})$/\1\2/')
   date -j -f '%Y-%m-%dT%H:%M:%S%z' "$s" +%s 2>/dev/null && return 0
-  # Смещения в строке не было. Тогда это UTC по договорённости источника — и
-  # именно поэтому здесь -u, а не голый -f.
+  # The string carried no offset. Then it is UTC by the source's convention —
+  # which is exactly why -u is here rather than a bare -f.
   date -j -u -f '%Y-%m-%dT%H:%M:%S' "$s" +%s 2>/dev/null && return 0
   return 1
 }
 
-# run_with_timeout <секунды> <команда> [аргументы...]
+# run_with_timeout <seconds> <command> [arguments...]
 #
-# `timeout` — из GNU coreutils; в macOS и во FreeBSD его нет (в Homebrew он
-# зовётся gtimeout). Без обёртки вызов просто не находит команду, health.sh
-# запускается вовсе, и --check зависает ровно там, где сторож и был нужен —
-# на неотвечающем стеке. Код 124 отдаём тот же, что GNU: вызывающий отличает
-# «не ответил» от «вернул ошибку» по нему.
+# `timeout` comes from GNU coreutils; macOS and FreeBSD do not have it (under
+# Homebrew it is called gtimeout). Without this wrapper the call simply fails
+# to find the command, health.sh is never started, and --check hangs exactly
+# where the watchdog was needed — on an unresponsive stack. Exit code 124
+# matches GNU timeout so the caller can tell "did not answer" from "returned an
+# error".
 run_with_timeout() {
   local secs="${1-}"; shift
   local t
   for t in timeout gtimeout; do
     if command -v "$t" >/dev/null 2>&1; then "$t" "$secs" "$@"; return $?; fi  # portable-ok
   done
-  # Ни того, ни другого — сторожим сами.
+  # Neither is present — run our own watchdog.
   "$@" &
   local pid=$! guard rc=0
   ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
@@ -442,7 +450,7 @@ run_with_timeout() {
   wait "$pid" || rc=$?
   kill -TERM "$guard" >/dev/null 2>&1
   wait "$guard" >/dev/null 2>&1
-  # 128+SIGTERM: так выглядит убитый сторожем процесс.
+  # 128+SIGTERM: that is what a process killed by the watchdog looks like.
   [ "$rc" -eq 143 ] && rc=124
   return "$rc"
 }
