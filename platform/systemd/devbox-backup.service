@@ -1,35 +1,36 @@
 [Unit]
 Description=Back up devbox databases to S3
 Documentation=file:@DEPLOY_DIR@/docs/architecture/backup-design.md
-# Дампы снимаются через `docker exec`, выгрузка идёт в S3 — нужны и докер, и сеть.
+# Dumps are taken through `docker exec` and uploaded to S3 -- both docker and
+# the network are needed.
 Wants=network-online.target
 After=network-online.target docker.service
-# Условий на пути здесь намеренно НЕТ, по той же причине, что и в
-# getssl-check.service: юнит с невыполненным Condition пропускается и НЕ
-# считается упавшим. Отсутствующий .env-backup должен приводить к failed —
-# скрипт для этого выходит с кодом 2, — а не к тихому «бэкапов нет уже месяц».
-# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
-# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
-# несуществующий обработчик работал бы, но шумел в журнале.
+# There are deliberately NO path conditions here, for the same reason as in
+# getssl-check.service: a unit whose Condition is not met is skipped and does
+# NOT count as failed. A missing .env-backup must lead to failed -- which is why
+# the script exits with code 2 -- and not to a quiet "no backups for a month".
+# Substituted by scripts/systemd.sh: an OnFailure line if notifications are
+# configured (.env-notify), otherwise nothing. A unit with an OnFailure pointing
+# at a handler that does not exist would work, but would clutter the journal.
 @ONFAILURE@
 
 [Service]
 Type=oneshot
 WorkingDirectory=@DEPLOY_DIR@
 
-# От root, в отличие от getssl-*, которые работают от владельца репозитория.
-# Причина конкретная: db/twd.db и содержимое бинд-маунтов принадлежат root
-# (по той же причине от root работают стековые ротаторы), а `sqlite3 .backup`
-# создаёт рядом файлы -wal и -shm.
+# As root, unlike getssl-*, which run as the repository owner. The reason is
+# concrete: the contents of the bind mounts belong to root (the same reason the
+# stacks' rotators run as root), and `sqlite3 .backup` creates -wal and -shm
+# files next to the database.
 ExecStart=@DEPLOY_DIR@/platform/bin/backup.sh
 
-# Для Type=oneshot systemd по умолчанию ОТКЛЮЧАЕТ таймаут старта. Зависший
-# pg_dump (заблокированная таблица, отвалившийся S3) висел бы вечно и держал
-# блокировку, из-за которой все следующие прогоны молча не начинались бы —
-# то есть отказ выглядел бы как «таймер есть, бэкапов нет».
+# For Type=oneshot systemd DISABLES the start timeout by default. A hung dump
+# (a locked table, an S3 endpoint that went away) would hang forever holding the
+# lock, because of which every later run would silently never start -- i.e. the
+# failure would look like "the timer is there, the backups are not".
 TimeoutStartSec=1h
 
-# Рядом работают семь стеков на 916 МБ памяти. Дамп — фоновая задача, и он не
-# должен отбирать процессор и диск у того, что обслуживает запросы.
+# Seven stacks run alongside on 916 MB of memory. A dump is a background job
+# and must not take CPU and disk away from whatever is serving requests.
 Nice=10
 IOSchedulingClass=idle

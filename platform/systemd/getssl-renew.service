@@ -1,43 +1,47 @@
 [Unit]
 Description=Renew Let's Encrypt certificates via getssl
 Documentation=https://github.com/srvrco/getssl
-# getssl отвечает на HTTP-01 challenge через контейнер nginx и перезагружает его
-# через RELOAD_CMD ("docker exec nginx nginx -s reload"), поэтому Docker должен
-# быть поднят раньше.
+# getssl answers the HTTP-01 challenge through the nginx container and reloads
+# it via RELOAD_CMD ("docker exec nginx nginx -s reload"), so Docker has to be
+# up first.
 Wants=network-online.target
 After=network-online.target docker.service
-# Если репозиторий не там, где ждали, лучше не стартовать вовсе: иначе getssl
-# создаст рабочую директорию с нуля и выпишет новый ACME-аккаунт.
+# If the repository is not where it was expected, it is better not to start at
+# all: otherwise getssl creates the working directory from scratch and registers
+# a new ACME account.
 ConditionPathIsDirectory=@DEPLOY_DIR@/state/getssl-config
-# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
-# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
-# несуществующий обработчик работал бы, но шумел в журнале.
+# Substituted by scripts/systemd.sh: an OnFailure line if notifications are
+# configured (.env-notify), otherwise nothing. A unit with an OnFailure pointing
+# at a handler that does not exist would work, but would clutter the journal.
 @ONFAILURE@
 
 [Service]
 Type=oneshot
 User=@SERVICE_USER@
 
-# Запуск ИМЕННО из state/ МАШИНЫ. Общий getssl-config/getssl.cfg задаёт
-# ACCOUNT_KEY="./getssl-config/account.key" — путь относительно текущей
-# директории, а не относительно того, что назвал -w. Из любого другого места
-# getssl сгенерирует новый 4096-битный ключ ACME-аккаунта не там и потеряет
-# существующий аккаунт. Каталог машинный, а не платформенный, намеренно:
-# аккаунт обязан быть свой у каждой машины — см. scripts/certs.sh.
+# Run from the MACHINE's state/, specifically. The shared
+# getssl-config/getssl.cfg sets ACCOUNT_KEY="./getssl-config/account.key" -- a
+# path relative to the current directory, not to whatever -w names. From any
+# other place getssl generates a new 4096-bit ACME account key in the wrong spot
+# and loses the existing account. The directory is the machine's and not the
+# platform's on purpose: every machine must have its own account -- see
+# scripts/certs.sh.
 WorkingDirectory=@DEPLOY_DIR@/state
 
-# -U, а не -u. В getssl -u означает "--upgrade: скачать свежую версию getssl и
-# поставить поверх себя" (getssl:889), а вовсе не "продлить". Самообновляющийся
-# из интернета скрипт на машине с пятью боевыми vhost'ами — не то, что должно
-# происходить по ночам без присмотра. -U отключает даже проверку версии.
+# -U, not -u. In getssl, -u means "--upgrade: download a fresh getssl and
+# install it over itself", not "renew". A script that updates itself from the
+# internet on a machine with five production vhosts is not something that should
+# happen unattended at night. -U disables even the version check.
 #
-# У самого продления отдельного флага нет: -a обходит все домены, а решение
-# продлевать принимает RENEW_ALLOW="30" из getssl-config/getssl.cfg.
-# -q оставляет в журнале только исключительное: ошибки и факт выпуска.
+# Renewal itself has no flag of its own: -a walks every domain, and the decision
+# to renew is made by RENEW_ALLOW="30" in getssl-config/getssl.cfg.
+# -q leaves only the exceptional in the journal: errors and the fact of an
+# issuance.
 ExecStart=@DEPLOY_DIR@/state/bin/getssl -w ./getssl-config/ -U -a -q
 
-# Для Type=oneshot systemd по умолчанию ОТКЛЮЧАЕТ таймаут старта. Зависший
-# getssl (ожидание DNS, недоступный ACME-сервер, CHECK_REMOTE в никуда) висел
-# бы вечно и блокировал все последующие запуски — то есть отказ выглядел бы
-# как «таймер есть, продления нет», ровно тот, который мы чиним.
+# For Type=oneshot systemd DISABLES the start timeout by default. A hung getssl
+# (waiting on DNS, an unreachable ACME server, CHECK_REMOTE pointing nowhere)
+# would hang forever and block every later run -- i.e. the failure would look
+# like "the timer is there, the renewals are not", exactly the one we are
+# fixing.
 TimeoutStartSec=30min

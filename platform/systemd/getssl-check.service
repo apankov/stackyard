@@ -1,18 +1,18 @@
 [Unit]
 Description=Verify TLS certificate expiry dates
 Documentation=file:@DEPLOY_DIR@/platform/bin/check-certs.sh
-# Условий на пути здесь намеренно нет. Юнит с невыполненным Condition
-# пропускается и НЕ считается упавшим — а этот юнит и есть страховка от
-# тихого простоя. Пропавший каталог должен приводить к failed, поэтому
-# проверку делает сам скрипт и выходит с кодом 2.
-# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
-# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
-# несуществующий обработчик работал бы, но шумел в журнале.
+# There are deliberately no path conditions here. A unit whose Condition is not
+# met is skipped and does NOT count as failed -- and this unit IS the insurance
+# against silent downtime. A directory that has gone missing must lead to
+# failed, so the script performs the check itself and exits with code 2.
+# Substituted by scripts/systemd.sh: an OnFailure line if notifications are
+# configured (.env-notify), otherwise nothing. A unit with an OnFailure pointing
+# at a handler that does not exist would work, but would clutter the journal.
 @ONFAILURE@
 
 [Service]
 Type=oneshot
 User=@SERVICE_USER@
-# Ненулевой код -> юнит в состоянии failed -> виден в `systemctl --failed`.
-# Это и есть весь механизм оповещения на сегодня: см. §"Чего здесь нет" в README.
+# A non-zero code -> the unit is failed -> it shows in `systemctl --failed`.
+# That is the entire notification mechanism as of today.
 ExecStart=@DEPLOY_DIR@/platform/bin/check-certs.sh

@@ -3,24 +3,26 @@ Description=Verify that database backups exist and are fresh
 Documentation=file:@DEPLOY_DIR@/platform/bin/check-backups.sh
 Wants=network-online.target
 After=network-online.target docker.service
-# Условий на пути нет намеренно — этот юнит и есть страховка от тихого
-# простоя. Пропущенный юнит не считается упавшим, а нам нужно ровно обратное:
-# невозможность проверить должна быть видна. Скрипт для этого выходит с кодом 2.
-# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
-# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
-# несуществующий обработчик работал бы, но шумел в журнале.
+# There are deliberately no path conditions -- this unit IS the insurance
+# against silent downtime. A skipped unit does not count as failed, and we need
+# exactly the opposite: being unable to check must be visible. That is why the
+# script exits with code 2.
+# Substituted by scripts/systemd.sh: an OnFailure line if notifications are
+# configured (.env-notify), otherwise nothing. A unit with an OnFailure pointing
+# at a handler that does not exist would work, but would clutter the journal.
 @ONFAILURE@
 
 [Service]
 Type=oneshot
 WorkingDirectory=@DEPLOY_DIR@
-# От владельца репозитория, как getssl-check: root тут не нужен — скрипт только
-# читает .env-backup, спрашивает postgres через docker и слушает S3.
+# As the repository owner, like getssl-check: root is not needed here -- the
+# script only reads .env-backup, queries the database through docker and talks
+# to S3.
 User=@SERVICE_USER@
 
-# Ненулевой код -> юнит в состоянии failed -> виден в `systemctl --failed`.
-# Это и есть весь механизм оповещения на сегодня. Внешний канал (почта,
-# Telegram) — отдельная задача, и подключаться он будет сюда.
+# A non-zero code -> the unit is failed -> it shows in `systemctl --failed`.
+# That is the entire notification mechanism as of today. An external channel
+# (mail, Telegram) is separate work, and it will plug in here.
 ExecStart=@DEPLOY_DIR@/platform/bin/check-backups.sh
 
 TimeoutStartSec=10min

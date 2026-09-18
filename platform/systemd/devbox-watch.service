@@ -3,17 +3,17 @@ Description=Check devbox host state (disk, inodes, containers)
 Documentation=file:@DEPLOY_DIR@/platform/bin/watch-host.sh
 After=network-online.target docker.service
 Wants=network-online.target
-# Условия на пути нет намеренно: пропущенный юнит не считается упавшим, а этот
-# юнит и есть страховка от тихого простоя.
-# Подставляется scripts/systemd.sh: строка OnFailure, если оповещения
-# настроены (.env-notify), иначе пустота. Юнит с OnFailure на
-# несуществующий обработчик работал бы, но шумел в журнале.
+# There is deliberately no path condition: a skipped unit does not count as
+# failed, and this unit IS the insurance against silent downtime.
+# Substituted by scripts/systemd.sh: an OnFailure line if notifications are
+# configured (.env-notify), otherwise nothing. A unit with an OnFailure pointing
+# at a handler that does not exist would work, but would clutter the journal.
 @ONFAILURE@
 
 [Service]
 Type=oneshot
 WorkingDirectory=@DEPLOY_DIR@
-# От root: пишет состояние в /var/lib/devbox-notify и читает docker.
+# As root: it writes state to /var/lib/devbox-notify and reads docker.
 ExecStart=@DEPLOY_DIR@/platform/bin/watch-host.sh
 TimeoutStartSec=10min
 Nice=10

@@ -3,9 +3,9 @@ Description=Periodic devbox host state check
 Documentation=file:@DEPLOY_DIR@/platform/bin/watch-host.sh
 
 [Timer]
-# Каждые 15 минут. Диск на этой машине уходил от «всё нормально» к 500 МБ за
-# часы, а не за дни: залипшая очередь писала лог гигабайтами. Суточной
-# проверки на такой скорости не хватило бы.
+# Every 15 minutes. The disk on this machine went from "all fine" to 500 MB in
+# hours rather than days: a stuck queue wrote its log by the gigabyte. A daily
+# check would not keep up with that.
 OnCalendar=*:0/15
 RandomizedDelaySec=2m
 Persistent=false

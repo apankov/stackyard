@@ -1,20 +1,20 @@
 # vim: filetype=sh
 #
-# СГЕНЕРИРОВАННЫЙ ФАЙЛ — правки будут перезаписаны scripts/certs.sh.
-# Шаблон: platform/getssl-config/getssl.cfg.template
+# GENERATED FILE -- edits are overwritten by scripts/certs.sh.
+# Template: platform/getssl-config/getssl.cfg.template
 #
-# CA здесь БОЕВОЙ и задан явно. Общий getssl-config/getssl.cfg указывает на
-# staging, и каждый per-host конфиг обязан его перебить: хост без этой строки
-# молча получает сертификат, которому не верит ни один браузер, и заметно это
-# только из браузера. Поэтому строка живёт в шаблоне, а не в инструкции
-# для человека.
+# The CA here is the PRODUCTION one and is set explicitly. The shared
+# getssl-config/getssl.cfg points at staging, and every per-host config must
+# override it: a host without this line silently gets a certificate no browser
+# trusts, and that is visible only from a browser. Which is why the line lives
+# in the template rather than in an instruction for a human.
 
 DOMAIN=@DOMAIN@
 
 CA="https://acme-v02.api.letsencrypt.org"
 
-# Дополнительные имена в том же сертификате. Подставляются из формы
-# `домен+алиас` в Domains= стека; пусто — значит алиасов нет.
+# Additional names in the same certificate. Substituted from the
+# `domain+alias` form in a stack's Domains=; empty means there are no aliases.
 SANS="@SANS@"
 
 PREFIX='@DEPLOY_DIR@'
@@ -26,11 +26,12 @@ DOMAIN_CERT_LOCATION="${PREFIX}/state/certs/${DOMAIN}.crt"
 DOMAIN_KEY_LOCATION="${PREFIX}/state/certs/${DOMAIN}.key"
 DOMAIN_CHAIN_LOCATION="${PREFIX}/state/certs/${DOMAIN}-fullchain.crt"
 
-# Перезагрузка, а не пересоздание: каталог сертификатов смонтирован с хоста, и
-# пересоздание nginx при опущенном upstream'е уносит все сайты машины.
-# Без членства владельца репозитория в группе docker команда молча не
-# срабатывает, и nginx остаётся со старым сертификатом в памяти — худший вид
-# отказа, тихий и частичный.
+# A reload, not a recreate: the certificate directory is mounted from the host,
+# and recreating nginx while an upstream is down takes down every site on the
+# machine.
+# Without the repository owner being in the docker group the command silently
+# does nothing, and nginx keeps the old certificate in memory -- the worst kind
+# of failure, quiet and partial.
 RELOAD_CMD="docker exec nginx nginx -s reload"
 
 CHECK_REMOTE="true"

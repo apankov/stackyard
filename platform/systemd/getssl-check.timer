@@ -3,8 +3,8 @@ Description=Weekly TLS certificate expiry check
 Documentation=file:@DEPLOY_DIR@/platform/bin/check-certs.sh
 
 [Timer]
-# Понедельник, через несколько часов после ночного окна продления, чтобы
-# проверка видела результат последнего запуска getssl, а не заставала его.
+# Monday, a few hours after the nightly renewal window, so the check sees the
+# result of the last getssl run instead of catching it in progress.
 OnCalendar=Mon *-*-* 09:00:00
 RandomizedDelaySec=15m
 Persistent=true

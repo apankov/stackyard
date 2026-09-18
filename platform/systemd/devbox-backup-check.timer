@@ -3,8 +3,9 @@ Description=Daily verification of database backups
 Documentation=file:@DEPLOY_DIR@/platform/bin/check-backups.sh
 
 [Timer]
-# Через час с небольшим после окна бэкапа (03:40 + до 20 минут разброса),
-# чтобы проверка видела результат последнего прогона, а не заставала его.
+# A little over an hour after the backup window (03:40 plus up to 20 minutes of
+# jitter), so the check sees the result of the last run instead of catching it
+# in progress.
 OnCalendar=*-*-* 05:10:00
 RandomizedDelaySec=10m
 Persistent=true

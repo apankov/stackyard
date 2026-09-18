@@ -8,53 +8,58 @@ services:
       - "443:443"
     volumes:
       - ${Platform_Deploy_Dir:?}/platform/nginx-snippets:/etc/nginx/snippets:ro
-      # Статические платформенные vhost'ы: default.conf (сервер по умолчанию) и
-      # 00-limits.conf (зоны лимитов, обязаны быть в http-контексте).
+      # Static platform vhosts: default.conf (the default server) and
+      # 00-limits.conf (limit zones, which must live in the http context).
       - ${Platform_Deploy_Dir:?}/platform/nginx-vhosts:/etc/nginx/conf.d:ro
-      # Генерируемые vhost'ы машины — КАТАЛОГОМ РЯДОМ с conf.d, а читает их
-      # оттуда platform/nginx-vhosts/05-enabled.conf одной строкой include.
+      # The machine's generated vhosts go in a DIRECTORY NEXT TO conf.d, and
+      # platform/nginx-vhosts/05-enabled.conf reads them from there with a
+      # single include line.
       #
-      # Раньше здесь стояло монтирование файла внутрь conf.d, и оно не работало
-      # в принципе: conf.d сам смонтирован с :ro, а точку монтирования для
-      # вложенного файла docker создаёт ВНУТРИ уже смонтированного каталога.
-      # Контейнер не стартовал вовсе, причём сообщение говорило про mountpoint
-      # — то есть отказ выглядел как поломка docker, а не как неверная спека.
+      # This used to mount a file inside conf.d, and that could never work:
+      # conf.d is itself mounted :ro, and docker creates the mount point for a
+      # nested file INSIDE the already-mounted directory. The container did not
+      # start at all, and the message talked about a mountpoint -- so the
+      # failure looked like a docker problem rather than a wrong spec.
       #
-      # Класть генерируемое внутрь platform/ по-прежнему нельзя: это симлинк на
-      # общий каталог (в рабочем пространстве) или вендоренная копия (на
-      # машине), и запись туда либо ломает соседнюю машину, либо пропадает при
-      # следующем обновлении платформы.
+      # Putting generated files inside platform/ is still not allowed: it is a
+      # symlink to a shared directory (in the workspace) or a vendored copy (on
+      # a machine), and writing there either breaks a neighbouring machine or
+      # disappears at the next platform update.
       - ${Platform_Deploy_Dir:?}/state/nginx-vhosts:/etc/nginx/enabled:ro
-      # Оба корня стеков целиком, только на чтение: vhost'ы читаются
-      # исключительно через include'ы из 10-enabled.conf — в этом и состоит
-      # механизм выключения стека. Монтирования постоянные и от набора
-      # включённых стеков не зависят.
-      # http-конфиг самой машины: её зоны лимитов и карты. Включается из
-      # генерируемого 10-enabled.conf первой строкой, до любого server-блока.
+      # Both stack roots in full, read-only: vhosts are read exclusively
+      # through the includes in 10-enabled.conf -- that is what disabling a
+      # stack consists of. The mounts are constant and do not depend on which
+      # stacks are enabled.
+      # The machine's own http config: its limit zones and maps. Included from
+      # the generated 10-enabled.conf as its first line, before any server
+      # block.
       - ${Platform_Deploy_Dir:?}/nginx:/etc/nginx/machine:ro
       - ${Platform_Deploy_Dir:?}/stacks:/etc/nginx/stacks:ro
       - ${Platform_Deploy_Dir:?}/profile/stacks:/etc/nginx/profile-stacks:ro
-      # Файлы basic-auth. В state/, а не в platform/: платформа общая и
-      # перезаписывается bootstrap'ом целиком, а это секреты машины.
+      # basic-auth files. In state/, not in platform/: the platform is shared
+      # and bootstrap overwrites it wholesale, while these are the machine's
+      # secrets.
       #
-      # Каталог смонтирован всегда, даже пустой: vhost с auth_basic_user_file
-      # на несмонтированный путь — это 500 на каждом запросе, и заметно это
-      # только снаружи.
+      # The directory is always mounted, even when empty: a vhost whose
+      # auth_basic_user_file points at an unmounted path means a 500 on every
+      # request, and that is visible only from outside.
       - ${Platform_Deploy_Dir:?}/state/htpasswd:/etc/nginx/htpasswd:ro
       - ${Platform_Deploy_Dir:?}/platform/acme:/var/www/acme
       - ${Platform_Deploy_Dir:?}/state/certs:/etc/nginx/certs
       - ${Platform_Vhosts_Dir:?}:${Platform_Vhosts_Mount:?}
       - /var/log/nginx:/var/log/nginx
-    # Апстрим не обязан жить в нашей сети. Стенд в чужом compose-проекте или
-    # процесс на самом хосте доступны только через host-gateway.
+    # An upstream is not required to live in our network. A stand in someone
+    # else's compose project, or a process on the host itself, is reachable only
+    # through host-gateway.
     #
-    # Альтернатива — объявить чужую сеть external и подключить к ней nginx —
-    # означает, что `down` в чужом репозитории уносит эту сеть, а с ней nginx.
-    # Вместе с nginx пропадает обработчик ACME-челленджа, то есть продление
-    # сертификатов ломается ровно тогда, когда чужой стенд лежит.
+    # The alternative -- declaring the other network external and attaching
+    # nginx to it -- means a `down` in the other repository takes that network
+    # away, and nginx with it. Losing nginx also loses the ACME challenge
+    # handler, so certificate renewal breaks exactly when someone else's stand
+    # is down.
     #
-    # Стоит всегда: это одна запись в /etc/hosts контейнера, и машине, которой
-    # она не нужна, она ничего не стоит.
+    # It is always present: it is one entry in the container's /etc/hosts, and
+    # it costs a machine that does not need it nothing.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

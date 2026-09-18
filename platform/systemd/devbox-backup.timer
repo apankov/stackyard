@@ -3,13 +3,13 @@ Description=Daily database backup
 Documentation=file:@DEPLOY_DIR@/docs/architecture/backup-design.md
 
 [Timer]
-# 03:40, а НЕ 05:23: там окно getssl-renew. Два тяжёлых процесса одновременно
-# на машине с ~200 МБ свободной памяти встречаются с OOM-killer'ом, и
-# проигрывает обычно тот, кто просил больше, — то есть pg_dump.
+# 03:40 and NOT 05:23: that is the getssl-renew window. Two heavy processes at
+# once on a machine with ~200 MB free meet the OOM killer, and the one that
+# asked for more usually loses -- that is, the dump.
 OnCalendar=*-*-* 03:40:00
 RandomizedDelaySec=20m
-# Машина была выключена в момент запуска — прогон произойдёт после загрузки,
-# а не будет пропущен молча.
+# If the machine was off at the scheduled time, the run happens after boot
+# instead of being skipped silently.
 Persistent=true
 
 [Install]

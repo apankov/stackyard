@@ -3,8 +3,8 @@ Description=Weekly devbox status digest
 Documentation=file:@DEPLOY_DIR@/platform/bin/notify.sh
 
 [Timer]
-# Понедельник, начало рабочего дня: сводку должен кто-то прочитать, а
-# непрочитанная сводка не отличается от неотправленной.
+# Monday, the start of the working day: somebody has to read the digest, and an
+# unread digest is no different from an unsent one.
 OnCalendar=Mon *-*-* 09:30:00
 RandomizedDelaySec=10m
 Persistent=true

@@ -3,12 +3,12 @@ Description=Daily getssl renewal check
 Documentation=https://github.com/srvrco/getssl
 
 [Timer]
-# Ночь, время низкой нагрузки на машину.
+# Night time, when the machine is least loaded.
 OnCalendar=*-*-* 05:23:00
-# Let's Encrypt просит не ходить всем в одну секунду.
+# Let's Encrypt asks that not everyone arrive in the same second.
 RandomizedDelaySec=30m
-# Если машина была выключена в 05:23, запуск произойдёт
-# после загрузки, а не будет пропущен молча.
+# If the machine was off at 05:23, the run happens after boot instead of being
+# skipped silently.
 Persistent=true
 
 [Install]
