@@ -1287,7 +1287,7 @@ echo "== корень машины из-под симлинка"
 # смотрит на текст скрипта, а этот блок — на то, КУДА скрипт на самом деле
 # сходит. Текстовая проверка одна не годится: она пройдёт и на скрипте, где
 # нужная строка есть, но стоит не в той ветке.
-MROOT="$WORK/машина"
+MROOT="$WORK/machine"
 rm -rf "$MROOT"
 mkdir -p "$MROOT/.stackyard"
 cp -R "$REPO_DIR/platform" "$MROOT/.stackyard/platform"
@@ -1298,7 +1298,7 @@ ln -s .stackyard/platform "$MROOT/platform"
 MREAL="$(cd "$MROOT" && pwd -P)"
 check "скрипт через симлинк видит корнем машину, а не .stackyard" \
   "$(cd "$MROOT" && env -u ROOT_DIR ./platform/bin/htpasswd.sh proba --list 2>&1)" \
-  "пусто: $MREAL/state/htpasswd/proba"
+  "empty: $MREAL/state/htpasswd/proba"
 rm -rf "$MROOT"
 
 echo "== переносимость: время, суммы, сторож"
