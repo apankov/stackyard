@@ -1,10 +1,11 @@
-# Настоящих машин в этом репозитории НЕТ: он публичный, а домены и состав
-# стеков клиента в публичном репозитории — ровно та утечка, ради которой всё
-# разделение и делалось. Машины живут своими приватными репозиториями.
+# There are NO real machines in this repository: it is public, and a client's
+# domains and stack list in a public repository are exactly the leak the whole
+# split was made for. Machines live in their own private repositories.
 #
-# В tests/machines/ лежат СИНТЕТИЧЕСКИЕ фикстуры: две конфигурации, на которых
-# гоняется движок. Их .env — тестовые значения, но в git им всё равно не место:
-# образец рядом, и путать образец с заполненным файлом не стоит нигде.
+# tests/machines/ holds SYNTHETIC fixtures: two configurations the engine is
+# exercised on. Their .env files hold test values, but git is still no place for
+# them: the example sits next to them, and confusing an example with a filled-in
+# file is a bad habit anywhere.
 tests/machines/*/.env
 tests/machines/*/.env-stacks
 tests/machines/*/stacks/*/.env
@@ -13,19 +14,19 @@ tests/machines/*/stacks/*/.env
 !tests/machines/*/stacks/*/.env.example
 profiles/stacks/*/.env
 
-# Состояние машины: всё, что описывает ЭТУ машину и генерируется, а не пишется
-# руками. Сертификаты, ключ ACME-аккаунта, список баз с паролями, include'ы
-# nginx. В git этому места нет — ни как секрету, ни как второму источнику правды.
+# Machine state: everything that describes THIS machine and is generated rather
+# than written by hand. Certificates, the ACME account key, the database list
+# with passwords, the nginx includes. None of it belongs in git -- neither as a
+# secret nor as a second source of truth.
 tests/machines/*/state/*
 !tests/machines/*/state/.keepit
 tests/machines/*/dumps/*
 !tests/machines/*/dumps/.keepit
 
-# Платформа, установленная в фикстуры их же bootstrap'ом. Дубликат того, что
-# лежит рядом в platform/ и profiles/.
-# Платформа, приехавшая в фикстуру через bootstrap. Сейчас фикстуры смотрят в
-# рабочее дерево симлинками (tests/machines/README.md), но каталог возможен,
-# если кто-то прогонит bootstrap руками.
+# A platform that arrived in a fixture through bootstrap -- a duplicate of what
+# sits next to it in platform/ and profiles/. The fixtures currently point into
+# the working tree with symlinks (tests/machines/README.md), but a directory is
+# possible if somebody runs bootstrap by hand.
 tests/machines/*/.stackyard/
 tests/machines/*/platform
 tests/machines/*/profile
