@@ -1,11 +1,11 @@
-# Платформа. В git машины её нет намеренно: она приезжает по stackyard.lock,
-# и копия в репозитории означала бы второй источник правды о том, какой код
-# на машине работает.
+# The platform. Deliberately absent from a machine's git: it arrives according
+# to stackyard.lock, and a copy in the repository would be a second source of
+# truth about which code the machine runs.
 /.stackyard/
 /platform
 /profile
 
-# Секреты и состояние машины.
+# Secrets and machine state.
 .env
 .env-stacks
 .env-backup
@@ -14,6 +14,8 @@ stacks/*/.env
 !.env.example
 !.env-stacks.example
 !stacks/*/.env.example
+!.env-backup.example
+!.env-notify.example
 state/*
 !state/.keepit
 dumps/*

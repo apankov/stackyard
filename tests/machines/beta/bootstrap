@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 #
-# Забрать stackyard, на котором работает эта машина.
+# Fetch the stackyard this machine runs on.
 #
-# Единственный файл, который обязан работать ДО того, как платформа появилась,
-# поэтому он самодостаточен: чистый bash, ничего из platform/ не подключает.
-# Он же единственный, что здесь коммитится из платформенной части — сама
-# платформа в git машины не лежит.
+# The one file that has to work BEFORE the platform exists, so it is
+# self-contained: plain bash, sourcing nothing from platform/. It is also the
+# only part of the platform committed here — the platform itself is not kept in
+# a machine's git.
 #
-#   git clone <репозиторий машины> && cd <машина> && ./bootstrap
+#   git clone <machine repository> && cd <machine> && ./bootstrap
 #
-# Закрепление — по КОММИТУ, а не по хешу архива. Автоматические архивы GitHub
-# (/archive/refs/tags/*.tar.gz) байт-стабильными не гарантированы: их формат
-# уже менялся, ломая чек-суммы. Коммит неизменен по определению.
+# Pinned by COMMIT rather than by an archive hash. Automatically generated
+# archives are not guaranteed to be byte-stable — their format has changed
+# before, breaking checksums. A commit is immutable by definition.
 #
-# Для разработки платформы: STACKYARD_SOURCE=/путь/к/локальному/stackyard ./bootstrap
-# берёт локальный каталог вместо сети. Это же режим установки без интернета.
+# For platform development: STACKYARD_SOURCE=/path/to/local/stackyard ./bootstrap
+# uses a local directory instead of the network. That is also the offline
+# installation mode.
 
 set -euo pipefail
 
@@ -22,64 +23,129 @@ ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 LOCK="$ROOT/stackyard.lock"
 DEST="$ROOT/.stackyard"
 
-[ -f "$LOCK" ] || { echo "Ошибка: нет $LOCK — неизвестно, какой stackyard нужен" >&2; exit 2; }
+[ -f "$LOCK" ] || { echo "Error: no $LOCK — it is unknown which stackyard is required" >&2; exit 2; }
 
 val() { grep -E "^$1=" "$LOCK" | tail -n 1 | cut -d= -f2- | tr -d '"'"'"; }
 REPO="$(val repo)"; VERSION="$(val version)"; COMMIT="$(val commit)"
 
-[ -n "$COMMIT" ] || { echo "Ошибка: в $LOCK не задан commit" >&2; exit 2; }
+[ -n "$COMMIT" ] || { echo "Error: $LOCK does not set commit" >&2; exit 2; }
 
-# Что считать «уже установленным». В сетевом режиме — коммит из lock: он и есть
-# то, что машине полагается. В локальном — HEAD источника: там платформу как раз
-# правят, и сверка с lock означала бы, что правка не доезжает до машины, пока
-# не передвинут lock. Ровно на этом я и попался при разработке.
+# What counts as "already installed". In network mode, the commit from the
+# lock: that is what the machine is supposed to have. In local mode, the
+# source's HEAD: that is where the platform is being edited, and comparing
+# against the lock would mean an edit never reaches the machine until the lock
+# is moved.
 want="$COMMIT"
 [ -n "${STACKYARD_SOURCE:-}" ] && want="$( cd "$STACKYARD_SOURCE" && git rev-parse HEAD )"
 
 if [ -f "$DEST/.commit" ] && [ "$(cat "$DEST/.commit")" = "$want" ]; then
-  echo "stackyard $VERSION ($want) уже на месте"
+  echo "stackyard $VERSION ($want) is already in place"
 else
   rm -rf "$DEST.tmp" "$DEST"
   if [ -n "${STACKYARD_SOURCE:-}" ]; then
-    echo "stackyard из локального каталога: $STACKYARD_SOURCE"
-    [ -d "$STACKYARD_SOURCE" ] || { echo "Ошибка: нет $STACKYARD_SOURCE" >&2; exit 2; }
+    echo "stackyard from a local directory: $STACKYARD_SOURCE"
+    [ -d "$STACKYARD_SOURCE" ] || { echo "Error: no $STACKYARD_SOURCE" >&2; exit 2; }
     mkdir -p "$DEST.tmp"
-    # Через git archive, а не cp: в копию не должны попасть ни .git, ни чужие
-    # незакоммиченные правки — иначе «локальный режим» тихо отличался бы от того,
-    # что получит машина из сети.
+    # Through git archive rather than cp: neither .git nor anyone's uncommitted
+    # edits should end up in the copy — otherwise "local mode" would quietly
+    # differ from what a machine gets over the network.
     ( cd "$STACKYARD_SOURCE" && git archive HEAD ) | tar -x -C "$DEST.tmp"
     got="$( cd "$STACKYARD_SOURCE" && git rev-parse HEAD )"
     printf '%s\n' "$got" > "$DEST.tmp/.commit"
-    # Локальный режим намеренно НЕ отказывает при расхождении с lock: он для
-    # того и существует, чтобы поставить ещё не выпущенную версию. Но молчать
-    # нельзя — иначе машина работает не на том, что записано, и по lock этого
-    # не видно.
+    # Local mode deliberately does NOT refuse on a mismatch with the lock: it
+    # exists precisely to install a version that has not been released yet. But
+    # it must not stay silent — otherwise the machine runs something other than
+    # what is recorded, and the lock does not show it.
     if [ "$got" != "$COMMIT" ]; then
-      echo "  ВНИМАНИЕ: локальный HEAD $got не совпадает с stackyard.lock ($COMMIT)." >&2
-      echo "  Машина работает на непроверенной версии. Закрепить: ./bin/pin.sh <машина>" >&2
+      echo "  NOTE: local HEAD $got does not match stackyard.lock ($COMMIT)." >&2
+      echo "  The machine is running an unpinned version. Pin it: ./bin/pin.sh <machine>" >&2
     fi
   else
-    echo "stackyard $VERSION: получаю $REPO"
-    command -v git >/dev/null || { echo "Ошибка: нужен git" >&2; exit 2; }
-    git clone --quiet --depth 1 --branch "$VERSION" "$REPO" "$DEST.tmp"
-    got="$( cd "$DEST.tmp" && git rev-parse HEAD )"
-    # Тег мог быть передвинут после того, как машину закрепили. Отказ, а не
-    # предупреждение: дальше поедет код, которого никто не утверждал.
-    if [ "$got" != "$COMMIT" ]; then
-      echo "ОТКАЗ: тег $VERSION указывает на $got, а в stackyard.lock записан $COMMIT." >&2
-      echo "  Тег передвинули. Проверьте, что именно изменилось, и обновите lock осознанно." >&2
+    echo "stackyard $VERSION ($COMMIT): fetching $REPO"
+    command -v git >/dev/null || { echo "Error: git is required" >&2; exit 2; }
+
+    # Clone the default branch and check out the PINNED COMMIT.
+    #
+    # Not `--branch "$VERSION"`: a tag is decoration. The pin is by commit, and
+    # requiring a tag to exist breaks installation wherever nobody created one
+    # — repository present, commit present, no tags, and bootstrap fails.
+    #
+    # No --depth: a shallow clone truncates history, and the required commit
+    # may lie beyond it. The repository is small, and a full clone is cheaper
+    # than guessing how deep to go.
+    git clone --quiet "$REPO" "$DEST.tmp" || { rm -rf "$DEST.tmp"; echo "Error: could not clone $REPO" >&2; exit 1; }
+    if ! ( cd "$DEST.tmp" && git checkout --quiet "$COMMIT" ) 2>/dev/null; then
+      echo "REFUSING: commit $COMMIT is not in $REPO." >&2
+      echo "  Either it was never pushed, or stackyard.lock has a typo." >&2
       rm -rf "$DEST.tmp"; exit 1
     fi
+    got="$( cd "$DEST.tmp" && git rev-parse HEAD )"
+    [ "$got" = "$COMMIT" ] || { echo "REFUSING: after checkout HEAD=$got, expected $COMMIT" >&2; rm -rf "$DEST.tmp"; exit 1; }
     printf '%s\n' "$got" > "$DEST.tmp/.commit"
     rm -rf "$DEST.tmp/.git"
   fi
   mv "$DEST.tmp" "$DEST"
-  echo "stackyard $VERSION ($COMMIT) установлен в .stackyard/"
+  echo "stackyard $VERSION ($COMMIT) installed into .stackyard/"
 fi
 
-# Слои подключаются симлинками внутрь машины: compose и обёртки обращаются к
-# ./platform и ./profile, и им не должно быть важно, откуда те взялись.
+# The layers are attached as symlinks inside the machine: compose and the
+# wrappers refer to ./platform and ./profile and must not care where those came
+# from.
+#
+# A real directory in that place is a refusal, not a reason to delete it.
+#
+# `ln -sfn TARGET DIR`, when DIR is an existing DIRECTORY, does not replace it
+# but creates a link INSIDE it: the result is platform/platform while
+# platform/ itself stays as it was — and the command still succeeds. That is
+# what a machine on the older layout looks like (its platform/ is in git):
+# bootstrap would report success while the wrappers then said the platform was
+# missing, with nothing connecting the two.
+for layer in platform profile; do
+  p="$ROOT/$layer"
+  if [ -e "$p" ] && [ ! -L "$p" ]; then
+    echo "REFUSING: $p exists and is not a symlink." >&2
+    echo "  The platform arrives in .stackyard/ and is attached by a link; a real" >&2
+    echo "  directory here means the older repository layout — you are probably" >&2
+    echo "  on the wrong branch. Check with: git branch --show-current" >&2
+    exit 1
+  fi
+done
 ln -sfn .stackyard/platform "$ROOT/platform"
 ln -sfn .stackyard/profiles "$ROOT/profile"
 
-echo "Готово. Дальше: sudo ./host-setup --check"
+# Reporting success without checking the result is not allowed: that is exactly
+# how bootstrap came to say "done" while the wrappers said the platform was
+# missing.
+for probe in platform/bin/stack.sh platform/bin/host-setup.sh profile/stacks; do
+  [ -e "$ROOT/$probe" ] && continue
+  echo "REFUSING: after installation there is no $probe." >&2
+  echo "  The platform was downloaded but attached incorrectly. Remove" >&2
+  echo "  $ROOT/platform, $ROOT/profile and $ROOT/.stackyard and try again." >&2
+  exit 1
+done
+[ -x "$ROOT/platform/bin/stack.sh" ] || {
+  echo "REFUSING: platform/bin/stack.sh is not executable." >&2
+  echo "  Check that the clone did not lose file modes (core.fileMode)." >&2
+  exit 1
+}
+
+# The .stackyard directory was replaced WHOLESALE (rm -rf above), and
+# platform/ is a symlink into it. A container started before that is left
+# bind-mounted onto a deleted directory: the path in docker inspect is
+# unchanged while there are zero files behind it. This surfaces not as "the
+# platform was updated" but as an error in a vhost — "open() ... failed (2: No
+# such file or directory)" — and the vhost, which is not at fault, is what gets
+# investigated.
+#
+# The containers themselves are NOT touched here: bootstrap must not restart
+# anything on a running machine without being asked. But staying silent is not
+# an option either.
+if command -v docker >/dev/null 2>&1 && [ -n "$(docker ps -q 2>/dev/null)" ]; then
+  echo
+  echo "NOTE: containers are running and have mounted the PREVIOUS platform/."
+  echo "  Until they are recreated they see empty platform directories:"
+  echo "    ./dc up -d"
+  echo "  To see what the running nginx sees: ./stack --check"
+fi
+
+echo "Done. Next: sudo ./host-setup --check"

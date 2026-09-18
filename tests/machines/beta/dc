@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# Точка входа машины. ROOT_DIR задаётся явно: platform/ — симлинк в .stackyard,
-# и вычисленный из пути скрипта каталог указывал бы не туда.
+# A machine's entry point. ROOT_DIR is set explicitly: platform/ is a symlink
+# into .stackyard, so a directory derived from the script's own path would
+# point at the wrong place.
 ROOT_DIR="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export ROOT_DIR
-[ -x "$ROOT_DIR/platform/bin/docker-compose.sh" ] || { echo "Платформы нет — запустите ./bootstrap" >&2; exit 2; }
+[ -x "$ROOT_DIR/platform/bin/docker-compose.sh" ] || {
+  echo "The platform is missing: $ROOT_DIR/platform/bin/docker-compose.sh is not available." >&2
+  echo "Run ./bootstrap. If it says the platform is already in place, check" >&2
+  echo "that $ROOT_DIR/platform is a symlink into .stackyard, not a directory:" >&2
+  echo "  ls -ld $ROOT_DIR/platform" >&2
+  exit 2
+}
 exec "$ROOT_DIR/platform/bin/docker-compose.sh" "$@"

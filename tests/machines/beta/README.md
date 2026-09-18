@@ -1,21 +1,21 @@
 # beta
 
-Машина на stackyard. Платформа в git не лежит — её приносит `./bootstrap`
-по версии из `stackyard.lock`.
+A stackyard machine. The platform is not kept in git -- `./bootstrap` fetches
+it at the version recorded in `stackyard.lock`.
 
-## Развернуть
+## Deploy
 
 ```sh
-git clone <этот репозиторий> /mnt/data/beta
+git clone <this repository> /mnt/data/beta
 cd /mnt/data/beta
-./bootstrap                     # платформа v0.3.0
+./bootstrap                     # platform v0.3.0
 cp .env.example .env && $EDITOR .env
 cp .env-stacks.example .env-stacks && $EDITOR .env-stacks
 sudo ./host-setup
-./stack enable <стеки>
+./stack enable <stacks>
 ```
 
-## Обновить платформу
+## Update the platform
 
-Из stackyard на ноутбуке: `./bin/pin.sh <путь-к-этой-машине>`, коммит здесь,
-на сервере `git pull && ./bootstrap && ./stack --check`.
+From stackyard on your laptop: `./bin/pin.sh <path-to-this-machine>`, commit
+here, then on the server `git pull && ./bootstrap && ./stack --check`.

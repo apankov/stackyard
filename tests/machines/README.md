@@ -1,28 +1,29 @@
-# Машины-фикстуры
+# Fixture machines
 
-Две синтетические раскладки, на которых гоняется движок: `alpha` (общий MySQL,
-PHP-сайт, редирект с алиасом, прокси в чужой контейнер) и `beta` (общий
-Postgres). Разные СУБД намеренно — платформа считается общей ровно тогда, когда
-обе работают на ней без единой правки.
+Two synthetic layouts the engine is exercised on: `alpha` (shared MySQL, a PHP
+site, a redirect with an alias, a proxy into somebody else's container) and
+`beta` (shared Postgres). Different DBMSes on purpose -- the platform counts as
+shared exactly when both run on it without a single edit.
 
-Настоящих машин здесь нет и быть не может: репозиторий публичный, а домены и
-состав стеков клиента в публичном репозитории — ровно та утечка, ради которой
-делалось разделение. Все имена — на `example.com`.
+There are no real machines here and there cannot be: the repository is public,
+and a client's domains and stack list in a public repository are exactly the
+leak the split was made for. Every name is under `example.com`.
 
-## Чем отличаются от настоящей машины
+## How they differ from a real machine
 
-`platform` и `profile` здесь — симлинки прямо в рабочее дерево, а не копии,
-принесённые `./bootstrap`. Это сделано ради цикла разработки: правка движка
-видна фикстурам сразу, без коммита и повторного `bootstrap`. Настоящая машина
-устроена иначе — см. README в корне.
+`platform` and `profile` here are symlinks straight into the working tree, not
+copies brought by `./bootstrap`. That is for the development loop: an edit to
+the engine is visible to the fixtures immediately, with no commit and no second
+`bootstrap`. A real machine is arranged differently -- see the README at the
+root.
 
-Сам `bootstrap` от этого не остаётся непроверенным: его гоняют на отдельной
-машине, заведённой `bin/new-machine.sh`.
+`bootstrap` itself does not go untested because of that: it is exercised on a
+separate machine created with `bin/new-machine.sh`.
 
-## Запустить
+## Run
 
 ```sh
-./platform/bin/selftest.sh              # весь движок, включая эти фикстуры
+./platform/bin/selftest.sh              # the whole engine, these fixtures included
 ./tests/machines/alpha/stack --check
 ./tests/machines/alpha/dc --all-stacks --examples config -q
 ```

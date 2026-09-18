@@ -1,11 +1,11 @@
-# На какой версии stackyard работает эта машина.
+# Which stackyard version this machine runs.
 #
-# Закрепление по КОММИТУ, а не по хешу архива: автоматические архивы GitHub
-# байт-стабильными не гарантированы, а коммит неизменен по определению.
-# Тег нужен только чтобы клонировать дешёво; если его передвинут, bootstrap
-# откажется работать, а не подсунет чужой код.
+# Pinned by COMMIT rather than by an archive hash: automatically generated
+# archives are not guaranteed byte-stable, while a commit is immutable by
+# definition. The tag only makes cloning cheap; if someone moves it, bootstrap
+# refuses to work rather than substituting someone else's code.
 #
-# Обновить: ./bin/pin.sh <эта-машина> из stackyard, затем ./bootstrap здесь.
+# To update: ./bin/pin.sh <this-machine> from stackyard, then ./bootstrap here.
 repo=https://github.com/apankov/stackyard.git
 version=v0.3.0
 commit=c288608fb5049451d262eee7a17deca0898ec408
