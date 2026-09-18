@@ -1043,7 +1043,7 @@ check "в платформенных зонах нет машинной поли
 
 # Совместимость образа с директивами платформы.
 ENV_VARS=(); ENV_VARS[Platform_Nginx_Image]='nginx:1.19-alpine'
-check "старый образ nginx назван" "$(check_nginx_image | grep -c 'старее 1.25.1')" "1"
+check "старый образ nginx назван" "$(check_nginx_image | grep -c 'older than 1.25.1')" "1"
 ENV_VARS[Platform_Nginx_Image]='nginx:1.25.1-alpine'
 check "1.25.1 претензий не вызывает" "$(check_nginx_image)" ""
 ENV_VARS=()

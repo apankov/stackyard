@@ -687,8 +687,8 @@ stacks_cert_paths() {
 
 # --------------------------------------------------------------- systemd
 
-# Файлы юнитов стека. Пусто, если каталога systemd/ нет — наличие каталога и
-# есть объявление, отдельного ключа в stack.conf для этого не нужно.
+# A stack's unit files. Empty if there is no systemd/ directory — the presence
+# of the directory is the declaration, no separate key in stack.conf is needed.
 stack_units() {
   local f
   for f in "$(stack_dir "$1")"/systemd/*.service "$(stack_dir "$1")"/systemd/*.timer; do
@@ -697,26 +697,27 @@ stack_units() {
   done
 }
 
-# Каталог стека ОТНОСИТЕЛЬНО корня — то есть без префикса ROOT_DIR.
+# A stack's directory RELATIVE to the root — that is, without the ROOT_DIR
+# prefix.
 #
-# Нужен там, где путь пишется не для нас, а для кого-то ещё: systemd видит
-# машину по DEPLOY_DIR, и подставлять туда локальный ROOT_DIR нельзя. При этом
-# КОРЕНЬ (машинный или профильный) обязан быть настоящим — иначе юнит
-# профильного стека получит ExecStart в машинный каталог, где лежит только
-# .env, и упадёт с 203/EXEC по таймеру, ночью.
+# Needed where the path is written for someone else rather than for us: systemd
+# sees the machine at DEPLOY_DIR, and a local ROOT_DIR must not be substituted
+# there. The ROOT (machine or profile) must still be the real one — otherwise a
+# profile stack's unit gets an ExecStart into the machine directory, which
+# holds only .env, and fails with 203/EXEC on a timer, at night.
 _stack_dir_suffix() {
   local d; d="$(stack_dir "$1")"
   printf '%s' "${d#"$(stacks_root)"}"
 }
 
-# Текст юнита с подставленными плейсхолдерами.
+# A unit's text with placeholders substituted.
 #
-# Юниты systemd не умеют переменных вовсе — ни своих, ни окружения на этапе
-# разбора. Поэтому подстановка делается здесь, при установке, и все пути в
-# результате абсолютные.
+# systemd units support no variables at all — neither their own nor the
+# environment at parse time. So substitution happens here, at install time, and
+# every resulting path is absolute.
 #
-# Значения берутся из окружения (DEPLOY_DIR, SERVICE_USER, ONFAILURE), чтобы
-# функция одинаково годилась и для systemd.sh, и для тестов.
+# The values come from the environment (DEPLOY_DIR, SERVICE_USER, ONFAILURE) so
+# the function is equally usable from systemd.sh and from tests.
 unit_render() {
   local file="$1" stack="$2"
   sed \
@@ -727,25 +728,27 @@ unit_render() {
     "$file"
 }
 
-# ---------------------------------------------------------------- домены
+# ---------------------------------------------------------------- domains
 
-# Домены включённых стеков, по одному на строку, без повторов.
+# The domains of enabled stacks, one per line, without duplicates.
 #
-# Отдельный список доменов (например, набор каталогов в getssl-config/)
-# разъезжается с набором стеков незаметно в обе стороны: домен без стека
-# продлевается вечно и тратит лимиты Let's Encrypt, а стек без домена молча
-# остаётся с самоподписанной заглушкой до тех пор, пока кто-нибудь не откроет
-# его в браузере.
-# Одна запись Domains= — это ОДИН сертификат. Форма `домен+алиас+алиас`
-# означает, что алиасы уходят в тот же сертификат как SANS.
+# A separate list of domains (a set of directories under getssl-config/, say)
+# drifts from the set of stacks invisibly in both directions: a domain with no
+# stack is renewed forever and burns Let's Encrypt rate limits, while a stack
+# with no domain quietly keeps its self-signed placeholder until someone opens
+# it in a browser.
 #
-# Без этого www-имя, которое обслуживает тот же server-блок, остаётся с
-# сертификатом на голый домен: браузер ругается только на www, то есть отказ
-# видно не всем и не сразу, а из логов nginx он не виден вовсе.
+# One Domains= entry is ONE certificate. The form `domain+alias+alias` means
+# the aliases go into that same certificate as SANs.
+#
+# Without that, a www name served by the same server block keeps a certificate
+# issued for the bare domain: the browser complains only about www, so the
+# failure is visible neither to everyone nor immediately, and from nginx's own
+# logs it is not visible at all.
 domain_primary() { printf '%s' "${1%%+*}"; }
 domain_sans()    { [ "$1" = "${1#*+}" ] || printf '%s' "${1#*+}" | tr '+' ' '; }
 
-# Основные домены включённых стеков — по одному на сертификат.
+# The primary domains of enabled stacks — one per certificate.
 stacks_domains() {
   local s d
   while IFS= read -r s; do
@@ -753,8 +756,8 @@ stacks_domains() {
   done < <(stacks_enabled 2>/dev/null) | sort -u
 }
 
-# Сырые записи Domains= включённых стеков — по одной на сертификат, вместе с
-# алиасами. Это то, из чего certs.sh собирает per-host конфиги getssl.
+# The raw Domains= entries of enabled stacks — one per certificate, aliases
+# included. This is what certs.sh builds the per-host getssl configs from.
 stacks_domain_specs() {
   local s d
   while IFS= read -r s; do
@@ -762,8 +765,8 @@ stacks_domain_specs() {
   done < <(stacks_enabled 2>/dev/null) | sort -u
 }
 
-# ВСЕ имена включённых стеков, включая алиасы. Это то, что обязан обслуживать
-# работающий nginx, — в отличие от stacks_domains, которым меряют сертификаты.
+# EVERY name of the enabled stacks, aliases included. This is what a running
+# nginx must serve — unlike stacks_domains, which measures certificates.
 stacks_domain_names() {
   local s d a
   while IFS= read -r s; do
@@ -774,15 +777,15 @@ stacks_domain_names() {
   done < <(stacks_enabled 2>/dev/null) | sort -u
 }
 
-# ------------------------------------------------- разбор compose-файла
+# ------------------------------------------------- parsing a compose file
 #
-# Имена сервисов, томов и образов читаем разбором yaml, а НЕ через
-# `docker compose config`: последний требует все env-файлы стека и падает на
-# стеке, который как раз выключен или сломан — то есть именно тогда, когда
-# `stack.sh list` и `stack.sh purge` обязаны работать. Разбор рассчитан на
-# формат этих файлов (два пробела отступа под `services:` / `volumes:`), а
-# `stack.sh --check` сверяет результат с `docker compose config --services`
-# для включённых стеков, чтобы расхождение не жило незамеченным.
+# Service, volume and image names are read by parsing the YAML, NOT through
+# `docker compose config`: the latter requires all of a stack's env files and
+# fails on a stack that is disabled or broken — that is, exactly when
+# `stack list` and `stack purge` must still work. The parser assumes the format
+# of these files (two-space indentation under `services:` / `volumes:`), and
+# `stack --check` compares its result against `docker compose config
+# --services` for enabled stacks so that a mismatch cannot live unnoticed.
 
 _stacks_yaml_keys() {
   local file="$1" want="$2"
@@ -800,29 +803,29 @@ _stacks_yaml_keys() {
   ' "$file"
 }
 
-# Сервисы, принадлежащие стеку.
+# The services that belong to a stack.
 #
-# Сервисы платформы (nginx, php-fpm) исключаются намеренно: файл стека может
-# домешивать в них том, и без этого фильтра `stack.sh disable` снёс бы контейнер
-# nginx вместе со всеми сайтами машины.
+# Platform services (nginx, php-fpm) are excluded deliberately: a stack file may
+# merge a volume into them, and without this filter `stack disable` would
+# destroy the nginx container together with every site on the machine.
 stack_services() {
   local s="$1" base_services svc
   base_services=$(platform_services)
   while IFS= read -r svc; do
     [ -n "$svc" ] || continue
     if printf '%s\n' "$base_services" | grep -qx -- "$svc"; then
-      echo "Предупреждение: стек '$s' домешивает в общий сервис '$svc' — он не будет ни остановлен, ни удалён" >&2
+      echo "Warning: stack '$s' merges into shared service '$svc' — it will be neither stopped nor removed" >&2
       continue
     fi
     printf '%s\n' "$svc"
   done < <(_stacks_yaml_keys "$(stack_compose_file "$s")" services)
 }
 
-# Named volumes, объявленные стеком (bind-mount'ы сюда не попадают и не должны:
-# данные на /mnt/data не удаляет никакая команда этого репозитория).
+# Named volumes declared by a stack. Bind mounts do not appear here and must
+# not: no command in this repository deletes data living on a host path.
 stack_volumes() { _stacks_yaml_keys "$(stack_compose_file "$1")" volumes; }
 
-# Образы, на которые ссылается стек (в формате repository:tag или repository).
+# The images a stack references (as repository:tag or repository).
 stack_images() {
   local f="$(stack_compose_file "$1")"
   [ -f "$f" ] || return 0
@@ -858,91 +861,94 @@ stacks_include_lines() {
   done
 }
 
-# Включён ли vhost стека в работающем include-файле.
+# Whether a stack's vhosts are included by the file nginx actually reads.
 #
-# Сверяем ровно ту строку, которую производит stacks_include_lines, а не
-# похожую на неё: прошлая версия искала подстроку "conf.d/<стек>/*.conf",
-# которой в генерируемом файле нет и никогда не было (там путь вида
-# /etc/nginx/stacks/<стек>/nginx/*.conf). Совпадений не было ни разу, поэтому
-# `stack.sh list` показывал «выкл» у КАЖДОГО стека с vhost'ами — при включённом
-# include. Колонка, которая всегда врёт, хуже отсутствующей: по ней принимают
-# решения.
+# This compares the EXACT line stacks_include_lines produces, not something
+# resembling it. A reader looking for a merely similar substring would match
+# nothing at all, and the "vhosts" column would report every stack as disabled
+# while its include was in place. A column that always lies is worse than a
+# missing one: decisions are made from it.
 stack_vhost_enabled() {
   local want
   want="include $(stack_dir_in_container "$1")/nginx/*.conf;"
   grep -qxF "$want" "$(stacks_include_file)" 2>/dev/null
 }
 
-# Содержимое 10-enabled.conf для текущего манифеста.
-# Каталог машины с её собственным http-конфигом (зоны лимитов, карты).
-# Монтирование постоянное; пустой каталог законен — include по маске, которая
-# ничего не нашла, для nginx не ошибка.
+# The machine's own http-level config (rate-limit zones, maps). The mount is
+# constant; an empty directory is legitimate — an include whose glob matches
+# nothing is not an error for nginx.
 MACHINE_CONF_DIR_IN_CONTAINER="/etc/nginx/machine"
 
+# The contents of the generated include file for the current manifest.
 stacks_include_content() {
   cat <<'HDR'
-# СГЕНЕРИРОВАННЫЙ ФАЙЛ — правки будут перезаписаны.
-# Создаётся scripts/stack.sh из Enabled_Stacks в .env-stacks.
+# GENERATED FILE — edits will be overwritten.
+# Produced by stack.sh from Enabled_Stacks in .env-stacks.
 #
-# Смысл: nginx включает только conf.d/*.conf верхнего уровня, а vhost'ы стеков
-# лежат вне conf.d — в смонтированном /etc/nginx/stacks/<стек>/nginx/. Читаются
-# они ТОЛЬКО через include ниже, поэтому стек без строки здесь для nginx не
-# существует.
+# The point: nginx reads only the top level of conf.d, while stack vhosts live
+# outside it, under the mounted /etc/nginx/stacks/<stack>/nginx/. They are read
+# ONLY through the includes below, so a stack without a line here does not
+# exist as far as nginx is concerned.
 HDR
-  # Своё у машины — ПЕРВЫМ: там определения зон и карт, а nginx разрешает их
-  # имена в момент разбора server-блока. Политика, зависящая от конкретной
-  # машины (какой URI считать логином, какие частоты терпимы её сайтам), в
-  # платформе жить не может: она уехала бы на все остальные машины.
+  # The machine's own config comes FIRST: it defines zones and maps, and nginx
+  # resolves their names while parsing a server block. Policy that depends on
+  # the particular machine (which URI counts as a login, what request rates its
+  # sites tolerate) cannot live in the platform: it would travel to every other
+  # machine.
   printf 'include %s/*.conf;\n' "$MACHINE_CONF_DIR_IN_CONTAINER"
   stacks_include_lines
 }
 
-# Содержимое platform/compose/nginx-static.generated.yaml.
+# The contents of the generated statics compose file.
 #
-# Собирается из Static= ВСЕХ стеков в stacks/, а не только включённых, и
-# значения переносятся дословно, без разворачивания ${...}. Ровно это и делает
-# текст файла независимым от Enabled_Stacks и от наличия .env у стеков: спека
-# nginx, зависящая от набора стеков, означает, что выключение стека
-# пересоздаёт nginx — а это уносит ВСЕ vhost'ы, а не только сайты выключаемого
-# стека (CLAUDE.md §3.1).
+# Built from Static= across ALL stacks, not only the enabled ones, and values
+# are copied verbatim without expanding ${...}. That is exactly what makes the
+# file's text independent of Enabled_Stacks and of whether stacks have a .env:
+# an nginx spec that depended on the set of stacks would mean disabling a stack
+# recreates nginx — which takes down EVERY vhost, not just the sites of the
+# stack being disabled.
 #
-# Файл генерируется, а не пишется руками: захардкоженное имя домена в общем
-# файле означало бы правку платформы при каждом новом стеке со статикой.
+# The file is generated rather than written by hand: a hardcoded domain name in
+# a shared file would mean editing the platform for every new stack that serves
+# static content.
 stacks_static_content() {
   local s pair domain path lines=""
   while IFS= read -r s; do
     for pair in $(stack_conf_get "$s" Static); do
       domain="${pair%%:*}"
       path="${pair#*:}"
-      lines="$lines      - $path:\${Platform_Vhosts_Mount:?задайте Platform_Vhosts_Mount в корневом .env}/$domain:ro"$'\n'
+      lines="$lines      - $path:\${Platform_Vhosts_Mount:?set Platform_Vhosts_Mount in the root .env}/$domain:ro"$'\n'
     done
   done < <(stacks_available)
 
   cat <<'HDR'
-# СГЕНЕРИРОВАННЫЙ ФАЙЛ — правки будут перезаписаны.
-# Создаётся scripts/stack.sh из Static= в stacks/*/stack.conf.
+# GENERATED FILE — edits will be overwritten.
+# Produced by stack.sh from Static= in stacks/*/stack.conf.
 #
-# Подключается ВСЕГДА, независимо от Enabled_Stacks, и собирается из всех
-# стеков, а не из включённых. Это и есть его смысл: том со статикой домешивается
-# в сервис nginx из platform/compose/nginx.yaml, и если бы он жил в файле стека,
-# выключение стека МЕНЯЛО БЫ спеку nginx — то есть следующий `up -d` пересоздавал
-# бы nginx со всеми последствиями из CLAUDE.md §3.1.
+# Always included, regardless of Enabled_Stacks, and built from all stacks
+# rather than the enabled ones. That is the whole point: the static-content
+# volume is merged into the nginx service declared in platform/compose/
+# nginx.yaml, and if it lived in a stack's own file, disabling that stack would
+# CHANGE the nginx spec — so the next `up -d` would recreate nginx and take
+# every site down with it.
 #
-# Переменные не развёрнуты намеренно: их подставляет compose из корневого .env,
-# который загружается всегда. Дефолт `:-./vhosts` в каждой из них обязателен —
-# пустой host-путь означает каталог-пустышку от root и молчаливые 404.
+# Variables are left unexpanded deliberately: compose substitutes them from the
+# root .env, which is always loaded. Each of them carries a required-value
+# marker, because an empty host path yields a root-owned empty directory and
+# silent 404s.
 HDR
 
-  # Пустой блок volumes — невалидный yaml, и compose падал бы на КАЖДОЙ команде
-  # на машине, где ни один стек статики не раздаёт.
+  # An empty volumes block is invalid YAML, and compose would fail on EVERY
+  # command on a machine where no stack serves static content.
   if [ -n "$lines" ]; then
     printf 'services:\n  nginx:\n    volumes:\n%s' "$lines"
   fi
 }
 
-# Имя compose-проекта. Берём с метки живого контейнера, а не из basename
-# каталога: по метке работают все docker-команды disable/purge, и ошибиться
-# здесь означало бы трогать чужие контейнеры.
+# The compose project name. Taken from a running container's label rather than
+# from the directory's basename: every disable/purge docker command filters by
+# that label, and getting it wrong would mean touching someone else's
+# containers.
 compose_project() {
   local p
   p=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' nginx 2>/dev/null || true)
@@ -950,7 +956,7 @@ compose_project() {
   basename "$(stacks_root)" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-' '-' | sed 's/-*$//'
 }
 
-# Контейнеры сервиса (включая остановленные) по меткам compose.
+# A service's containers (stopped ones included), by compose labels.
 service_containers() {
   local svc="$1" proj
   proj=$(compose_project)
@@ -959,12 +965,12 @@ service_containers() {
     --filter "label=com.docker.compose.service=$svc" 2>/dev/null || true
 }
 
-# Сервисы, объявленные платформой и ВСЕМИ стеками — включёнными и нет.
+# The services declared by the platform and by ALL stacks — enabled or not.
 #
-# Выключенный стек здесь намеренно считается «знакомым»: его оставшиеся
-# контейнеры — это отдельная строка проверки («выключен, но остались
-# контейнеры») с понятным лечением через stack.sh disable. Бесхозный — это
-# другое: сервиса с таким именем не объявляет НИКТО.
+# A disabled stack counts as "known" here on purpose: its leftover containers
+# are a separate check line ("disabled, but containers remain") with an obvious
+# remedy via `stack disable`. An orphan is a different thing: NOBODY declares a
+# service by that name.
 stacks_known_services() {
   local s f
   for f in "$(stacks_root)"/platform/compose/*.yaml; do
@@ -976,14 +982,14 @@ stacks_known_services() {
   done < <(stacks_available)
 }
 
-# Контейнеры проекта: «имя<TAB>сервис» по строке на контейнер, включая
-# остановленные.
+# The project's containers: "name<TAB>service", one line per container,
+# stopped ones included.
 #
-# Существует потому, что service_containers() ищет по ИМЕНАМ сервисов из
-# compose-файлов и поэтому слеп к тому, чего в них нет. Контейнер
-# переименованного или удалённого сервиса иначе не виден ни одной проверке, а
-# для watch-host.sh он при этом вечная авария: остановлен, но с
-# restart: unless-stopped.
+# This exists because service_containers() searches by service NAMES taken from
+# compose files and is therefore blind to anything not in them. A container
+# belonging to a renamed or deleted service would otherwise be invisible to
+# every check, while for watch-host.sh it is a permanent incident: stopped, yet
+# declared restart: unless-stopped.
 project_containers() {
   local proj
   proj=$(compose_project)
@@ -991,18 +997,19 @@ project_containers() {
     --format '{{.Names}}	{{.Label "com.docker.compose.service"}}' 2>/dev/null || true
 }
 
-# ------------------------------------------------------- вывод таблиц
+# ------------------------------------------------------- table output
 
-# Ширина строки в СИМВОЛАХ. `printf %-12s` считает байты, поэтому таблица с
-# русскими значениями («вкл», «выкл», «ок») разъезжается тем сильнее, чем
-# больше в ней кириллицы. Считаем байты, кроме продолжающих байтов UTF-8
-# (0x80-0xBF) — это не зависит от локали, а `${#s}` зависит: под LANG=C bash
-# посчитает те же байты.
+# String width in CHARACTERS. `printf %-12s` counts bytes, so a table
+# containing any non-ASCII value drifts out of alignment by however many
+# multi-byte characters it holds. Counting bytes while skipping UTF-8
+# continuation bytes (0x80-0xBF) is locale-independent, whereas `${#s}` is not:
+# under LANG=C bash counts the same bytes.
 #
-# Живёт здесь, а не в stack.sh: таблицу со стеками печатает не он один.
+# It lives here rather than in stack.sh because more than one script prints the
+# stack table.
 _vislen() { LC_ALL=C printf '%s' "$1" | LC_ALL=C tr -d '\200-\277' | LC_ALL=C wc -c | tr -d ' \n'; }
 
-# Ячейка таблицы: текст, добитый пробелами до нужной ширины.
+# A table cell: text padded with spaces to the required width.
 _cell() {
   local text="$1" width="$2" len
   len=$(_vislen "$text")
@@ -1010,16 +1017,17 @@ _cell() {
   while [ "$len" -lt "$width" ]; do printf ' '; len=$((len + 1)); done
 }
 
-# Зоны лимитов, на которые ссылаются vhost'ы включённых стеков, но которых
-# никто не определяет.
+# Rate-limit zones referenced by the vhosts of enabled stacks but defined by
+# nobody.
 #
-# nginx разрешает имя зоны в момент разбора server-блока: неизвестное имя —
-# "unknown limit_req_zone", отказ старта и краш-луп по restart: always. Ровно
-# это ждало любую машину, чьи vhost'ы писались под другой набор зон: платформа
-# несла зоны одного девбокса, а vhost'ы других просили свои.
+# nginx resolves a zone name while parsing the server block: an unknown name
+# gives "unknown limit_req_zone", a refusal to start, and a crash loop under
+# restart: always. Any machine whose vhosts were written against a different
+# set of zones hits this.
 #
-# Ищем и в платформе, и в nginx/ машины: политика, зависящая от машины, живёт
-# там, и зона, объявленная ею, законна не меньше платформенной.
+# Both the platform and the machine's own nginx/ directory are searched:
+# machine-specific policy lives there, and a zone declared by it is no less
+# legitimate than a platform one.
 check_limit_zones() {
   local defined used z
   defined=$( { cat "$(stacks_root)/platform/nginx-vhosts"/*.conf 2>/dev/null
@@ -1032,54 +1040,48 @@ check_limit_zones() {
           | sed -E 's/.*zone=//; s/limit_conn[[:space:]]+//' | sort -u )
   for z in $used; do
     printf '%s\n' "$defined" | grep -qx "$z" \
-      || printf 'vhost ссылается на зону лимита %s, которой никто не определяет — nginx не стартует\n' "$z"
+      || printf 'a vhost references rate-limit zone %s, which nobody defines — nginx will not start\n' "$z"
   done
   return 0
 }
 
-# Поддерживает ли закреплённый образ nginx директиву `http2 on`.
-#
-# Она появилась в 1.25.1 и стоит в platform/nginx-snippets/ssl-params.conf.
-# Машина, закрепившая образ старее, получает неизвестную директиву — nginx не
-# стартует, и с restart: always это краш-луп, уносящий все сайты. Отказ виден
-# только в логах контейнера: снаружи машина просто не отвечает.
-#
-# Печатает строку на проблему, молчит когда её нет.
-# Образ nginx — один на всех, кто его называет. Копий было три: compose (там
-# без литерала нельзя), эта проверка и htpasswd.sh, который про
-# Platform_Nginx_Image вовсе не знал и запускал свой. На машине с
-# переопределённым образом это значило, что файл паролей готовит НЕ тот nginx,
-# который его потом читает, — а прав на файл это касается напрямую.
+# The nginx image is one value shared by everyone who names it: this check, the
+# password-file helper, and compose (where a literal is unavoidable). On a
+# machine that overrides the image, a second copy would mean the password file
+# is prepared by a DIFFERENT nginx from the one that later reads it — and file
+# ownership depends on the image.
 nginx_image() { env_get Platform_Nginx_Image "nginx:1.30-alpine"; }
 
-# check_vhost_dir <каталог>
+# check_vhost_dir <directory>
 #
-# Всё, что лежит рядом с генерируемым include'ом, читается nginx по маске
-# *.conf. Docker, не найдя файла для bind-mount, заводит на его месте КАТАЛОГ
-# от root — и тот попадает под маску: nginx падает с «pread() ... failed (21:
-# Is a directory)», а с restart: always это краш-луп, уносящий все сайты.
+# Everything sitting next to the generated include file is read by nginx
+# through a *.conf glob. When Docker cannot find a file to bind-mount, it
+# creates a root-owned DIRECTORY in its place — and that directory matches the
+# glob: nginx fails with "pread() ... failed (21: Is a directory)", and under
+# restart: always that is a crash loop taking down every site.
 #
-# Такой каталог остаётся от прежних спек и переживает обновление платформы:
-# state/ машинный, bootstrap его не трогает. Убрать его может только root,
-# поэтому в сообщении стоит sudo — без него rm молча не сработает.
+# Such a directory survives a platform update: state/ belongs to the machine
+# and bootstrap does not touch it. Only root can remove it, which is why the
+# message says sudo — without it rm silently does nothing.
 #
-# Печатает строку на находку, молчит когда их нет.
+# Prints one line per finding, stays silent when there are none.
 check_vhost_dir() {
   local dir="${1-}" e
   [ -d "$dir" ] || return 0
   for e in "$dir"/*; do
     [ -e "$e" ] || continue
     [ -f "$e" ] && continue
-    printf '%s — не файл, а каталог; nginx читает его по маске *.conf и падает: sudo rm -rf %s\n' "$e" "$e"
+    printf '%s is a directory, not a file; nginx reads it through the *.conf glob and fails: sudo rm -rf %s\n' "$e" "$e"
   done
 }
 
-# mount_looks_stale <файлов на хосте> <файлов в контейнере>
+# mount_looks_stale <files on the host> <files in the container>
 #
-# Правило вынесено из stack.sh отдельно, потому что сама сверка требует docker
-# и потому в selftest не проверяется — а решение «это устаревший mount» нужно
-# проверять. Пустой каталог на хосте не улика: смонтировать пустое законно.
-# Улика — непустой на хосте против пустого в контейнере.
+# The rule is factored out of stack.sh because the comparison itself needs
+# docker and therefore cannot run under selftest — while the decision "this
+# mount is stale" does need testing. An empty directory on the host is not
+# evidence: mounting something empty is legitimate. The evidence is non-empty
+# on the host against empty in the container.
 mount_looks_stale() {
   [ "${1:-0}" -gt 0 ] && [ "${2:-0}" -eq 0 ]
 }
@@ -1096,22 +1098,22 @@ check_nginx_image() {
       if [ "$major" -lt 1 ] \
          || { [ "$major" -eq 1 ] && [ "$minor" -lt 25 ]; } \
          || { [ "$major" -eq 1 ] && [ "$minor" -eq 25 ] && [ "$patch" -lt 1 ]; }; then
-        printf 'образ %s старее 1.25.1, а ssl-params.conf содержит `http2 on` — nginx не стартует\n' "$img"
+        printf 'image %s is older than 1.25.1 while ssl-params.conf uses `http2 on` — nginx will not start\n' "$img"
       fi
       ;;
-    *) printf 'не разобрать версию образа nginx (%s) — проверьте вручную, что он не старее 1.25.1\n' "$img" ;;
+    *) printf 'cannot parse the nginx image version (%s) — check by hand that it is not older than 1.25.1\n' "$img" ;;
   esac
 }
 
-# -------------------------------------------- живой nginx против спеки
+# -------------------------------------------- the live nginx vs its spec
 
-# «источник<TAB>цель» по каждому bind-mount'у из рендера `docker compose
-# config`. Читает stdin.
+# "source<TAB>target" for every bind mount in a `docker compose config` render.
+# Reads stdin.
 #
-# Спека контейнера и его живое состояние — разные вещи: правка `volumes`
-# применяется только пересозданием. До него `docker ps` показывает контейнер
-# работающим, `nginx -t` внутри него проходит, и ничто не намекает, что nginx
-# смотрит в каталоги, которых на диске уже нет.
+# A container's spec and its live state are different things: an edit to
+# `volumes` takes effect only on recreation. Until then `docker ps` shows the
+# container running, `nginx -t` inside it passes, and nothing hints that nginx
+# is looking at directories that no longer exist on disk.
 compose_mount_pairs() {
   awk '
     $1 == "-" && $2 == "type:"      { ty = $3; src = "" }
@@ -1121,30 +1123,31 @@ compose_mount_pairs() {
   '
 }
 
-# Домены, которые РЕАЛЬНО обслуживает работающий nginx. Читает вывод
-# `nginx -T`, то есть эффективную конфигурацию процесса, а не файлы на диске.
+# The domains a running nginx ACTUALLY serves. Reads the output of `nginx -T`,
+# that is the process's effective configuration rather than the files on disk.
 #
-# `nginx -t` на этот вопрос не отвечает: конфигурация без единого server-блока
-# синтаксически верна и проверку синтаксиса проходит — при том что nginx в
-# таком состоянии не слушает вообще ничего.
+# `nginx -t` does not answer this question: a configuration with no server
+# block at all is syntactically valid and passes the syntax check — while nginx
+# in that state listens for nothing.
 nginx_served_names() {
   awk '$1 == "server_name" {
          for (i = 2; i <= NF; i++) { gsub(/;/, "", $i); if ($i != "" && $i != "_") print $i }
        }' | sed '/^$/d' | sort -u
 }
 
-# ------------------------------------------------------ юниты на машине
+# ------------------------------------------------------ units on the machine
 
-# Каталог юнитов systemd. Переопределяется только ради тестов: на машине это
-# всегда /etc/systemd/system, и юниты там лежат плоско — отсюда требование
-# префикса devbox-<стек>- в имени.
+# The systemd unit directory. Overridable only for tests: on a machine it is
+# always /etc/systemd/system, and units there are stored flat — hence the
+# requirement that names carry a devbox-<stack>- prefix.
 SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
-# Юниты стека, РЕАЛЬНО установленные на машине, по одному имени на строку.
+# A stack's units ACTUALLY installed on the machine, one name per line.
 #
-# Объявленные (stack_units) и установленные — разные множества, и расходятся
-# они молча в обе стороны: у включённого стека юнит может быть не поставлен, у
-# выключенного — остаться и будить машину по таймеру мёртвого стека.
+# Declared units (stack_units) and installed ones are different sets, and they
+# drift silently in both directions: an enabled stack may have a unit that was
+# never installed, and a disabled stack may leave one behind that wakes the
+# machine on a dead stack's timer.
 stack_units_installed() {
   local s="$1" u n
   while IFS= read -r u; do
@@ -1155,9 +1158,10 @@ stack_units_installed() {
   return 0
 }
 
-# --------------------------------------------------- здоровье стеков
+# --------------------------------------------------- stack health
 
-# Проверка живости стека, если стек её объявил. Наличие файла — и есть
-# объявление: отдельного списка нет, как и у vhost'ов, юнитов и logrotate.
+# A stack's liveness check, if the stack declares one. The presence of the file
+# is the declaration: there is no separate list, just as there is none for
+# vhosts, units or logrotate.
 stack_health_script() { printf '%s/scripts/health.sh' "$(stack_dir "$1")"; }
 
