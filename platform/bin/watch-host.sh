@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 
-# Периодический обход состояния машины: диск, inode, контейнеры.
+# A periodic sweep of the machine's state: disk, inodes, containers.
 #
-# Юниты systemd сообщают о СВОИХ сбоях через OnFailure, а состояние хоста не
-# сообщает о себе никак: кончающееся место и краш-луп контейнера видны только
-# тому, кто зашёл посмотреть.
+# systemd units report THEIR OWN failures through OnFailure, while the host's
+# state reports nothing at all: a disk filling up and a container crash loop
+# are visible only to whoever logs in to look.
 #
-# КОД ВОЗВРАТА. 0, если проверки выполнены — независимо от того, что нашли:
-# находки скрипт отправляет сам, с деталями. Ненулевой код только если
-# проверить не удалось. Иначе OnFailure присылал бы вторым, менее
-# информативным сообщением то же самое, о чём мы уже написали.
+# EXIT CODE. 0 when the checks ran, regardless of what they found: the script
+# sends its findings itself, with detail. A non-zero code only when the checks
+# could not be performed. Otherwise OnFailure would deliver a second, less
+# informative message about something already reported.
 #
-#   sudo ./scripts/watch-host.sh            # обход и оповещения
-#   sudo ./scripts/watch-host.sh --dry-run  # показать находки, не отправляя
+#   sudo ./platform/bin/watch-host.sh            # sweep and notify
+#   sudo ./platform/bin/watch-host.sh --dry-run  # show findings, send nothing
 
 set -uo pipefail
 
@@ -36,20 +36,20 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 # shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 
-# Переопределяется только ради тестов: боевой путь — /var/lib/devbox-notify,
-# и юниты его не переопределяют. Без этого проверить дедупликацию и
-# восстановление можно было бы только от root на живой машине.
+# Overridable only for tests: the production path is /var/lib/devbox-notify and
+# the units do not override it. Without this, deduplication and recovery could
+# be exercised only as root on a live machine.
 STATE_DIR="${DEVBOX_NOTIFY_STATE_DIR:-/var/lib/devbox-notify}"
 RESTARTS_STATE="$STATE_DIR/restarts.state"
 
 DRY_RUN=0
 [ "${1-}" = "--dry-run" ] && DRY_RUN=1
-[ "${1-}" = "--help" ] && { echo "Использование: sudo $0 [--dry-run]"; exit 0; }
+[ "${1-}" = "--help" ] && { echo "Usage: sudo $0 [--dry-run]"; exit 0; }
 
-die() { echo "Ошибка: $*" >&2; exit 2; }
+die() { echo "Error: $*" >&2; exit 2; }
 
 ENV_NOTIFY="$ROOT_DIR/.env-notify"
-[ -f "$ENV_NOTIFY" ] || die "нет $ENV_NOTIFY"
+[ -f "$ENV_NOTIFY" ] || die "no $ENV_NOTIFY"
 env_load_files "$ROOT_DIR/.env" "$ENV_NOTIFY"
 
 WARN_PCT=$(env_get Notify_Disk_Warn_Percent 80)
@@ -59,89 +59,91 @@ RESTART_DELTA=$(env_get Notify_Restart_Delta 3)
 IGNORE=$(env_get Notify_Ignore_Containers)
 
 for n in WARN_PCT CRIT_PCT RESTART_DELTA; do
-  case "${!n}" in ''|*[!0-9]*) die "$n должно быть целым числом, а не '${!n}'" ;; esac
+  case "${!n}" in ''|*[!0-9]*) die "$n must be an integer, not '${!n}'" ;; esac
 done
 
-install -d -m 700 "$STATE_DIR" 2>/dev/null || die "не создать $STATE_DIR (нужен root)"
+install -d -m 700 "$STATE_DIR" 2>/dev/null || die "cannot create $STATE_DIR (root required)"
 
 notify() {
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "  [dry-run] notify.sh $*"
     return 0
   fi
-  "$DIR0/notify.sh" "$@" || echo "  [!] отправка не удалась: $*" >&2
+  "$DIR0/notify.sh" "$@" || echo "  [!] sending failed: $*" >&2
 }
 
-echo "== Обход состояния devbox, $(date -u '+%Y-%m-%d %H:%M') UTC"
+echo "== Host sweep, $(date -u '+%Y-%m-%d %H:%M') UTC"
 
-# ------------------------------------------------------------------ 1. диск
+# ------------------------------------------------------------------ 1. disk
 
 echo
-echo "-- Диск"
+echo "-- Disk"
 
-# check_usage <ascii-имя> <человеческое имя> <точка> <процент> <детали>
+# check_usage <ascii key> <human label> <mount point> <percent> <detail>
 #
-# Имя ключа ОТДЕЛЬНО от заголовка и обязательно ASCII: ключ становится именем
-# файла состояния, а санитайзер в notify.sh заменяет всё не-ASCII на
-# подчёркивания. Два русских слова одинаковой длины дали бы один и тот же файл,
-# то есть два разных предупреждения молча гасили бы друг друга.
+# The key is SEPARATE from the title and must be ASCII: the key becomes a state
+# file's name, and the sanitiser in notify.sh replaces every non-ASCII
+# character with an underscore. Two different non-ASCII labels of the same
+# length would collapse into one file, so two distinct alerts would silently
+# suppress each other.
 check_usage() {
   local kind="$1" label="$2" mp="$3" pct="$4" detail="$5"
-  # Отдельным оператором, а не шестым присваиванием выше: `local` сначала
-  # объявляет ВСЕ имена и лишь потом присваивает, поэтому $kind в той же
-  # строке ещё пуст — а под `set -u` это не пустая строка, а смерть скрипта.
+  # A separate statement rather than a sixth assignment above: `local` declares
+  # ALL the names first and assigns afterwards, so $kind on that same line is
+  # still empty — and under `set -u` that is not an empty string but the death
+  # of the script.
   local key="disk-$kind:$mp"
 
   if [ "$pct" -ge "$CRIT_PCT" ]; then
     printf '  [!!]   %-7s %-10s %s%%\n' "$label" "$mp" "$pct"
     notify --key "$key" --level crit \
-           --title "$label на $mp — $pct% (порог $CRIT_PCT%)" <<< "$detail"
+           --title "$label on $mp — $pct% (threshold $CRIT_PCT%)" <<< "$detail"
   elif [ "$pct" -ge "$WARN_PCT" ]; then
     printf '  [!]    %-7s %-10s %s%%\n' "$label" "$mp" "$pct"
     notify --key "$key" --level warn \
-           --title "$label на $mp — $pct% (порог $WARN_PCT%)" <<< "$detail"
+           --title "$label on $mp — $pct% (threshold $WARN_PCT%)" <<< "$detail"
   else
     printf '  [ok]   %-7s %-10s %s%%\n' "$label" "$mp" "$pct"
-    notify --key "$key" --resolve --title "$label на $mp снова в норме — $pct%"
+    notify --key "$key" --resolve --title "$label on $mp is back to normal — $pct%"
   fi
 }
 
 for mp in $MOUNTS; do
   if ! df -Ph "$mp" >/dev/null 2>&1; then
-    echo "  [FAIL] точка монтирования '$mp' недоступна" >&2
+    echo "  [FAIL] mount point '$mp' is not reachable" >&2
     continue
   fi
 
   pct=$(df -Ph "$mp" | awk 'NR==2 {gsub(/%/, "", $5); print $5}')
   detail=$(df -Ph "$mp" | sed -n '1p;2p')
-  # Крупнейшие потребители полезнее в самом сообщении, чем ссылка на команду:
-  # тревога приходит ночью, и лишний заход на машину стоит времени.
-  detail+=$'\n\n'"крупнейшее в /var/lib/docker:"$'\n'
-  detail+=$(docker system df 2>/dev/null | head -5 || echo "  docker не отвечает")
-  check_usage space "место" "$mp" "$pct" "$detail"
+  # The biggest consumers are more useful inside the message than a command to
+  # run: the alert arrives at night, and one more login costs time.
+  detail+=$'\n\n'"largest docker objects:"$'\n'
+  detail+=$(docker system df 2>/dev/null | head -5 || echo "  docker is not responding")
+  check_usage space "space" "$mp" "$pct" "$detail"
 
   ipct=$(df -Pi "$mp" | awk 'NR==2 {gsub(/%/, "", $5); print $5}')
-  # На некоторых ФС (btrfs, overlay без своего inode-учёта) df -i возвращает
-  # прочерк. Это не отказ — просто нечего проверять.
+  # On some filesystems (btrfs, overlay without its own inode accounting) df -i
+  # returns a dash. That is not a failure — there is simply nothing to check.
   case "$ipct" in
-    ''|*[!0-9]*) echo "  [--]   inode  $mp           учёт inode недоступен" ;;
+    ''|*[!0-9]*) echo "  [--]   inode  $mp           inode accounting unavailable" ;;
     *) check_usage inode "inode" "$mp" "$ipct" "$(df -Pi "$mp" | sed -n '1p;2p')" ;;
   esac
 done
 
-# ------------------------------------------------------------ 2. контейнеры
+# ------------------------------------------------------------ 2. containers
 
 echo
-echo "-- Контейнеры"
+echo "-- Containers"
 
 if ! docker info >/dev/null 2>&1; then
-  # Демон не отвечает — это само по себе тревога, и проверить контейнеры мы не
-  # можем. Единственное место, где скрипт возвращает ненулевой код.
-  notify --key "docker:daemon" --level crit --title "демон docker не отвечает" \
+  # An unresponsive daemon is an alert in itself, and the containers cannot be
+  # inspected. The only place where this script exits non-zero.
+  notify --key "docker:daemon" --level crit --title "the docker daemon is not responding" \
     <<< "$(systemctl status docker --no-pager -n 10 2>&1 | tail -12)"
-  die "демон docker не отвечает"
+  die "the docker daemon is not responding"
 fi
-notify --key "docker:daemon" --resolve --title "демон docker снова отвечает"
+notify --key "docker:daemon" --resolve --title "the docker daemon is responding again"
 
 NEW_RESTARTS=$(mktemp)
 trap 'rm -f "$NEW_RESTARTS"' EXIT
@@ -161,48 +163,48 @@ while IFS= read -r name; do
 
   echo "$name $restarts" >> "$NEW_RESTARTS"
 
-  # Контейнеры, которым положено завершаться (инициализаторы, миграторы),
-  # отсеиваются политикой рестарта, а не списком имён: список пришлось бы
-  # править при каждом новом стеке.
+  # Containers that are supposed to exit (initializers, migrators) are filtered
+  # out by their restart policy rather than by a list of names: such a list
+  # would need editing for every new stack.
   case "$policy" in
     always|unless-stopped) ;;
-    *) printf '  [--]   %-22s %s (одноразовый, не наблюдаем)\n' "$name" "$state"; continue ;;
+    *) printf '  [--]   %-22s %s (one-shot, not watched)\n' "$name" "$state"; continue ;;
   esac
 
-  # 2a. не запущен
+  # 2a. not running
   if [ "$state" != "running" ]; then
     printf '  [!!]   %-22s %s\n' "$name" "$state"
     notify --key "container:$name" --level crit \
-           --title "контейнер $name не запущен ($state)" \
+           --title "container $name is not running ($state)" \
            <<< "$(docker logs --tail 25 "$name" 2>&1 | tail -25)"
     continue
   fi
-  notify --key "container:$name" --resolve --title "контейнер $name снова запущен"
+  notify --key "container:$name" --resolve --title "container $name is running again"
 
-  # 2b. краш-луп. Следим за ДЕЛЬТОЙ счётчика рестартов, а не за статусом:
-  #     `restart: always` показывает «Up 3 seconds» бесконечно, и по docker ps
-  #     краш-луп неотличим от нормально работающего контейнера.
+  # 2b. crash loop. What is watched is the DELTA of the restart counter, not the
+  #     status: `restart: always` shows "Up 3 seconds" forever, and in docker ps
+  #     a crash loop is indistinguishable from a healthy container.
   prev=$(awk -v n="$name" '$1 == n {print $2}' "$RESTARTS_STATE" 2>/dev/null)
   case "$prev" in ''|*[!0-9]*) prev="$restarts" ;; esac
   delta=$(( restarts - prev ))
 
   if [ "$delta" -ge "$RESTART_DELTA" ]; then
-    printf '  [!!]   %-22s краш-луп: +%s рестартов\n' "$name" "$delta"
+    printf '  [!!]   %-22s crash loop: +%s restarts\n' "$name" "$delta"
     notify --key "container-loop:$name" --level crit \
-           --title "контейнер $name перезапустился $delta раз с прошлой проверки" \
+           --title "container $name restarted $delta times since the last check" \
            <<< "$(docker logs --tail 25 "$name" 2>&1 | tail -25)"
   else
-    notify --key "container-loop:$name" --resolve --title "контейнер $name перестал перезапускаться"
+    notify --key "container-loop:$name" --resolve --title "container $name stopped restarting"
   fi
 
   # 2c. healthcheck
   if [ "$health" = "unhealthy" ]; then
     printf '  [!]    %-22s unhealthy\n' "$name"
     notify --key "container-health:$name" --level warn \
-           --title "контейнер $name — unhealthy" \
+           --title "container $name is unhealthy" \
            <<< "$(docker inspect -f '{{range .State.Health.Log}}{{.Output}}{{end}}' "$name" 2>/dev/null | tail -10)"
   else
-    notify --key "container-health:$name" --resolve --title "контейнер $name снова healthy"
+    notify --key "container-health:$name" --resolve --title "container $name is healthy again"
     printf '  [ok]   %-22s running%s\n' "$name" "$([ "$health" != "-" ] && echo ", $health")"
   fi
 
@@ -214,4 +216,4 @@ if [ "$DRY_RUN" -eq 0 ]; then
 fi
 
 echo
-echo "Обход завершён."
+echo "Sweep complete."
