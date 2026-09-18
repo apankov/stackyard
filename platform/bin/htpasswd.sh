@@ -26,12 +26,14 @@ set -euo pipefail
 DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -z "${ROOT_DIR:-}" ]; then
   ROOT_DIR="$( cd "$DIR0/../.." && pwd )"
-  # На машине platform/ — симлинк в .stackyard/, и `cd -P` выше его уже
-  # развернул: два уровня приводят не в машину, а в .stackyard. Тогда state/
-  # заводится ВНУТРИ скачиваемого слоя и пропадает при следующем ./bootstrap,
-  # а до того htpasswd, сертификаты и databases.yaml лежат не там, где их ищут
-  # контейнеры. Обёртки в корне машины ROOT_DIR задают сами, но документация
-  # каждого скрипта зовёт его как ./platform/bin/<имя>.sh — этот путь и чиним.
+  # On a machine, platform/ is a symlink into .stackyard/, and the `cd -P`
+  # above has already resolved it: two levels up lands in .stackyard rather
+  # than in the machine. state/ would then be created INSIDE the downloaded
+  # layer and vanish on the next ./bootstrap, and until then the password
+  # files, certificates and databases.yaml would sit where no container looks
+  # for them. The wrappers in the machine root set ROOT_DIR themselves, but
+  # every script documents being called as ./platform/bin/<name>.sh — that is
+  # the path this fixes.
   [ "${ROOT_DIR##*/}" = .stackyard ] && ROOT_DIR="${ROOT_DIR%/*}"
 fi
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
