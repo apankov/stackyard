@@ -126,7 +126,7 @@ units_apply() {
 # and the data cannot drift apart when either is edited.
 _row() {
   printf '%s%s%s%s%s\n' \
-    "$(_cell "$1" 13)" "$(_cell "$2" 10)" "$(_cell "$3" 22)" "$(_cell "$4" 14)" "$5"
+    "$(_cell "$1" 13)" "$(_cell "$2" 10)" "$(_cell "$3" 24)" "$(_cell "$4" 14)" "$5"
 }
 
 usage() {
