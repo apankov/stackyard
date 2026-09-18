@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 
-# Установка таймеров systemd: продление сертификатов через getssl, проверка
-# сроков, суточный бэкап баз в S3 с его собственной проверкой, оповещения в
-# Telegram (обработчик OnFailure, наблюдение за хостом, еженедельная сводка) —
-# и юниты, которые приносят с собой сами стеки.
+# Installing the systemd timers: certificate renewal through getssl, an expiry
+# check, a daily backup to S3 with its own independent check, notifications (an
+# OnFailure handler, host watching, a weekly digest) — plus the units the
+# stacks bring with them.
 #
-# Пакета cronie на этой машине нет вовсе; systemd здесь уже есть, ставить
-# нечего.
+# systemd rather than cron because systemd is already present on the machine
+# and needs nothing installed.
 #
-# Скрипт идемпотентен: повторный запуск переустанавливает юниты и перечитывает
-# конфигурацию, ничего не ломая.
+# The script is idempotent: running it again reinstalls the units and reloads
+# the configuration without breaking anything.
 
 set -euo pipefail
 
 DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# Каталог МАШИНЫ, а не платформы. Обычно его задаёт обёртка ./stack в корне
-# машины; запасной вариант — на два уровня вверх от platform/bin, чтобы скрипт
-# работал и при прямом вызове.
+# The MACHINE's directory, not the platform's. Normally set by a wrapper in the
+# machine root; the fallback is two levels up from platform/bin, so the script
+# also works when invoked directly.
 if [ -z "${ROOT_DIR:-}" ]; then
   ROOT_DIR="$( cd "$DIR0/../.." && pwd )"
   # On a machine, platform/ is a symlink into .stackyard/, and the `cd -P`
@@ -37,89 +37,90 @@ UNIT_DST="/etc/systemd/system"
 BACKUP_ENV_FILE="$ROOT_DIR/.env-backup"
 NOTIFY_ENV_FILE="$ROOT_DIR/.env-notify"
 
-# Юниты бэкапа и оповещений добавляются ниже, если на машине настроены
-# соответствующие части. Продление сертификатов ставится всегда.
+# The backup and notification units are appended below when the machine has
+# those parts configured. Certificate renewal is always installed.
 #
-# Юниты СТЕКОВ здесь не перечисляются вовсе: их приносит проход по
-# stacks/<стек>/systemd/ (блок 4). Иначе стек, которому понадобился таймер, был
-# бы обязан править этот скрипт.
+# STACK units are not listed here at all: they are picked up by the pass over
+# stacks/<stack>/systemd/ (block 4). Otherwise a stack that needed a timer
+# would have to edit this script.
 UNITS=(getssl-renew.service getssl-renew.timer getssl-check.service getssl-check.timer)
 TIMERS=(getssl-renew.timer getssl-check.timer)
 
-# 1. Проверяем наличие .env
+# 1. The .env file must exist
 if [ ! -f "$ENV_FILE" ]; then
-  echo "Ошибка: Файл окружения '$ENV_FILE' не найден!" >&2
+  echo "Error: environment file '$ENV_FILE' not found" >&2
   exit 1
 fi
 
-# `|| true` обязателен: при set -euo pipefail отсутствие строки в .env даёт
-# ненулевой код grep, pipefail протаскивает его через конвейер, а set -e
-# убивает скрипт прямо на присваивании — до проверки ниже, которая должна
-# была объяснить, что не так.
+# `|| true` is mandatory: under set -euo pipefail a line missing from .env makes
+# grep exit non-zero, pipefail carries that through the pipeline, and set -e
+# kills the script right at the assignment — before the check below, which was
+# supposed to explain what is wrong.
 Platform_Deploy_Dir=$(grep -E '^Platform_Deploy_Dir=' "$ENV_FILE" | head -n 1 | cut -d '=' -f2- | tr -d '"'\' || true)
 
 if [ -z "$Platform_Deploy_Dir" ]; then
-  echo "Ошибка: Переменная Platform_Deploy_Dir не задана в файле $ENV_FILE" >&2
+  echo "Error: Platform_Deploy_Dir is not set in $ENV_FILE" >&2
   exit 1
 fi
 
-# 2. Предполётные проверки. Каждая из них — отказ, который иначе проявился бы
-#    только через сутки, в 05:23, и молча.
+# 2. Preflight checks. Each of them is a failure that would otherwise surface
+#    only a day later, in the middle of the night, and silently.
 if ! command -v systemctl >/dev/null 2>&1; then
-  echo "Ошибка: systemd не найден. Этой машине нужен другой планировщик." >&2
+  echo "Error: systemd not found. This machine needs a different scheduler." >&2
   exit 1
 fi
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "Ошибка: нужны права root. Запустите: sudo $0" >&2
+  echo "Error: root privileges are required. Run: sudo $0" >&2
   exit 1
 fi
 
-# Platform_Deploy_Dir — это путь НА машине; на ней же мы и стоим.
+# Platform_Deploy_Dir is a path ON the machine, and this runs on that machine.
 if [ ! -d "$Platform_Deploy_Dir/state/getssl-config" ]; then
-  echo "Ошибка: нет $Platform_Deploy_Dir/state/getssl-config" >&2
-  echo "  Platform_Deploy_Dir в .env указывает не туда, где лежит репозиторий." >&2
+  echo "Error: no $Platform_Deploy_Dir/state/getssl-config" >&2
+  echo "  Platform_Deploy_Dir in .env does not point at the repository." >&2
   exit 1
 fi
 
-# getssl — машинный артефакт в state/, а не файл платформы: его скачивает
-# getssl-fetch.sh по platform/getssl.lock. Юниты ставить бессмысленно, пока
-# его нет: таймер был бы, продления — нет, и выглядело бы это как «getssl
-# молчит, потому что продлевать нечего».
+# getssl is a machine artifact under state/, not a platform file: it is
+# downloaded by getssl-fetch.sh according to platform/getssl.lock. Installing
+# the units before it exists is pointless: there would be a timer and no
+# renewals, which looks exactly like "getssl is quiet because there is nothing
+# to renew".
 if [ ! -x "$Platform_Deploy_Dir/state/bin/getssl" ]; then
-  echo "Ошибка: нет $Platform_Deploy_Dir/state/bin/getssl" >&2
-  echo "  Скачать: ./platform/bin/getssl-fetch.sh" >&2
+  echo "Error: no $Platform_Deploy_Dir/state/bin/getssl" >&2
+  echo "  Download it with: ./platform/bin/getssl-fetch.sh" >&2
   exit 1
 fi
 
-# От чьего имени крутить таймеры: владелец каталога репозитория. Он же владеет
-# state/certs, куда getssl пишет результат.
+# Which user the timers run as: the owner of the repository directory. That
+# same user owns state/certs, where getssl writes its results.
 SERVICE_USER=$(stat -c '%U' "$Platform_Deploy_Dir" 2>/dev/null || stat -f '%Su' "$Platform_Deploy_Dir")
 
 if [ -z "$SERVICE_USER" ] || [ "$SERVICE_USER" = "root" ]; then
-  echo "Ошибка: владелец $Platform_Deploy_Dir — '$SERVICE_USER'." >&2
-  echo "  Ожидался обычный пользователь (ec2-user), от которого работает деплой." >&2
+  echo "Error: $Platform_Deploy_Dir is owned by '$SERVICE_USER'." >&2
+  echo "  An ordinary user was expected — the one the deployment runs as." >&2
   exit 1
 fi
 
-# RELOAD_CMD в каждом getssl.cfg — это "docker exec nginx nginx -s reload".
-# Без членства в группе docker продление пройдёт, а nginx останется со старым
-# сертификатом в памяти: худший вид отказа — тихий и частичный.
+# RELOAD_CMD in every getssl.cfg is "docker exec nginx nginx -s reload".
+# Without membership in the docker group the renewal succeeds while nginx keeps
+# the old certificate in memory: the worst kind of failure — quiet and partial.
 if ! id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx docker; then
-  echo "Ошибка: пользователь '$SERVICE_USER' не состоит в группе docker." >&2
-  echo "  RELOAD_CMD ('docker exec nginx nginx -s reload') не сработает," >&2
-  echo "  и nginx продолжит отдавать старый сертификат после продления." >&2
-  echo "  Исправление: sudo usermod -aG docker $SERVICE_USER" >&2
+  echo "Error: user '$SERVICE_USER' is not in the docker group." >&2
+  echo "  RELOAD_CMD ('docker exec nginx nginx -s reload') will not work," >&2
+  echo "  and nginx will keep serving the old certificate after a renewal." >&2
+  echo "  Fix: sudo usermod -aG docker $SERVICE_USER" >&2
   exit 1
 fi
 
-# 2c. Бэкап баз. Тоже пропуск, а не отказ: машина без настроенного S3 — это
-#     нормальное состояние свежего девбокса, и оно не повод оставить
-#     сертификаты без продления. Пропуск громкий, в stderr.
+# 2c. Backups. A skip rather than a refusal: a machine with no S3 configured is
+#     a normal state for a fresh install, and it is no reason to leave
+#     certificates unrenewed. The skip is loud, on stderr.
 #
-#     Проверяем именно предусловия, а не только наличие файла: конфиг с пустым
-#     бакетом или без публичного ключа даёт таймер, который каждую ночь молча
-#     падает, — а это ровно тот отказ, от которого мы защищаемся.
+#     The preconditions are checked, not merely the file's existence: a config
+#     with an empty bucket or without a public key produces a timer that fails
+#     silently every night — exactly the failure being guarded against.
 INSTALL_BACKUP=1
 BACKUP_SKIP=""
 BACKUP_BUCKET=""
@@ -127,7 +128,7 @@ BACKUP_PUBKEY=""
 
 if [ ! -f "$BACKUP_ENV_FILE" ]; then
   INSTALL_BACKUP=0
-  BACKUP_SKIP="нет $BACKUP_ENV_FILE (cp .env-backup.example .env-backup && chmod 600)"
+  BACKUP_SKIP="no $BACKUP_ENV_FILE (cp .env-backup.example .env-backup && chmod 600)"
 else
   BACKUP_BUCKET=$(grep -E '^Backup_S3_Bucket=' "$BACKUP_ENV_FILE" | head -n 1 | cut -d '=' -f2- | tr -d '"'\' || true)
   BACKUP_PUBKEY=$(grep -E '^Backup_GPG_Pubkey=' "$BACKUP_ENV_FILE" | head -n 1 | cut -d '=' -f2- | tr -d '"'\' || true)
@@ -136,13 +137,13 @@ else
 
   if [ -z "$BACKUP_BUCKET" ]; then
     INSTALL_BACKUP=0
-    BACKUP_SKIP="Backup_S3_Bucket не задан в $BACKUP_ENV_FILE"
+    BACKUP_SKIP="Backup_S3_Bucket is not set in $BACKUP_ENV_FILE"
   elif [ ! -f "$BACKUP_PUBKEY" ]; then
     INSTALL_BACKUP=0
-    BACKUP_SKIP="нет публичного GPG-ключа $BACKUP_PUBKEY (генерируется НЕ на этой машине, см. README)"
+    BACKUP_SKIP="no GPG public key at $BACKUP_PUBKEY (generated OFF this machine, see the README)"
   elif ! command -v aws >/dev/null 2>&1; then
     INSTALL_BACKUP=0
-    BACKUP_SKIP="нет команды aws — поставьте awscli пакетом дистрибутива"
+    BACKUP_SKIP="no aws command — install awscli from your distribution"
   fi
 fi
 
@@ -150,61 +151,62 @@ if [ "$INSTALL_BACKUP" -eq 1 ]; then
   UNITS+=(devbox-backup.service devbox-backup.timer devbox-backup-check.service devbox-backup-check.timer)
   TIMERS+=(devbox-backup.timer devbox-backup-check.timer)
 else
-  echo "ВНИМАНИЕ: бэкап баз пропущен — $BACKUP_SKIP" >&2
+  echo "NOTE: backups skipped — $BACKUP_SKIP" >&2
 fi
 
-# 2d. Оповещения в Telegram. От них зависит подстановка @ONFAILURE@ во ВСЕ
-#     остальные юниты, поэтому блок стоит до цикла установки.
+# 2d. Notifications. The @ONFAILURE@ substitution in EVERY other unit depends on
+#     them, so this block comes before the install loop.
 #
-#     Юнит с OnFailure на необъявленный обработчик работал бы, но при каждом
-#     сбое сыпал бы в журнал ошибкой о ненайденном юните — то есть шумел бы
-#     ровно там, куда смотрят, разбирая сбой.
+#     A unit with OnFailure pointing at an undeclared handler would still work,
+#     but every failure would add an error about a missing unit to the
+#     journal — noise in exactly the place someone looks while investigating a
+#     failure.
 INSTALL_NOTIFY=1
 NOTIFY_SKIP=""
 ONFAILURE_LINE=""
 
 if [ ! -f "$NOTIFY_ENV_FILE" ]; then
   INSTALL_NOTIFY=0
-  NOTIFY_SKIP="нет $NOTIFY_ENV_FILE (cp .env-notify.example .env-notify && chmod 600)"
+  NOTIFY_SKIP="no $NOTIFY_ENV_FILE (cp .env-notify.example .env-notify && chmod 600)"
 else
   NOTIFY_TOKEN=$(grep -E '^Notify_Telegram_Token=' "$NOTIFY_ENV_FILE" | head -n 1 | cut -d '=' -f2- | tr -d '"'\' || true)
   NOTIFY_CHAT=$(grep -E '^Notify_Telegram_Chat_Id=' "$NOTIFY_ENV_FILE" | head -n 1 | cut -d '=' -f2- | tr -d '"'\' || true)
   if [ -z "$NOTIFY_TOKEN" ] || [ -z "$NOTIFY_CHAT" ]; then
     INSTALL_NOTIFY=0
-    NOTIFY_SKIP="в $NOTIFY_ENV_FILE не заполнены Notify_Telegram_Token и/или Notify_Telegram_Chat_Id"
+    NOTIFY_SKIP="Notify_Telegram_Token and/or Notify_Telegram_Chat_Id are empty in $NOTIFY_ENV_FILE"
   elif ! command -v curl >/dev/null 2>&1; then
     INSTALL_NOTIFY=0
-    NOTIFY_SKIP="нет команды curl"
+    NOTIFY_SKIP="no curl command"
   fi
 fi
 
 if [ "$INSTALL_NOTIFY" -eq 1 ]; then
-  # Шаблон devbox-notify@.service именно копируется, а не включается: у
-  # шаблонных юнитов нет [Install], их запускает OnFailure по имени экземпляра.
+  # The devbox-notify@.service template is copied, not enabled: template units
+  # have no [Install] section — OnFailure starts them by instance name.
   UNITS+=(devbox-notify@.service devbox-watch.service devbox-watch.timer
           devbox-heartbeat.service devbox-heartbeat.timer)
   TIMERS+=(devbox-watch.timer devbox-heartbeat.timer)
   ONFAILURE_LINE="OnFailure=devbox-notify@%n.service"
 else
-  echo "ВНИМАНИЕ: оповещения в Telegram пропущены — $NOTIFY_SKIP" >&2
-  echo "         сбои будут видны только в \`systemctl --failed\`." >&2
+  echo "NOTE: notifications skipped — $NOTIFY_SKIP" >&2
+  echo "      failures will be visible only in \`systemctl --failed\`." >&2
 fi
 
-echo "** Установка таймеров в $UNIT_DST"
-echo "   репозиторий: $Platform_Deploy_Dir"
-echo "   пользователь: $SERVICE_USER"
+echo "** Installing timers into $UNIT_DST"
+echo "   repository: $Platform_Deploy_Dir"
+echo "   user:       $SERVICE_USER"
 if [ "$INSTALL_BACKUP" -eq 1 ]; then
-  echo "   бэкап баз: s3://$BACKUP_BUCKET"
+  echo "   backups:    s3://$BACKUP_BUCKET"
 fi
 if [ "$INSTALL_NOTIFY" -eq 1 ]; then
-  echo "   оповещения: telegram, чат $NOTIFY_CHAT"
+  echo "   notify:     chat $NOTIFY_CHAT"
 fi
 
-# 3. Подстановка путей. Юниты systemd не умеют переменных и требуют абсолютных
-#    путей, поэтому в репозитории они лежат шаблонами с @DEPLOY_DIR@.
+# 3. Path substitution. systemd units support no variables and require absolute
+#    paths, so in the repository they are templates carrying @DEPLOY_DIR@.
 for unit in "${UNITS[@]}"; do
   if [ ! -f "$UNIT_SRC/$unit" ]; then
-    echo "Ошибка: нет шаблона $UNIT_SRC/$unit" >&2
+    echo "Error: template $UNIT_SRC/$unit is missing" >&2
     exit 1
   fi
   sed -e "s#@DEPLOY_DIR@#${Platform_Deploy_Dir}#g" \
@@ -215,8 +217,8 @@ for unit in "${UNITS[@]}"; do
   echo "    -> $unit"
 done
 
-# 4. Юниты включённых стеков. Стек, которому нужен таймер, кладёт юнит в
-# stacks/<стек>/systemd/ и этот скрипт не трогает.
+# 4. Units of the enabled stacks. A stack that needs a timer puts the unit in
+# stacks/<stack>/systemd/ and leaves this script alone.
 
 # shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
@@ -230,22 +232,24 @@ while IFS= read -r stack; do
   units=$(stack_units "$stack")
   [ -n "$units" ] || continue
 
-  # Предполётная проверка стека. Ненулевой код — юниты НЕ ставятся, и причина
-  # называется вслух.
+  # The stack's preflight check. A non-zero exit means the units are NOT
+  # installed, and the reason is said out loud.
   #
-  # Условие внутри самого юнита (ConditionPathExists) для этого не годится:
-  # оно молчит. Таймер срабатывает, ничего не делает и снаружи неотличим от
-  # исправного — то есть отказ выглядит как норма, а это худший исход. Таймер,
-  # падающий каждую ночь, плох; таймер, тихо не делающий ничего, хуже.
-  # Через stack_dir, а не сборкой пути: стек может лежать и в машинном stacks/,
-  # и в профильном profile/stacks/. Собранный строкой путь слеп ко второму, и
-  # preflight профильного стека молча не выполнялся бы — то есть юниты вставали
-  # бы стеку, который к работе не готов. Ровно та тишина, от которой этот
-  # preflight и защищает.
+  # A condition inside the unit itself (ConditionPathExists) will not do: it is
+  # silent. The timer fires, does nothing, and from the outside is
+  # indistinguishable from a healthy one — a failure that looks like normal
+  # operation, which is the worst outcome. A timer failing every night is bad;
+  # a timer quietly doing nothing is worse.
+  #
+  # Via stack_dir rather than a built path: a stack may live in the machine's
+  # stacks/ or in the profile's. A string-built path is blind to the second, so
+  # a profile stack's preflight would silently not run — and units would be
+  # installed for a stack that is not ready. Exactly the silence this preflight
+  # guards against.
   preflight="$(stack_dir "$stack")/scripts/preflight.sh"
   if [ -x "$preflight" ]; then
     if ! reason=$("$preflight" 2>&1); then
-      echo "ВНИМАНИЕ: юниты стека '$stack' пропущены — ${reason:-preflight.sh вернул ошибку}" >&2
+      echo "NOTE: units of stack '$stack' skipped — ${reason:-preflight.sh returned an error}" >&2
       continue
     fi
   fi
@@ -253,27 +257,27 @@ while IFS= read -r stack; do
   while IFS= read -r unit; do
     [ -n "$unit" ] || continue
     name=$(basename "$unit")
-    # /etc/systemd/system плоский: без префикса два стека подерутся за имя, и
-    # победит тот, чьи юниты поставили последними.
+    # /etc/systemd/system is flat: without a prefix two stacks fight over a
+    # name, and whichever was installed last wins.
     case "$name" in
       devbox-"$stack"-*) ;;
-      *) echo "ВНИМАНИЕ: $name пропущен — имя юнита стека должно начинаться с devbox-$stack-" >&2
+      *) echo "NOTE: $name skipped — a stack unit's name must start with devbox-$stack-" >&2
          continue ;;
     esac
     unit_render "$unit" "$stack" > "$UNIT_DST/$name"
     chmod 644 "$UNIT_DST/$name"
     case "$name" in *.timer) STACK_TIMERS+=("$name") ;; esac
-    echo "    -> $name (стек $stack)"
+    echo "    -> $name (stack $stack)"
   done <<< "$units"
 done < <(stacks_enabled)
 
 TIMERS+=("${STACK_TIMERS[@]}")
 
-# 4b. Снятие юнитов выключенных стеков.
+# 4b. Removing the units of disabled stacks.
 #
-# Без этого выключенный стек продолжал бы будить машину по своему таймеру.
-# `stack.sh disable` сделать этого не может — он работает без root — и потому
-# лишь советует запустить этот скрипт.
+# Without this, a disabled stack would keep waking the machine on its own
+# timer. `stack disable` cannot do it — it runs without root — so it only
+# advises running this script.
 enabled_now=" $(stacks_enabled 2>/dev/null | tr '\n' ' ') "
 while IFS= read -r stack; do
   [ -n "$stack" ] || continue
@@ -284,11 +288,11 @@ while IFS= read -r stack; do
     [ -f "$UNIT_DST/$name" ] || continue
     systemctl disable --now "$name" >/dev/null 2>&1 || true
     rm -f "$UNIT_DST/$name"
-    echo "    снят $name (стек $stack выключен)"
+    echo "    removed $name (stack $stack is disabled)"
   done < <(stack_units "$stack")
 done < <(stacks_available)
 
-# 5. Перечитать и включить
+# 5. Reload and enable
 systemctl daemon-reload
 
 for timer in "${TIMERS[@]}"; do
@@ -296,18 +300,18 @@ for timer in "${TIMERS[@]}"; do
 done
 
 echo
-echo "Успешно. Расписание:"
+echo "Done. Schedule:"
 systemctl list-timers --all 'getssl-*' 'devbox-*'
 echo
-echo "Проверить прямо сейчас, не дожидаясь расписания:"
+echo "To check right now, without waiting for the schedule:"
 echo "  sudo systemctl start getssl-check.service && systemctl status getssl-check.service"
 echo "  sudo systemctl start getssl-renew.service && journalctl -u getssl-renew -n 50"
 if [ "$INSTALL_NOTIFY" -eq 1 ]; then
-  echo "  sudo $Platform_Deploy_Dir/scripts/notify.sh --test       # проверить канал прямо сейчас"
-  echo "  sudo $Platform_Deploy_Dir/scripts/watch-host.sh --dry-run"
+  echo "  sudo $Platform_Deploy_Dir/platform/bin/notify.sh --test      # exercise the channel now"
+  echo "  sudo $Platform_Deploy_Dir/platform/bin/watch-host.sh --dry-run"
 fi
 if [ "$INSTALL_BACKUP" -eq 1 ]; then
-  echo "  sudo $Platform_Deploy_Dir/scripts/backup.sh --dry-run   # план бэкапа, без изменений"
+  echo "  sudo $Platform_Deploy_Dir/platform/bin/backup.sh --dry-run   # the backup plan, no changes"
   echo "  sudo systemctl start devbox-backup.service && journalctl -u devbox-backup -n 50"
-  echo "  $Platform_Deploy_Dir/scripts/check-backups.sh"
+  echo "  $Platform_Deploy_Dir/platform/bin/check-backups.sh"
 fi
