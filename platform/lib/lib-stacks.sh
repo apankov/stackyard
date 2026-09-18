@@ -1010,10 +1010,16 @@ project_containers() {
 _vislen() { LC_ALL=C printf '%s' "$1" | LC_ALL=C tr -d '\200-\277' | LC_ALL=C wc -c | tr -d ' \n'; }
 
 # A table cell: text padded with spaces to the required width.
+#
+# A value longer than the column still gets one trailing space. Without it the
+# cell runs straight into the next one and the two read as a single word — and
+# the values that overflow are exactly the interesting ones, such as the list
+# of files a stack is missing.
 _cell() {
   local text="$1" width="$2" len
   len=$(_vislen "$text")
   printf '%s' "$text"
+  if [ "$len" -ge "$width" ]; then printf ' '; return 0; fi
   while [ "$len" -lt "$width" ]; do printf ' '; len=$((len + 1)); done
 }
 
