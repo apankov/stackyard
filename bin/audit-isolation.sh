@@ -1,30 +1,31 @@
 #!/usr/bin/env bash
 #
-# Аудит изоляции машин. Запускается в РАБОЧЕМ ПРОСТРАНСТВЕ, а не на машине, и
-# это не мелочь: машина по определению не видит соседей и «общий на всех бакет»
-# для неё выглядит ровно как правильно настроенный свой.
+# Auditing isolation between machines. It runs in the WORKSPACE, not on a
+# machine, and that is not a detail: a machine by definition cannot see its
+# neighbours, and a bucket shared by everyone looks to it exactly like a
+# correctly configured one of its own.
 #
-# Что ищем — значения, общие у двух и более машин. Каждое из них означает, что
-# изоляция клиентов существует только на бумаге:
+# What it looks for is values shared by two or more machines. Each of them
+# means client isolation exists only on paper:
 #
-#   * один ключ ACME-аккаунта  -> общие лимиты Let's Encrypt и общий отзыв
-#                                 чужих сертификатов;
-#   * один бакет/префикс бэкапа -> дампы клиента A там, где их берёт клиент B;
-#   * один GPG-получатель       -> и там же расшифрует;
-#   * один чат оповещений       -> аварии всех клиентов у одного читателя;
-#   * одна docker-сеть или один
-#     каталог развёртывания      -> почти наверняка копипаста .env, за которой
-#                                 тянется и всё остальное.
+#   * one ACME account key    -> shared Let's Encrypt rate limits and shared
+#                                authority to revoke someone else's certificates
+#   * one backup bucket/prefix -> client A's dumps where client B collects theirs
+#   * one GPG recipient        -> and decrypts them there too
+#   * one notification chat    -> every client's incidents in one reader's feed
+#   * one docker network or one
+#     deployment directory     -> almost certainly a copy-pasted .env, dragging
+#                                everything else along with it
 #
-#   ./bin/audit-isolation.sh          # отчёт, ненулевой код при находках
+#   ./bin/audit-isolation.sh          # a report, non-zero exit on findings
 #
-# Ничего не меняет.
+# Changes nothing.
 
 set -uo pipefail
 
 ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
-# Нужен ради sha256_file: голого `shasum` может не оказаться.
+# Needed for sha256_file: a bare `shasum` may not be available.
 # shellcheck source=platform/lib/lib-env.sh
 . "$ROOT/platform/lib/lib-env.sh"
 PROBLEMS=0
@@ -35,16 +36,16 @@ warn() { printf '  [!]    %s\n' "$1"; WARNINGS=$((WARNINGS + 1)); }
 bad()  { printf '  [FAIL] %s\n' "$1"; PROBLEMS=$((PROBLEMS + 1)); }
 step() { printf '\n== %s\n' "$1"; }
 
-# Машины лежат ВНЕ этого репозитория: stackyard публичный, а домены и состав
-# стеков клиента в публичном репозитории — ровно та утечка, от которой всё и
-# затевалось. Поэтому пути приходят снаружи.
+# Machines live OUTSIDE this repository: stackyard is public, and a client's
+# domains and stack list in a public repository would be exactly the leak this
+# whole design exists to prevent. So the paths come from outside.
 #
 #   ./bin/audit-isolation.sh ~/dev/machines/*
-#   ./bin/audit-isolation.sh            # из ~/.stackyard-fleet, по строке на путь
+#   ./bin/audit-isolation.sh            # from ~/.stackyard-fleet, one path per line
 paths=("$@")
 if [ ${#paths[@]} -eq 0 ]; then
   list="${HOME}/.stackyard-fleet"
-  [ -f "$list" ] || { echo "Укажите пути к машинам или заведите $list" >&2; exit 2; }
+  [ -f "$list" ] || { echo "Give the paths to the machines, or create $list" >&2; exit 2; }
   while IFS= read -r l; do
     case "$l" in ''|\#*) continue ;; esac
     paths+=("${l/#\~/$HOME}")
@@ -53,53 +54,56 @@ fi
 
 machines=(); declare -A MDIR=()
 for p in "${paths[@]}"; do
-  [ -d "$p" ] || { echo "Предупреждение: нет каталога $p — пропускаю" >&2; continue; }
+  [ -d "$p" ] || { echo "Warning: no directory $p — skipping" >&2; continue; }
   n="$(basename "$p")"; machines+=("$n"); MDIR[$n]="$p"
 done
-[ ${#machines[@]} -gt 0 ] || { echo "Машин не найдено"; exit 0; }
+[ ${#machines[@]} -gt 0 ] || { echo "No machines found"; exit 0; }
 
-# --------------------------------------------- 1. в платформе нет секретов
+# --------------------------------------------- 1. no secrets in the platform
 
-step "Секреты в общих слоях"
+step "Secrets in the shared layers"
 
-# Платформа и профиль уезжают на КАЖДУЮ машину. Секрет в них — это секрет,
-# размноженный по всем клиентам, и обнаружить это постфактум нечем.
+# The platform and the profile travel to EVERY machine. A secret in them is a
+# secret copied to every client, and nothing can detect that after the fact.
 found=0
 while IFS= read -r f; do
   case "$f" in *.example) continue ;; esac
-  bad "секрет в общем слое: ${f#"$ROOT"/}"
+  bad "secret in a shared layer: ${f#"$ROOT"/}"
   found=1
 done < <(find "$ROOT/platform" "$ROOT/profiles" \
               \( -name '.env' -o -name '*.key' -o -name '*.pem' -o -name 'account.key' \
                  -o -name 'databases.yaml' -o -name '*.asc' \) 2>/dev/null)
-[ "$found" -eq 0 ] && ok "в platform/ и profiles/ секретов нет"
+[ "$found" -eq 0 ] && ok "no secrets in platform/ or profiles/"
 
-# ------------------------------------- 2. значения, общие у разных машин
+# ------------------------------------- 2. values shared between machines
 
-step "Значения, общие у нескольких машин"
+step "Values shared by several machines"
 
-# Ключи, совпадение которых по любым двум машинам — это отказ, а не совпадение.
+# Keys whose coincidence across any two machines is a failure rather than a
+# coincidence.
 #
-# Backup_S3_Bucket здесь НЕТ намеренно: один бакет на несколько машин — законная
-# и частая конфигурация. Разделяет их Backup_S3_Prefix, и вот он совпадать не
-# смеет: одинаковый префикс в одном бакете означает, что машины пишут друг
-# поверх друга, а check-backups у обеих при этом зелёный.
-# Список поимённый, а не «всё, что похоже на секрет»: у Platform_Vhosts_Mount
-# значение обязано совпадать (это путь ВНУТРИ контейнера), и ловить его здесь
-# значило бы приучить читать отчёт по диагонали.
+# Backup_S3_Bucket is deliberately NOT here: one bucket for several machines is
+# a legitimate and common configuration. What separates them is
+# Backup_S3_Prefix, and that one must not match: the same prefix in one bucket
+# means the machines write over each other while check-backups stays green on
+# both.
+#
+# The list is by name rather than "anything that looks like a secret": some
+# values are REQUIRED to match (a path inside a container, say), and flagging
+# those would teach people to skim the report.
 MUST_DIFFER="Platform_Network Platform_Deploy_Dir
 Backup_S3_Prefix Backup_GPG_Recipient
 Backup_AWS_Access_Key_Id Backup_AWS_Secret_Access_Key
 Notify_Telegram_Token Notify_Telegram_Chat_Id"
 
-# Собираем «ключ<TAB>значение<TAB>машина» по всем env-файлам всех машин.
+# Collect "key<TAB>value<TAB>machine" across every env file of every machine.
 pairs=$(
   for m in "${machines[@]}"; do
     for f in "${MDIR[$m]}"/.env "${MDIR[$m]}"/.env-backup \
              "${MDIR[$m]}"/.env-notify "${MDIR[$m]}"/stacks/*/.env; do
       [ -f "$f" ] || continue
-      # Построчно, без source: значение с пробелами или обратными кавычками
-      # иначе стало бы исполняемым кодом.
+      # Line by line, without source: a value containing spaces or backticks
+      # would otherwise become executable code.
       while IFS= read -r line; do
         case "$line" in \#*|'') continue ;; esac
         case "$line" in *=*) ;; *) continue ;; esac
@@ -114,48 +118,49 @@ pairs=$(
 
 shared=0
 for key in $MUST_DIFFER; do
-  # `$2 != prevm` — не придирка: один и тот же ключ у одной машины лежит сразу
-  # в двух файлах (например, Mysql_Root_Password в .env и в stacks/mysql/.env),
-  # и без этого условия аудит докладывал «ключ одинаков у машин X и X». Ложная
-  # тревога в проверке изоляции хуже отсутствия проверки: её учатся не читать.
+  # `$2 != prevm` is not a quibble: the same key of one machine lives in two
+  # files at once (a root password in .env and in that stack's .env), and
+  # without this condition the audit reports "the key is identical on machines
+  # X and X". A false alarm in an isolation check is worse than no check: people
+  # learn not to read it.
   dupes=$(printf '%s\n' "$pairs" | awk -F'\t' -v k="$key" '$1 == k { print $2 "\t" $3 }' \
           | sort | awk -F'\t' '{ if ($1 == prev && $2 != prevm) print prev "\t" prevm "\t" $2; prev = $1; prevm = $2 }')
   [ -n "$dupes" ] || continue
   while IFS=$'\t' read -r val m1 m2; do
-    bad "$key одинаков у машин $m1 и $m2 (значение: ${val:0:24}…)"
+    bad "$key is identical on machines $m1 and $m2 (value: ${val:0:24}...)"
     shared=1
   done <<< "$dupes"
 done
 
-# Любой пароль/токен, совпавший у двух машин по ЗНАЧЕНИЮ.
+# Any password or token shared by two machines BY VALUE.
 #
-# Сравниваем именно значения, а не пары ключ-значение. Mysql_Root_Password на
-# одной машине и Pg_Root_Password на другой — разные ключи, но если строка
-# одна, то и секрет один: утёк он у любой из них, а достанет обе. Сверка по
-# парам этот случай пропускает, и пропускает молча.
+# Values are compared, not key-value pairs. A root password under one key on
+# one machine and under a different key on another are different keys, but if
+# the string is the same then the secret is the same: leak it from either and
+# it opens both. Comparing pairs misses this case, and misses it silently.
 dupes=$(printf '%s\n' "$pairs" \
   | awk -F'\t' 'tolower($1) ~ /password|secret|token|_key$/ { print $2 "\t" $1 "\t" $3 }' \
   | sort -u | sort -t$'\t' -k1,1 \
   | awk -F'\t' '{ if ($1 == pv && $3 != pm) print $2 "\t" pm "\t" $3; pv = $1; pm = $3 }')
 if [ -n "$dupes" ]; then
   while IFS=$'\t' read -r key m1 m2; do
-    bad "секрет переиспользован машинами $m1 и $m2 (ключ вида $key)"
+    bad "a secret is reused by machines $m1 and $m2 (under a key such as $key)"
     shared=1
   done <<< "$dupes"
 fi
-[ "$shared" -eq 0 ] && ok "совпадающих значений не найдено"
+[ "$shared" -eq 0 ] && ok "no shared values found"
 
-# ------------------------------------------- 3. ключи ACME-аккаунтов
+# ------------------------------------------- 3. ACME account keys
 
-step "Ключи ACME-аккаунтов"
+step "ACME account keys"
 
-# Сравниваем по содержимому: путь у каждой машины свой по построению, а вот
-# скопированный файл выглядит настроенным правильно.
+# Compared by CONTENT: the path is unique per machine by construction, whereas
+# a copied file looks perfectly well configured.
 sums=""
 for m in "${machines[@]}"; do
   k="${MDIR[$m]}/state/getssl-config/account.key"
   if [ ! -f "$k" ]; then
-    warn "$m: ключа ACME-аккаунта ещё нет (заведёт getssl при первом выпуске)"
+    warn "$m: no ACME account key yet (getssl will create one on first issue)"
     continue
   fi
   sums="$sums$(sha256_file "$k")	$m"$'\n'
@@ -163,17 +168,17 @@ done
 dupes=$(printf '%s' "$sums" | sort | awk -F'\t' '{ if ($1 == prev && $2 != prevm) print prevm "\t" $2; prev = $1; prevm = $2 }')
 if [ -n "$dupes" ]; then
   while IFS=$'\t' read -r m1 m2; do
-    bad "машины $m1 и $m2 используют ОДИН ключ ACME-аккаунта — общие лимиты и общий отзыв"
+    bad "machines $m1 and $m2 share ONE ACME account key — shared limits and shared revocation"
   done <<< "$dupes"
 elif [ -n "$sums" ]; then
-  ok "у каждой машины свой ключ"
+  ok "every machine has its own key"
 fi
 
-# ------------------------------------------------------------------ итог
+# ------------------------------------------------------------------ summary
 
 echo
 if [ "$PROBLEMS" -gt 0 ]; then
-  echo "Изоляция нарушена: проблем — $PROBLEMS, предупреждений — $WARNINGS."
+  echo "Isolation is broken: problems — $PROBLEMS, warnings — $WARNINGS."
   exit 1
 fi
-echo "Изоляция в порядке. Предупреждений: $WARNINGS."
+echo "Isolation is intact. Warnings: $WARNINGS."
