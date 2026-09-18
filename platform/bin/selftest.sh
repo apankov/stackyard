@@ -206,10 +206,10 @@ check "Domains is read" "$(stack_conf_get bravo Domains)" "bravo.test"
 check "Static is returned verbatim, without substitution" \
   "$(stack_conf_get bravo Static)" 'bravo.test:${Bravo_Static_Dir:-./vhosts}/public'
 check "a missing key yields the default" "$(stack_conf_get bravo Nope def)" "def"
-check "стек без stack.conf не роняет чтение" "$(stack_conf_get nosuch Domains)" ""
-check "stack_requires читает из файла" "$(stack_requires bravo)" "pg qdrant"
+check "a stack without stack.conf does not break reading" "$(stack_conf_get nosuch Domains)" ""
+check "stack_requires reads from the file" "$(stack_requires bravo)" "pg qdrant"
 
-echo "== генерация статики"
+echo "== generating the static spec"
 
 fixture charlie stack.conf 'Static="charlie.test:${Charlie_Dir:-./vhosts}/pub"'
 fixture charlie compose.yaml 'services:
@@ -1058,70 +1058,74 @@ while IFS= read -r line; do
     stale_mut="$stale_mut [$name]"
   fi
 done < <(sed -n "/^MUTATIONS=(/,/^)/p" "$REPO_DIR/tests/mutate.sh" | grep "@@")
-check "образцы мутаций совпадают с кодом" "$stale_mut" ""
+check "mutation patterns still match the code" "$stale_mut" ""
 
-# 13. Имя образа nginx — одно на всех, кто его называет. Копий было три, и
-#     htpasswd.sh про Platform_Nginx_Image вовсе не знал: на машине с
-#     переопределённым образом файл паролей готовил НЕ тот nginx, который его
-#     читает, — а от образа зависит gid, то есть права на файл.
-#     В compose литерал неизбежен (там подстановки без запасного значения нет),
-#     поэтому его и не считаем; речь про скрипты.
+# 19. The nginx image is one value shared by everyone who names it. On a
+#     machine that overrides the image, a second copy means the password file
+#     is prepared by a DIFFERENT nginx from the one that reads it — and the gid,
+#     hence the file's permissions, comes from the image.
+#     In compose a literal is unavoidable, so compose is not examined here;
+#     this is about the scripts.
 badimg=$(grep -rInE 'nginx:[0-9]+\.[0-9]+' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
          | grep -vE '(selftest|mutate)\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
-check "скрипты берут образ nginx из nginx_image" "$badimg" ""
+check "scripts take the nginx image from nginx_image" "$badimg" ""
 
-# 14. Файл, созданный контейнером, принадлежит root: на хосте его уже не
-#     переназначить, и `chmod` от обычного пользователя падает с EPERM. Права
-#     должен ставить сам контейнер, пока он root. Проверяем, что после docker
-#     run в скрипте не осталось хостового chmod по этому файлу.
+# 20. A file created by a container is owned by root: it cannot be reassigned
+#     on the host, and `chmod` from an ordinary user fails with EPERM. The
+#     permissions must be set by the container itself, while it is root. This
+#     checks that no host-side chmod on that file remains after the docker
+#     run.
 badchmod=$(grep -n '^chmod .*"\$FILE"' "$REPO_DIR/platform/bin/htpasswd.sh" 2>/dev/null || true)
-check "права файла паролей ставит контейнер, а не хост" "$badchmod" ""
+check "the password file's permissions are set by the container, not the host" "$badchmod" ""
 
-# Lock обязан называть всё, без чего скачивание не воспроизводится. Пустое поле
-# здесь означало бы «скачаем что дадут»: ровно то, от чего lock и заводят.
+# A lock file must name everything without which the download is not
+# reproducible. An empty field here would mean "download whatever is served" —
+# precisely what a lock file exists to prevent.
 for field in repo version sha256; do
   v=$(sed -n "s/^$field=//p" "$REPO_DIR/platform/getssl.lock" | head -n 1)
-  check "getssl.lock: поле $field заполнено" "$([ -n "$v" ] && echo да || echo нет)" "да"
+  check "getssl.lock: field $field is filled in" "$([ -n "$v" ] && echo yes || echo no)" "yes"
 done
-# Сумма — ровно 64 шестнадцатеричных знака. Обрезанная или с пробелом не
-# совпадёт ни с чем, и getssl-fetch будет вечно докладывать о подмене.
-check "getssl.lock: сумма похожа на sha256" \
+# The checksum is exactly 64 hexadecimal characters. A truncated one, or one
+# with a stray space, matches nothing, and getssl-fetch would report tampering
+# forever.
+check "getssl.lock: the checksum looks like a sha256" \
   "$(sed -n 's/^sha256=//p' "$REPO_DIR/platform/getssl.lock" | head -n 1 | grep -cE '^[0-9a-f]{64}$')" "1"
 
-echo "== порядок и зоны лимитов"
+echo "== ordering and rate-limit zones"
 
-# Файлы conf.d читаются по алфавиту, а nginx разрешает имя зоны в момент
-# разбора server-блока. Генерируемый файл, попавший ПЕРЕД определениями зон,
-# означает "unknown limit_req_zone" и отказ старта — то есть краш-луп по
-# restart: always. На машине разработчика nginx не запускается вовсе, поэтому
-# заметить это можно только так.
+# conf.d files are read alphabetically, and nginx resolves a zone name while
+# parsing the server block. A generated file landing BEFORE the zone
+# definitions means "unknown limit_req_zone" and a refusal to start — a crash
+# loop under restart: always. nginx does not run on a developer's machine at
+# all, so this is the only way to notice.
 inc_name="$(basename "$(stacks_include_file)")"
 first=$( { printf '%s\n' "$inc_name"
            ls -1 "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | sed 's:.*/::'; } | sort | head -n 1)
-check "определения зон читаются раньше vhost'ов стеков" \
-  "$([ "$first" = "$inc_name" ] && echo "СНАЧАЛА vhost'ы" || echo ok)" "ok"
+check "zone definitions are read before the stacks' vhosts" \
+  "$([ "$first" = "$inc_name" ] && echo "VHOSTS FIRST" || echo ok)" "ok"
 
-# Платформа несёт только общие зоны. Политика конкретной машины — какой URI
-# считать логином — уехав в общий слой, попала бы на все машины сразу.
-# Комментарии пропускаем — как и в остальных гигиенических проверках:
-# объяснение прошлого дефекта неизбежно содержит то, что он ловит.
-check "в платформенных зонах нет машинной политики" \
+# The platform carries only generic zones. A particular machine's policy —
+# which URI counts as a login — would, once in a shared layer, travel to every
+# machine at once. Comments are skipped, as in the other hygiene checks: an
+# explanation of a past defect inevitably contains what it catches.
+check "the platform's zones contain no machine-specific policy" \
   "$(grep -vE '^[[:space:]]*#' "$REPO_DIR"/platform/nginx-vhosts/00-limits.conf \
      | grep -cE 'map |user/login' || true)" "0"
 
-# Совместимость образа с директивами платформы.
+# The image's compatibility with the platform's directives.
 ENV_VARS=(); ENV_VARS[Platform_Nginx_Image]='nginx:1.19-alpine'
-check "старый образ nginx назван" "$(check_nginx_image | grep -c 'older than 1.25.1')" "1"
+check "an old nginx image is reported" "$(check_nginx_image | grep -c 'older than 1.25.1')" "1"
 ENV_VARS[Platform_Nginx_Image]='nginx:1.25.1-alpine'
-check "1.25.1 претензий не вызывает" "$(check_nginx_image)" ""
+check "1.25.1 raises nothing" "$(check_nginx_image)" ""
 ENV_VARS=()
 
-echo "== include: генератор против читателя"
+echo "== the include file: generator vs reader"
 
-# Формула строки include пишется в одном месте и читается в другом. Разъезд
-# молчит в обе стороны: прошлая версия читателя искала "conf.d/<стек>/*.conf",
-# которой генератор не производил никогда, и колонка VHOSTS показывала «выкл»
-# у каждого стека с vhost'ами. Колонка, которая всегда врёт, хуже отсутствующей.
+# The formula for an include line is written in one place and read in another.
+# A mismatch is silent in both directions: a reader looking for a path the
+# generator never produced matches nothing, and the VHOSTS column reports every
+# stack with vhosts as disabled. A column that always lies is worse than a
+# missing one.
 fixture tango stack.conf 'Domains="tango.test"
 Containers="no"'
 fixture tango nginx/70-tango.conf 'server { server_name tango.test; }'
@@ -1133,44 +1137,46 @@ printf 'Enabled_Stacks="papa lima november tango uniform"\n' > "$WORK/.env-stack
 mkdir -p "$(dirname "$(stacks_include_file)")"
 stacks_include_content > "$(stacks_include_file)"
 
-check "читатель видит включённый машинный стек" \
-  "$(stack_vhost_enabled tango && echo да || echo нет)" "да"
-check "читатель видит включённый ПРОФИЛЬНЫЙ стек" \
-  "$(stack_vhost_enabled uniform && echo да || echo нет)" "да"
+check "the reader sees an enabled machine stack" \
+  "$(stack_vhost_enabled tango && echo yes || echo no)" "yes"
+check "the reader sees an enabled PROFILE stack" \
+  "$(stack_vhost_enabled uniform && echo yes || echo no)" "yes"
 
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
 stacks_include_content > "$(stacks_include_file)"
-check "выключенный стек читателем не виден" \
-  "$(stack_vhost_enabled tango && echo да || echo нет)" "нет"
+check "a disabled stack is invisible to the reader" \
+  "$(stack_vhost_enabled tango && echo yes || echo no)" "no"
 
-echo "== состояние свежей машины"
+echo "== the state of a fresh machine"
 
-# На свежей машине после ./bootstrap каталога state/ нет вовсе: bootstrap несёт
-# платформу, а состояние — дело машины. Первая же команда писала в
-# state/nginx-vhosts/ и умирала сырой ошибкой оболочки, а databases.yaml не
-# создавался никогда — при том что --check требовал `sync`, который его и не
-# создаёт. Замкнутый круг на первой минуте знакомства с платформой.
+# On a fresh machine, right after ./bootstrap, there is no state/ directory at
+# all: bootstrap delivers the platform, while state is the machine's own. The
+# very first command would write into state/nginx-vhosts/ and die with a raw
+# shell error, and databases.yaml would never be created — while --check
+# demanded a `sync` that does not create it either. A closed loop in the first
+# minute of using the platform.
 rm -rf "$WORK/state"
 printf 'Enabled_Stacks="papa lima"\n' > "$WORK/.env-stacks"
 ensure_state_dirs
 for d in nginx-vhosts certs htpasswd getssl-config; do
-  check "state/$d заведён" "$([ -d "$WORK/state/$d" ] && echo да || echo нет)" "да"
+  check "state/$d was created" "$([ -d "$WORK/state/$d" ] && echo yes || echo no)" "yes"
 done
-check "каталог поставщика заведён" "$([ -d "$WORK/state/papa" ] && echo да || echo нет)" "да"
+check "the provider's directory was created" "$([ -d "$WORK/state/papa" ] && echo yes || echo no)" "yes"
 
-# А на машине без поставщика его каталога быть не должно: пустой state/papa
-# там вводит в заблуждение не меньше, чем его отсутствие там, где он нужен.
+# On a machine without a provider that directory must not exist: an empty one
+# is as misleading there as a missing one is where it is needed.
 rm -rf "$WORK/state"
 printf 'Enabled_Stacks="lima"\n' > "$WORK/.env-stacks"
 ensure_state_dirs
-check "без поставщика его каталог не заводится" \
-  "$([ -d "$WORK/state/papa" ] && echo да || echo нет)" "нет"
-check "без поставщика путь к файлу баз пуст" "$(stacks_databases_file)" ""
+check "without a provider its directory is not created" \
+  "$([ -d "$WORK/state/papa" ] && echo yes || echo no)" "no"
+check "without a provider the database file path is empty" "$(stacks_databases_file)" ""
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
 
-# Заглушки сертификатов обязаны заводиться и профильным стекам. Иначе домен
-# объявлен, конфиг getssl есть, а файла нет — nginx не стартует и с
-# restart: always уносит ВСЕ сайты машины.
+# Placeholder certificates must be created for profile stacks too. Otherwise
+# the domain is declared, the getssl config exists, and the file does not —
+# nginx will not start, and under restart: always it takes EVERY site on the
+# machine down with it.
 fixture_root profile/stacks sierra stack.conf 'Domains="sierra.test"
 Containers="no"'
 fixture_root profile/stacks sierra nginx/60-sierra.conf 'server {
@@ -1178,60 +1184,61 @@ fixture_root profile/stacks sierra nginx/60-sierra.conf 'server {
 	ssl_certificate_key /etc/nginx/certs/sierra.test.key;
 }'
 printf 'Enabled_Stacks="papa lima november sierra"\n' > "$WORK/.env-stacks"
-check "путь сертификата профильного стека виден" \
+check "a profile stack's certificate path is visible" \
   "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
 
-echo "== посторонний каталог среди vhost'ов"
+echo "== a stray directory among the vhosts"
 
-# Docker, не найдя файла для bind-mount, заводит на его месте КАТАЛОГ от root.
-# Он попадает под маску *.conf, по которой nginx читает включённые vhost'ы, и
-# роняет его: «pread() ... failed (21: Is a directory)». С restart: always это
-# краш-луп, уносящий все сайты, а сообщение говорит про pread — то есть отказ
-# выглядит как поломка nginx, а не как мусор в каталоге.
+# When Docker cannot find a file to bind-mount, it creates a root-owned
+# DIRECTORY in its place. That directory matches the *.conf glob through which
+# nginx reads the enabled vhosts, and brings it down: "pread() ... failed (21:
+# Is a directory)". Under restart: always that is a crash loop taking every
+# site with it, and the message talks about pread — so the failure looks like a
+# broken nginx rather than like rubbish in a directory.
 #
-# Пережить обновление платформы он может: state/ машинный, bootstrap его не
-# трогает. Так и случилось — каталог от прежней спеки дождался версии, где
-# маска стала его читать.
+# Such a directory can survive a platform update: state/ belongs to the machine
+# and bootstrap does not touch it.
 vh="$WORK/state/nginx-vhosts"
 mkdir -p "$vh"
 : > "$vh/10-enabled.conf"
-check "нормальный каталог vhost'ов претензий не вызывает" "$(check_vhost_dir "$vh")" ""
+check "a normal vhost directory raises nothing" "$(check_vhost_dir "$vh")" ""
 
 mkdir -p "$vh/00-enabled.conf"
-check "посторонний каталог найден" \
+check "a stray directory is found" \
   "$(check_vhost_dir "$vh" | wc -l | tr -d ' ')" "1"
-check "в сообщении есть выполнимая команда с sudo" \
+check "the message carries a command that can actually be run, with sudo" \
   "$(check_vhost_dir "$vh" | grep -c 'sudo rm -rf')" "1"
 rmdir "$vh/00-enabled.conf"
 
-check "несуществующий каталог — не находка" "$(check_vhost_dir "$WORK/нет-такого")" ""
+check "a non-existent directory is not a finding" "$(check_vhost_dir "$WORK/no-such-dir")" ""
 
-# Функция проверена выше, но она бесполезна, если её не зовут. Мест ровно два:
-# перед записью в каталог (иначе nginx -t падает, и причина тонет в откате) и
-# в --check (иначе про мусор узнают от краш-лупа).
-check "проверка каталога вызывается и при записи, и при --check" \
+# The function is exercised above, but it is useless if nobody calls it. There
+# are exactly two places: before writing into the directory (otherwise nginx -t
+# fails and the cause is buried under the rollback) and in --check (otherwise
+# the rubbish is discovered through a crash loop).
+check "the directory check is called both on write and in --check" \
   "$(grep -c 'check_vhost_dir "\$(dirname' "$REPO_DIR/platform/bin/stack.sh")" "2"
 
-echo "== вложенные монтирования"
+echo "== nested mounts"
 
-# Точку монтирования для вложенного пути docker создаёт ВНУТРИ уже
-# смонтированного каталога. Если тот смонтирован с :ro, создать её нечем, и
-# контейнер не стартует вовсе. Сообщение при этом говорит про mountpoint и
-# read-only file system — то есть отказ выглядит как поломка docker, а не как
-# неверная спека, и ищут его не там. Так стоял генерируемый список include'ов:
-# файлом внутрь conf.d, смонтированного с :ro.
+# Docker creates the mount point for a nested path INSIDE the already-mounted
+# directory. If that one is mounted :ro there is nothing to create it with, and
+# the container does not start at all. The message talks about a mountpoint and
+# a read-only file system — so the failure looks like a broken docker rather
+# than like a wrong spec, and it gets investigated in the wrong place.
 #
-# Проверяем КЛАСС: ни одна цель монтирования не должна лежать внутри другой
-# цели, смонтированной только на чтение. Разбираем все compose-файлы платформы,
-# а не один nginx.yaml: следующий такой же появится в другом.
+# What is checked is the CLASS: no mount target may lie inside another target
+# mounted read-only. Every compose file of the platform is parsed, not just one
+# of them: the next such mount will appear in a different file.
 nested=""
 while IFS= read -r f; do
-  # Из строки-элемента volumes берём ЦЕЛЬ и режим: "<цель> <ro|rw>".
+  # From a volumes list item, take the TARGET and the mode: "<target> <ro|rw>".
   #
-  # Источник отрезаем по ПОСЛЕДНЕМУ ":/", а не по первому двоеточию: в
-  # источнике стоит ${Platform_Deploy_Dir:?}, и двоеточие внутри подстановки
-  # съедало половину строки. На этом гард сначала и промолчал.
+  # The source is cut at the LAST ":/" rather than at the first colon: the
+  # source contains ${Platform_Deploy_Dir:?}, and the colon inside that
+  # substitution would eat half the line — which is how this guard first
+  # stayed silent.
   mounts=$(grep -oE '^[[:space:]]*-[[:space:]]+[^[:space:]]+:/[^[:space:]]+' "$f" \
            | sed -E 's|.*:(/[^:]+)(:([a-z]+))?$|\1 \2|; s/:ro$/ ro/; s/ $/ rw/' \
            | sed -E 's/ :ro$/ ro/; s/  +/ /')
@@ -1240,129 +1247,132 @@ while IFS= read -r f; do
     while IFS=' ' read -r o_dst _; do
       [ -n "${o_dst:-}" ] || continue
       case "$o_dst" in
-        "$ro_dst"/*) nested="$nested $(basename "$f"):$o_dst-внутри-$ro_dst" ;;
+        "$ro_dst"/*) nested="$nested $(basename "$f"):$o_dst-inside-$ro_dst" ;;
       esac
     done <<< "$mounts"
   done <<< "$mounts"
 done < <(find "$REPO_DIR/platform/compose" "$REPO_DIR/profiles" -name '*.yaml' 2>/dev/null)
-check "внутрь :ro-каталога ничего не монтируется" "$nested" ""
+check "nothing is mounted inside a :ro directory" "$nested" ""
 
-echo "== генерируемые файлы: имя одно на всех"
+echo "== generated files: one name for everyone"
 
-# Переименование генерируемого файла обязано доходить до ВСЕХ, кто его
-# называет. Фикс A15 переименовал 00-enabled.conf в 10-enabled.conf в
-# генераторе — и не дошёл до compose, который монтирует его по имени, и до
-# docker-compose.sh, где ветка case сверялась с образцом имени.
+# Renaming a generated file must reach EVERYONE who names it. A rename that
+# reaches the generator but not compose, which mounts the file by name, and not
+# the branch that compares against a name pattern, is expensive: docker turns a
+# missing bind-mount file into a DIRECTORY, after which nginx does not start at
+# all — "create mountpoint ... read-only file system". The failure looks like a
+# broken docker rather than like an unfinished rename.
 #
-# Обошлось это дорого: docker на отсутствующий файл в bind-mount заводит
-# КАТАЛОГ, после чего nginx не стартует вовсе — «create mountpoint ...
-# read-only file system». То есть отказ выглядит как поломка docker, а не как
-# незавершённое переименование.
+# In compose a literal is unavoidable: there are no function calls in its
+# substitutions. So the literal is compared against what the library produces.
 #
-# В compose литерал неизбежен: подстановок с вызовом функции там нет. Поэтому
-# сверяем литерал с тем, что производит библиотека.
-# Каталог, куда пишется генерируемый include, обязан быть смонтирован целиком.
+# The directory the generated include is written into must be mounted whole.
 inc_dir="$(basename "$(dirname "$(stacks_include_file)")")"
-check "compose монтирует каталог генерируемых vhost'ов" \
+check "compose mounts the directory of generated vhosts" \
   "$(grep -cE "state/$inc_dir:/etc/nginx/[a-z-]+:ro" "$REPO_DIR/platform/compose/nginx.yaml")" "1"
 
-# И читается он ровно одной строкой из платформенного файла conf.d. Имя этого
-# файла задаёт порядок: зоны лимитов обязаны быть объявлены до server-блоков.
+# And it is read by exactly one include line from a platform conf.d file. That
+# file's name fixes the order: rate-limit zones must be declared before any
+# server block.
 inc_mount="$(grep -oE "state/$inc_dir:/etc/nginx/[a-z-]+:ro" "$REPO_DIR/platform/compose/nginx.yaml" | head -n 1)"
 inc_mount="${inc_mount#*:}"; inc_mount="${inc_mount%:ro}"
-check "платформа читает этот каталог одной строкой include" \
+check "the platform reads that directory with a single include line" \
   "$(grep -rlF "include $inc_mount/" "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | wc -l | tr -d ' ')" "1"
-# Обе стороны обязаны найтись. Пустое имя сравнивается как меньшее любого, то
-# есть исчезнувший файл зон выглядел бы как правильный порядок — проверка
-# одобрила бы ровно то, ради чего написана.
+# Both sides must be found. An empty name compares as smaller than any other,
+# so a vanished zones file would look like the correct order — the check would
+# approve precisely what it was written to prevent.
 reader=$(grep -rlF "include $inc_mount/" "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | head -n 1)
 limits=$(grep -rlE '^[[:space:]]*limit_req_zone' "$REPO_DIR"/platform/nginx-vhosts/*.conf 2>/dev/null | head -n 1)
-check "зоны лимитов и читатель — оба на месте" \
-  "$([ -n "$reader" ] && [ -n "$limits" ] && echo да || echo нет)" "да"
-check "читатель сортируется ПОСЛЕ зон лимитов" \
-  "$([ -n "$reader" ] && [ -n "$limits" ] && [ "$(basename "$limits")" \< "$(basename "$reader")" ] && echo да || echo нет)" "да"
+check "the zones file and the reader are both present" \
+  "$([ -n "$reader" ] && [ -n "$limits" ] && echo yes || echo no)" "yes"
+check "the reader sorts AFTER the rate-limit zones" \
+  "$([ -n "$reader" ] && [ -n "$limits" ] && [ "$(basename "$limits")" \< "$(basename "$reader")" ] && echo yes || echo no)" "yes"
 
-# Имя генерируемого compose-файла в коде не пишется вовсе — спрашивается у
-# stacks_static_file. Комментарии не в счёт: гард про код, а объяснение
-# прошлого дефекта неизбежно называет файл.
+# The generated compose file's name is never written in code — it is asked of
+# stacks_static_file. Comments do not count: the guard is about code, and an
+# explanation of a past defect inevitably names the file.
 stat_name="$(basename "$(stacks_static_file)")"
-# grep по ОДНОМУ файлу не печатает его имя, поэтому строка начинается сразу с
-# номера — шаблон исключения комментариев здесь другой, чем у гардов выше.
+# grep over ONE file does not print its name, so the line starts with the
+# number — the comment-exclusion pattern here differs from the guards above.
 badstat=$(grep -In "$stat_name" "$REPO_DIR/platform/bin/docker-compose.sh" 2>/dev/null \
           | grep -vE '^[0-9]+:[[:space:]]*#' || true)
-check "имя генерируемого compose-файла в коде не повторяется" "$badstat" ""
+check "the generated compose file's name is not repeated in code" "$badstat" ""
 
-# Ни один потребитель не должен узнавать имя по образцу: образец переживает
-# переименование молча, а ветка case перестаёт совпадать без единого слова.
+# No consumer may learn the name through a pattern: a pattern survives a rename
+# silently, and the branch stops matching without a word.
 badpat=$(grep -rInE '\*[0-9]+-enabled\.conf\)' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
          | grep -vE '(selftest|mutate)\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
-check "имя генерируемого файла не сверяется образцом" "$badpat" ""
+check "the generated file's name is never matched by pattern" "$badpat" ""
 
-echo "== устаревший bind-mount"
+echo "== a stale bind mount"
 
-# ./bootstrap заменяет .stackyard целиком (rm -rf), а platform/ — симлинк туда.
-# Контейнер, запущенный до этого, остаётся с монтированием на УДАЛЁННЫЙ
-# каталог: путь в docker inspect прежний, файлов по нему ноль. Сверка путей
-# такое пропускает — она сравнивает строки, а изменился inode.
+# ./bootstrap replaces .stackyard wholesale (rm -rf), and platform/ is a
+# symlink into it. A container started before that is left mounted onto a
+# DELETED directory: the path in docker inspect is unchanged, and there are
+# zero files behind it. Comparing paths misses this — it compares strings,
+# while what changed is the inode.
 #
-# Саму сверку selftest прогнать не может (нужен docker), поэтому проверяется
-# ПРАВИЛО. Пустой каталог на хосте не улика: смонтировать пустое законно, и
-# [FAIL] на этом был бы вечной ложной тревогой на свежей машине.
-check "непустой на хосте против пустого в контейнере — улика" \
-  "$(mount_looks_stale 5 0 && echo да || echo нет)" "да"
-check "совпадающие количества — не улика" \
-  "$(mount_looks_stale 5 5 && echo да || echo нет)" "нет"
-check "пусто с обеих сторон — не улика" \
-  "$(mount_looks_stale 0 0 && echo да || echo нет)" "нет"
-check "пусто на хосте, непусто в контейнере — не улика" \
-  "$(mount_looks_stale 0 5 && echo да || echo нет)" "нет"
-check "пустые аргументы не считаются уликой" \
-  "$(mount_looks_stale "" "" && echo да || echo нет)" "нет"
+# The comparison itself cannot be run by selftest (it needs docker), so what is
+# checked is the RULE. An empty directory on the host is not evidence: mounting
+# something empty is legitimate, and a [FAIL] on that would be a permanent
+# false alarm on a fresh machine.
+check "non-empty on the host against empty in the container is evidence" \
+  "$(mount_looks_stale 5 0 && echo yes || echo no)" "yes"
+check "matching counts are not evidence" \
+  "$(mount_looks_stale 5 5 && echo yes || echo no)" "no"
+check "empty on both sides is not evidence" \
+  "$(mount_looks_stale 0 0 && echo yes || echo no)" "no"
+check "empty on the host, non-empty in the container is not evidence" \
+  "$(mount_looks_stale 0 5 && echo yes || echo no)" "no"
+check "empty arguments are not evidence" \
+  "$(mount_looks_stale "" "" && echo yes || echo no)" "no"
 
-echo "== корень машины из-под симлинка"
+echo "== the machine root seen through a symlink"
 
-# Раскладка ровно как на машине: platform — симлинк в .stackyard/. Гард выше
-# смотрит на текст скрипта, а этот блок — на то, КУДА скрипт на самом деле
-# сходит. Текстовая проверка одна не годится: она пройдёт и на скрипте, где
-# нужная строка есть, но стоит не в той ветке.
+# The layout exactly as on a machine: platform is a symlink into .stackyard/.
+# The guard above looks at a script's text; this block looks at WHERE the
+# script actually goes. A textual check alone will not do: it passes for a
+# script that contains the right line in the wrong branch.
 MROOT="$WORK/machine"
 rm -rf "$MROOT"
 mkdir -p "$MROOT/.stackyard"
 cp -R "$REPO_DIR/platform" "$MROOT/.stackyard/platform"
 ln -s .stackyard/platform "$MROOT/platform"
-# pwd -P у ожидания — потому что скрипт разворачивает симлинки сам (cd -P), а
-# в macOS $TMPDIR это /var -> /private/var. Иначе тест ловил бы раскладку
-# временного каталога, а не то, ради чего написан.
+# The expectation goes through pwd -P because the script resolves symlinks
+# itself (cd -P), and on macOS $TMPDIR is /var -> /private/var. Otherwise the
+# test would be measuring the layout of the temp directory instead of the thing
+# it was written for.
 MREAL="$(cd "$MROOT" && pwd -P)"
-check "скрипт через симлинк видит корнем машину, а не .stackyard" \
+check "through the symlink a script sees the machine as its root, not .stackyard" \
   "$(cd "$MROOT" && env -u ROOT_DIR ./platform/bin/htpasswd.sh proba --list 2>&1)" \
   "empty: $MREAL/state/htpasswd/proba"
 rm -rf "$MROOT"
 
-echo "== переносимость: время, суммы, сторож"
+echo "== portability: time, checksums, the watchdog"
 
-# Метка S3 разбирается в ОДНО И ТО ЖЕ независимо от часового пояса машины, на
-# которой запущена проверка. Иначе check-backups.sh считает возраст бэкапа со
-# сдвигом на величину пояса: к востоку от Гринвича свежий дамп выглядит
-# устаревшим (ложная тревога), к западу — устаревший проходит проверку.
-# Второе тише и потому хуже.
+# An S3 timestamp must parse to THE SAME value regardless of the timezone of
+# the machine running the check. Otherwise check-backups.sh computes a backup's
+# age with an offset the size of the timezone: east of Greenwich a fresh dump
+# looks stale (a false alarm), west of it a stale dump passes. The second is
+# quieter and therefore worse.
 #
-# Гоняем в трёх поясах намеренно: в UTC неверный разбор даёт верный ответ, то
-# есть тест, написанный только под UTC, был бы вечнозелёным.
+# Three timezones on purpose: in UTC an incorrect parse gives the correct
+# answer, so a test written only for UTC would be evergreen.
 for tz in UTC Asia/Tokyo America/New_York; do
   for form in '2026-01-02T03:04:05+00:00' '2026-01-02T03:04:05Z' \
               '2026-01-02T03:04:05.123456+00:00' '2026-01-02T06:04:05+03:00'; do
-    check "iso_to_epoch $form в TZ=$tz" "$(TZ="$tz" iso_to_epoch "$form")" "1767323045"
+    check "iso_to_epoch $form under TZ=$tz" "$(TZ="$tz" iso_to_epoch "$form")" "1767323045"
   done
 done
-check "iso_to_epoch без смещения считает UTC" "$(TZ=Asia/Tokyo iso_to_epoch '2026-01-02T03:04:05')" "1767323045"
-check "iso_to_epoch отвергает мусор" "$(iso_to_epoch 'не дата' >/dev/null 2>&1 && echo принял || echo отверг)" "отверг"
+check "iso_to_epoch treats a timestamp without an offset as UTC" "$(TZ=Asia/Tokyo iso_to_epoch '2026-01-02T03:04:05')" "1767323045"
+check "iso_to_epoch rejects rubbish" "$(iso_to_epoch 'not a date' >/dev/null 2>&1 && echo accepted || echo rejected)" "rejected"
 
-# Гарда версии bash проверяется НА ДЕЛЕ, а не наличием слова BASH_VERSINFO в
-# файле: проверка «слово на месте» проходит и на обезвреженной гарде, и именно
-# так она первую же мутацию и пропустила. Нужен настоящий старый bash — в macOS
-# это штатный /bin/bash 3.2. Там, где его нет (Linux), проверять нечем и блок
-# пропускается: лучше честный пропуск, чем тест, который ничего не значит.
+# The bash version guard is checked BY RUNNING IT, not by the presence of the
+# word BASH_VERSINFO in the file: a "the word is there" check passes for a
+# disarmed guard, which is exactly how it missed its first mutation. A genuinely
+# old bash is needed — on macOS that is the stock /bin/bash 3.2. Where there is
+# none (Linux), there is nothing to check with and the block is skipped: an
+# honest skip beats a test that means nothing.
 old_bash=""
 for b in /bin/bash /usr/bin/bash; do
   [ -x "$b" ] || continue
@@ -1370,38 +1380,39 @@ for b in /bin/bash /usr/bin/bash; do
   [ -n "$v" ] && [ "$v" -lt 42 ] 2>/dev/null && { old_bash="$b"; break; }
 done
 if [ -n "$old_bash" ]; then
-  check "библиотека отказывается работать на bash < 4.2" \
-    "$("$old_bash" -c ". '$REPO_DIR/platform/lib/lib-env.sh'; echo загрузилась" 2>/dev/null)" ""
-  check "и называет причину" \
+  check "the library refuses to run on bash < 4.2" \
+    "$("$old_bash" -c ". '$REPO_DIR/platform/lib/lib-env.sh'; echo loaded" 2>/dev/null)" ""
+  check "and it states the reason" \
     "$("$old_bash" -c ". '$REPO_DIR/platform/lib/lib-env.sh'" 2>&1 | grep -c 'bash >= 4.2')" "1"
 else
-  printf '  [--]   bash < 4.2 на этой машине нет — гарду версии проверить нечем\n'
+  printf '  [--]   no bash < 4.2 on this machine — the version guard cannot be exercised\n'
 fi
 
-# Сумма — известного содержимого, а не «что-нибудь непустое»: пустая строка
-# ровно так и появилась бы при отсутствии обеих команд, а сравнение с непустым
-# ожиданием её ловит.
-printf 'stackyard' > "$WORK/сумма.txt"
-check "sha256_file считает сумму" "$(sha256_file "$WORK/сумма.txt")" \
+# The checksum is of KNOWN content, not "something non-empty": an empty string
+# is exactly what a missing tool would produce, and comparing against a
+# non-empty expectation catches it.
+printf 'stackyard' > "$WORK/checksum.txt"
+check "sha256_file computes the checksum" "$(sha256_file "$WORK/checksum.txt")" \
   "660b926bc79186f63660911f660e1a187daf9fafd1700148d43fb7e02f909bb0"
 
-# Сторож обязан отдавать 124 (как GNU timeout), сохранять уже напечатанное и
-# пропускать чужой код возврата. Проверяем ФОЛБЭК — путь, который включается
-# там, где timeout'а нет: штатный путь и без теста работает у всех.
-guard_out=$(PATH=/usr/bin:/bin run_with_timeout 1 bash -c 'echo раньше; sleep 5; echo позже' 2>/dev/null); guard_rc=$?
-check "сторож обрывает зависшее" "$guard_rc" "124"
-check "сторож сохраняет напечатанное до обрыва" "$guard_out" "раньше"
-PATH=/usr/bin:/bin run_with_timeout 5 bash -c 'exit 7' >/dev/null 2>&1; check "сторож пропускает чужой код возврата" "$?" "7"
+# The watchdog must return 124 (as GNU timeout does), preserve what was already
+# printed, and pass through someone else's exit code. What is exercised is the
+# FALLBACK — the path taken where timeout does not exist: the normal path works
+# for everyone without a test.
+guard_out=$(PATH=/usr/bin:/bin run_with_timeout 1 bash -c 'echo before; sleep 5; echo after' 2>/dev/null); guard_rc=$?
+check "the watchdog aborts something hung" "$guard_rc" "124"
+check "the watchdog preserves what was printed before the abort" "$guard_out" "before"
+PATH=/usr/bin:/bin run_with_timeout 5 bash -c 'exit 7' >/dev/null 2>&1; check "the watchdog passes through someone else's exit code" "$?" "7"
 
-echo "== распознавание дампа"
+echo "== recognising a dump"
 
-# Прошлая версия объявляла SQLite'ом ЛЮБОЙ gzip. А gzip'ом сжаты и дамп MySQL
-# (.sql.gz), и tar источников files:/volume:. В аварийный день дамп базы шёл не
-# той веткой восстановления, и в базу не попадало ничего — молча, потому что
-# `gunzip -c > цель` отрабатывал успешно.
+# Treating EVERY gzip as SQLite would be wrong: a SQL dump (.sql.gz) and a tar
+# of files:/volume: sources are gzipped too. On the day a restore is needed, a
+# database dump would take the wrong branch and nothing would land in the
+# database — silently, because `gunzip -c > target` succeeds.
 #
-# Проверяем на НАСТОЯЩИХ файлах: распознавание по магии нельзя проверить
-# фикстурой из строк.
+# Exercised against REAL files: magic-number recognition cannot be checked with
+# a fixture made of strings.
 bkd="$WORK/bk"; mkdir -p "$bkd/dir"
 printf 'SQLite format 3\000' > "$bkd/plain.db"
 gzip -c "$bkd/plain.db" > "$bkd/base.db.gz"
@@ -1409,80 +1420,83 @@ printf -- '-- dump\nCREATE TABLE t;\n' | gzip -c > "$bkd/mysql.sql.gz"
 echo x > "$bkd/dir/f"; tar -czf "$bkd/files.tar.gz" -C "$bkd" dir
 printf 'PGDMP\000\000\000\000\000\000\000\000\000\000\000' > "$bkd/pg.dump"
 
-check "SQLite без сжатия"            "$(backup_file_kind "$bkd/plain.db")"     "sqlite_plain"
-check "SQLite под gzip"              "$(backup_file_kind "$bkd/base.db.gz")"   "sqlite_gz"
-check "дамп SQL под gzip — НЕ SQLite" "$(backup_file_kind "$bkd/mysql.sql.gz")" "unknown"
-check "tar под gzip — НЕ SQLite"      "$(backup_file_kind "$bkd/files.tar.gz")" "tar_gz"
-check "формат поставщика платформе неизвестен" "$(backup_file_kind "$bkd/pg.dump")" "unknown"
+check "SQLite, uncompressed"             "$(backup_file_kind "$bkd/plain.db")"     "sqlite_plain"
+check "SQLite under gzip"                "$(backup_file_kind "$bkd/base.db.gz")"   "sqlite_gz"
+check "a SQL dump under gzip is NOT SQLite" "$(backup_file_kind "$bkd/mysql.sql.gz")" "unknown"
+check "a tar under gzip is NOT SQLite"      "$(backup_file_kind "$bkd/files.tar.gz")" "tar_gz"
+check "a provider's own format is unknown to the platform" "$(backup_file_kind "$bkd/pg.dump")" "unknown"
 
-# Ключ seed'а: генератор пишет имя в нижнем регистре без префикса, и второе
-# написание в инициализаторе означало бы, что seed молча не накатывается —
-# база заведена, схема пуста, приложение падает уже в рантайме.
+# The seed key: the generator writes the name in lowercase without a prefix,
+# and a second spelling in the initializer would mean the seed silently never
+# runs — the database is created, the schema is empty, and the application
+# fails at runtime.
 gen_key=$(printf '%s' "$DB_KEYS_OPTIONAL" | tr 'A-Z ' 'a-z\n' | grep -x dump)
-check "генератор пишет ключ seed'а как 'dump'" "$gen_key" "dump"
+check "the generator writes the seed key as 'dump'" "$gen_key" "dump"
 for init in "$REPO_DIR"/profiles/stacks/*/db-init/initializer.sh; do
   [ -f "$init" ] || continue
-  check "$(basename "$(dirname "$(dirname "$init")")"): инициализатор читает тот же ключ" \
+  check "$(basename "$(dirname "$(dirname "$init")")"): the initializer reads the same key" \
     "$(grep -c "yq e '\.dump //" "$init")" "1"
 done
 
-echo "== пути в S3"
+echo "== paths in S3"
 
-# Формула пути обязана быть ОДНА на всех потребителей. Разъезд означает, что
-# backup.sh кладёт объект по одному пути, а check-backups.sh ищет по другому —
-# и вечно докладывает «нет ни одного бэкапа» при исправных бэкапах. Обе стороны
-# при этом выглядят работающими, поэтому проверка тут не про значение, а про то,
-# что формула ровно одна.
+# A path formula must be ONE for all its consumers. A divergence means
+# backup.sh stores an object under one path while check-backups.sh looks under
+# another — and reports "no backups at all" forever while backups are healthy.
+# Both sides look like they work, so the check here is not about the value but
+# about there being exactly one formula.
 dup=$(grep -hoE 'env_(get|require) Backup_(S3|DB)_Prefix' "$REPO_DIR"/platform/bin/*.sh | sort -u)
-check "формулы префиксов не продублированы в bin/" "$dup" ""
+check "the prefix formulas are not duplicated in bin/" "$dup" ""
 
-# Префикс машины обязателен: бакет бывает общим на несколько машин, и умолчание
-# означало бы дампы, уезжающие в чужой каталог поверх чужих. Раньше умолчанием
-# было имя конкретной машины.
+# The machine's prefix is mandatory: a bucket is sometimes shared by several
+# machines, and a default would mean dumps landing in another machine's
+# directory, on top of its dumps.
 printf 'Backup_S3_Bucket=b\n' > "$WORK/.env-backup"
 ENV_VARS=(); env_load_files "$WORK/.env-backup" >/dev/null 2>&1
-check "без Backup_S3_Prefix формула отказывает" \
-  "$(backup_s3_prefix 2>/dev/null; echo "код:$?")" "код:1"
+check "without Backup_S3_Prefix the formula refuses" \
+  "$(backup_s3_prefix 2>/dev/null; echo "code:$?")" "code:1"
 
-echo "== раскладка профиля и фикстур"
+echo "== the layout of the profile and the fixtures"
 
-# Эти проверки идут по РЕАЛЬНЫМ файлам, а не по фикстуре из mktemp: предмет
-# здесь — сами стеки профиля и машин-фикстур, и разъехаться они могут только
-# там.
+# These checks run against REAL files rather than a fixture in a temporary
+# directory: the subject here is the profile's own stacks and the fixture
+# machines, and those can only drift there.
 
-check "профильные стеки объявляют stack.conf" \
+check "profile stacks declare a stack.conf" \
   "$(ls "$REPO_DIR"/profiles/stacks/*/stack.conf 2>/dev/null | wc -l | tr -d ' ')" \
   "$(ls -d "$REPO_DIR"/profiles/stacks/*/ 2>/dev/null | wc -l | tr -d ' ')"
 
-# Ровно один поставщик БД на префикс. Два стека с одним Provides_DB в профиле
-# означали бы, что машина, включившая оба, тихо получает чужие заказы.
+# Exactly one DB provider per prefix. Two stacks with the same Provides_DB in
+# the profile would mean a machine enabling both quietly receives declarations
+# meant for the other.
 dupe_prefix=$(grep -h '^Provides_DB=' "$REPO_DIR"/profiles/stacks/*/stack.conf 2>/dev/null \
               | cut -d= -f2- | tr -d '"' | sort | uniq -d)
-check "префиксы поставщиков в профиле уникальны" "$dupe_prefix" ""
+check "provider prefixes in the profile are unique" "$dupe_prefix" ""
 
-# У поставщика обязан быть хук дампов: без него backup.sh молча не снимет ни
-# одной базы, а check-backups.sh не сможет построить ожидаемый список.
+# A provider must have a dump hook: without it backup.sh silently takes no
+# database dumps at all, and check-backups.sh cannot build the expected list.
 for d in "$REPO_DIR"/profiles/stacks/*/; do
   name=$(basename "${d%/}")
   grep -q '^Provides_DB=' "$d/stack.conf" 2>/dev/null || continue
-  check "поставщик $name: есть scripts/backup-dump.sh" \
-    "$([ -x "$d/scripts/backup-dump.sh" ] && echo да || echo нет)" "да"
-  check "поставщик $name: хук отвечает на ext" \
+  check "provider $name: scripts/backup-dump.sh exists" \
+    "$([ -x "$d/scripts/backup-dump.sh" ] && echo yes || echo no)" "yes"
+  check "provider $name: the hook answers ext" \
     "$(ROOT_DIR="$REPO_DIR" STACK_DIR="$d" "$d/scripts/backup-dump.sh" ext 2>/dev/null | head -c 1)" "."
 done
 
-# Движок обязан обслуживать ОБЕ машины-фикстуры без правок. Они с разными
-# СУБД намеренно: платформа считается общей ровно тогда, когда обе работают.
-# Фикстура настраивается ЗДЕСЬ, а не заранее руками.
+# The engine must serve BOTH fixture machines with no edits. They run different
+# DBMSes on purpose: the platform counts as shared exactly when both work.
+# The fixture is set up HERE, not by hand beforehand.
 #
-# Её .env, .env-stacks и stacks/*/.env в git не лежат (это .env-файлы, правило
-# одно на всех). Значит на свежем клоне их нет, и блок уходил в «пропускаю» —
-# а пропуск неотличим от «проверено». Selftest был зелёным только на машине
-# автора, где эти файлы остались с прошлых запусков.
+# Its .env, .env-stacks and stacks/*/.env are not in git (they are .env files,
+# and the rule is the same for everyone). So a fresh clone does not have them,
+# and this block used to skip itself -- and a skip is indistinguishable from a
+# pass. The selftest was green only on the author's machine, where those files
+# survived from earlier runs.
 #
-# Поэтому копируем фикстуру во временный каталог и заводим ей окружение из
-# образцов. Заодно это проверяет сами образцы: фикстура, у которой .env.example
-# неполон, теперь не настроится.
+# So we copy the fixture into a temp directory and build its environment from
+# the examples. That also tests the examples themselves: a fixture whose
+# .env.example is incomplete no longer sets up.
 fixture_machine() {
   local src="$1" dst="$2" f
   mkdir -p "$dst"
@@ -1494,9 +1508,10 @@ fixture_machine() {
   if [ ! -f "$dst/.env" ] && [ -f "$dst/.env.example" ]; then
     sed "s|^Platform_Deploy_Dir=.*|Platform_Deploy_Dir=$dst|" "$dst/.env.example" > "$dst/.env"
   fi
-  # Секреты стеков — из образцов, с подстановкой вместо CHANGE_ME. Значение
-  # своё у каждой фикстуры: одинаковый секрет у двух машин — то, что ловит
-  # bin/audit-isolation.sh, и заводить его здесь значило бы учить плохому.
+  # Stack secrets come from the examples, with a value substituted for
+  # CHANGE_ME. Each fixture gets its own: the same secret on two machines is
+  # exactly what bin/audit-isolation.sh catches, and planting one here would be
+  # teaching the wrong habit.
   for f in "$dst"/stacks/*/; do
     [ -d "$f" ] || continue
     [ -f "$f/.env" ] && continue
@@ -1504,7 +1519,8 @@ fixture_machine() {
     [ -f "$ex" ] || ex="$f/.env.example"
     [ -f "$ex" ] && sed "s/CHANGE_ME/$(basename "$dst")-fixture-pw/" "$ex" > "$f/.env"
   done
-  # Профильным стекам .env тоже нужен, а их каталога в машине может не быть.
+  # Profile stacks need a .env too, and the machine may have no directory for
+  # them at all.
   while IFS= read -r st; do
     [ -n "$st" ] || continue
     local sd; sd="$dst/stacks/$st"
@@ -1524,112 +1540,115 @@ for src in "$FIXTURES"/*/; do
   fixture_machine "$src" "$m"
   fixtures_seen=$((fixtures_seen + 1))
 
-  # Фикстура обязана быть НЕПУСТОЙ. Без этого все проверки ниже сравнивают
-  # пустое с пустым и проходят: ровно так блок и выглядел «зелёным», когда на
-  # деле пропускался. Пустое равно пустому — это не проверка.
+  # The fixture must be NON-EMPTY. Without that, every check below compares
+  # empty with empty and passes: that is exactly how this block looked "green"
+  # while in fact being skipped. Empty equals empty is not a check.
   enabled_n=$( ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_enabled 2>/dev/null" | grep -c . || true)
-  check "$name: фикстура настроена и непуста" \
-    "$([ "${enabled_n:-0}" -ge 1 ] && echo да || echo "нет (стеков: ${enabled_n:-0})")" "да"
+  check "$name: the fixture is set up and non-empty" \
+    "$([ "${enabled_n:-0}" -ge 1 ] && echo yes || echo "no (stacks: ${enabled_n:-0})")" "yes"
 
-  # Domains и server_name — два списка одного и того же. Разъезд означает либо
-  # сертификат, который выпускается и никому не служит, либо vhost, работающий
-  # до первого посетителя.
+  # Domains and server_name are two lists of the same thing. A divergence means
+  # either a certificate that gets issued and serves nobody, or a vhost that
+  # works only until the first visitor.
   declared=$( ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_domain_names" 2>/dev/null )
   served=$(grep -rhE '^[[:space:]]*server_name[[:space:]]' "$m"/stacks/*/nginx/*.conf 2>/dev/null \
            | awk '{for (i = 2; i <= NF; i++) print $i}' | tr -d ';' | sed '/^$/d' | sort -u)
-  check "$name: Domains совпадают с server_name" "$declared" "$served"
+  check "$name: Domains match server_name" "$declared" "$served"
 
-  # Стек без compose.yaml обязан объявить это явно. Молчаливая терпимость
-  # превращала бы забытый файл в «стек без контейнеров».
+  # A stack without compose.yaml must say so explicitly. Tolerating it silently
+  # would turn a forgotten file into "a stack with no containers".
   bad=""
   for d in "$m"/stacks/*/; do
     [ -f "$d/stack.conf" ] || continue
     [ -f "$d/compose.yaml" ] && continue
     grep -q '^Containers="\?no' "$d/stack.conf" || bad="$bad $(basename "${d%/}")"
   done
-  check "$name: стеки без compose.yaml объявили Containers=no" "$bad" ""
+  check "$name: stacks without compose.yaml declare Containers=no" "$bad" ""
 
-  # Ни одного заказа базы без включённого поставщика: иначе стек «включается»
-  # успешно и падает в рантайме на подключении.
+  # No database order without an enabled provider: otherwise a stack "enables"
+  # successfully and fails at runtime on the connection.
   prefix=$( ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_db_prefix" 2>/dev/null )
   orphan=""
   if [ -z "$prefix" ]; then
     orphan=$(grep -lE '^[A-Za-z]+_(DB|User|Password)=' "$m"/stacks/*/stack.conf 2>/dev/null | wc -l | tr -d ' ')
     [ "$orphan" = "0" ] && orphan=""
   fi
-  check "$name: заказов базы без поставщика нет" "$orphan" ""
+  check "$name: no database orders without a provider" "$orphan" ""
 
-  # Ни одного недостающего файла: если образец неполон, фикстура не настроится,
-  # и раньше это было незаметно.
+  # No missing files: if an example is incomplete the fixture will not set up,
+  # and that used to go unnoticed.
   missing_all=""
   while IFS= read -r st; do
     [ -n "$st" ] || continue
     mf=$( ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stack_missing_files $st" 2>/dev/null )
     [ -n "$mf" ] && missing_all="$missing_all $st:$mf"
   done < <(ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_enabled 2>/dev/null")
-  check "$name: у включённых стеков всё на месте" "$missing_all" ""
+  check "$name: enabled stacks have everything in place" "$missing_all" ""
 done
 
-# Пропуск фикстуры неотличим от её проверки, поэтому их число проверяется явно.
-# Две с разными СУБД — тот минимум, ради которого фикстуры и существуют.
-check "фикстуры действительно прогнаны" "$([ "$fixtures_seen" -ge 2 ] && echo да || echo "нет ($fixtures_seen)")" "да"
+# Skipping a fixture is indistinguishable from checking it, so their count is
+# asserted explicitly. Two, with different DBMSes, is the minimum the fixtures
+# exist for.
+check "the fixtures really ran" "$([ "$fixtures_seen" -ge 2 ] && echo yes || echo "no ($fixtures_seen)")" "yes"
 
 echo "== .gitignore"
 
-# Правило `.env*` без исключения молча съедает каждый новый образец: уже
-# добавленные файлы продолжают отслеживаться, а новые не попадают в git, и
-# обнаруживается это на свежей машине. Поэтому правила проверяются явно.
-# Вне git-репозитория check-ignore ответить не может, и его молчание выглядело
-# как «файл отслеживается» — шесть ложных провалов на распакованном архиве.
-# Отсутствие ответа и ответ «нет» — разные вещи, и путать их нельзя нигде.
+# An `.env*` rule without an exception silently eats every new example: files
+# already added keep being tracked, new ones never reach git, and it surfaces
+# only on a fresh machine. So the rules are asserted explicitly.
+# Outside a git repository check-ignore cannot answer, and its silence looked
+# like "the file is tracked" -- six false failures on an unpacked archive.
+# No answer and an answer of "no" are different things, and confusing them is
+# wrong anywhere.
 if ! ( cd "$REPO_DIR" && git rev-parse --git-dir ) >/dev/null 2>&1; then
-  echo "  · это не git-репозиторий — правила .gitignore проверить нечем, блок пропущен"
+  echo "  . not a git repository -- nothing to check .gitignore rules with, block skipped"
 else
 
 ignored() {
   ( cd "$REPO_DIR" && git check-ignore -q "$1" 2>/dev/null && echo ignored || echo tracked )
 }
 
-# Секреты и состояние фикстур — мимо git. Настоящих машин здесь нет по
-# построению: репозиторий публичный.
+# Fixture secrets and state stay out of git. There are no real machines here by
+# construction: the repository is public.
 for f in tests/machines/alpha/.env \
          tests/machines/alpha/.env-stacks \
          tests/machines/alpha/stacks/site/.env \
          tests/machines/alpha/state/certs/x.crt \
          tests/machines/alpha/.stackyard/platform/bin/stack.sh \
          profiles/stacks/mysql/.env; do
-  check "$f игнорируется" "$(ignored "$f")" "ignored"
+  check "$f is ignored" "$(ignored "$f")" "ignored"
 done
 
-# А образцы — наоборот: без них на сервере не из чего завести файл.
+# The examples are the opposite: without them there is nothing on the server to
+# build the real file from.
 for f in tests/machines/alpha/.env.example \
          tests/machines/alpha/.env-stacks.example \
          tests/machines/alpha/stacks/site/.env.example \
          profiles/stacks/mysql/.env.example \
          platform/getssl-config/getssl.cfg \
          platform/getssl-config/getssl.cfg.template; do
-  check "$f НЕ игнорируется" "$(ignored "$f")" "tracked"
+  check "$f is NOT ignored" "$(ignored "$f")" "tracked"
 done
 
-# Ни одного секрета в общих слоях: они уезжают на КАЖДУЮ машину, и секрет в них
-# означает секрет, размноженный по всем клиентам.
+# No secrets in the shared layers: they ship to EVERY machine, so a secret
+# there is a secret copied to every client.
 leaked=$(find "$REPO_DIR/platform" "$REPO_DIR/profiles" \
               \( -name '.env' -o -name '*.key' -o -name 'account.key' -o -name '*.pem' \) 2>/dev/null | wc -l | tr -d ' ')
-check "в platform/ и profiles/ секретов нет" "$leaked" "0"
+check "no secrets in platform/ and profiles/" "$leaked" "0"
 
-# Уже отслеживаемый файл, попавший под новое правило, git продолжает
-# отслеживать — и правило выглядит работающим, не будучи им.
+# git keeps tracking a file that is already tracked when a new rule starts
+# matching it -- so the rule looks like it works without working.
 fell_out=$( cd "$REPO_DIR" && git ls-files | while IFS= read -r f; do
               git check-ignore -q "$f" 2>/dev/null && echo "$f"
             done )
-check "отслеживаемые файлы не выпали из git" "$fell_out" ""
+check "tracked files did not fall out of git" "$fell_out" ""
 
 fi
 
 echo
 if [ "$failures" -eq 0 ]; then
-  echo "selftest: всё сошлось"
+  echo "selftest: everything checks out"
   exit 0
 fi
-echo "selftest: провалов: $failures"
+echo "selftest: failures: $failures"
 exit 1
