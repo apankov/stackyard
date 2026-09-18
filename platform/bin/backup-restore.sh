@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 
-# Восстановление из бэкапа.
+# Restoring from a backup.
 #
-# ВАЖНОЕ СЛЕДСТВИЕ ШИФРОВАНИЯ, о котором лучше узнать не в аварийный день:
-# расшифровать бэкап НА ЭТОЙ МАШИНЕ нельзя. Приватного GPG-ключа здесь нет и
-# быть не должно — иначе шифрование не защищало бы ровно от того сценария, ради
-# которого оно есть. Поэтому восстановление — два шага:
+# AN IMPORTANT CONSEQUENCE OF ENCRYPTION, better learned on a calm day than
+# during an incident: a backup CANNOT be decrypted ON THIS MACHINE. The private
+# GPG key is not here and must not be — otherwise the encryption would not
+# protect against the very scenario it exists for. So a restore takes two
+# steps:
 #
-#   1. На машине, где есть приватный ключ (ноутбук):
-#        aws s3 cp s3://<бакет>/<префикс>/postgres/<база>/<TS>.dump.gpg - \
-#          | gpg --decrypt > <база>.dump
-#        scp <база>.dump ec2-user@devbox:/tmp/
+#   1. On a machine that holds the private key (a laptop):
+#        aws s3 cp s3://<bucket>/<prefix>/<provider>/<db>/<TS>.dump.gpg - \
+#          | gpg --decrypt > <db>.dump
+#        scp <db>.dump user@machine:/tmp/
 #
-#   2. Здесь — этот скрипт, он принимает УЖЕ РАСШИФРОВАННЫЙ файл:
-#        ./scripts/backup-restore.sh --check /tmp/<база>.dump
-#        ./scripts/backup-restore.sh --apply /tmp/<база>.dump --into <база> --yes
+#   2. Here — this script, which accepts an ALREADY DECRYPTED file:
+#        ./platform/bin/backup-restore.sh --check /tmp/<db>.dump
+#        ./platform/bin/backup-restore.sh --apply /tmp/<db>.dump --into <db> --yes
 #
-# Порядок при полном восстановлении: сначала _globals (роли и пароли), потом
-# базы. Наоборот — pg_restore упрётся в «role does not exist».
+# The order for a full restore: cluster-level objects (roles and passwords)
+# first, then the databases. The other way round, the restore fails on a role
+# that does not exist.
 
 set -euo pipefail
 
@@ -38,9 +40,8 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 
 # shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
-# lib-stacks нужен с самого начала: поставщика БД спрашиваем ещё при разборе
-# конфига. Раньше на его месте стояла константа с именем контейнера postgres,
-# и библиотека подключалась сильно позже, по месту первой надобности.
+# lib-stacks is needed from the very start: the DB provider is asked for while
+# the config is still being parsed.
 # shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
 
@@ -52,23 +53,22 @@ ASSUME_YES=0
 
 usage() {
   cat <<'EOF'
-Использование:
-  ./scripts/backup-restore.sh --list [<подпуть>]
-        показать, что лежит в S3. Без аргумента — источники верхнего уровня,
-        например: --list mysql/orders
+Usage:
+  ./platform/bin/backup-restore.sh --list [<subpath>]
+        show what is in S3. With no argument, the top-level sources;
+        for example: --list mysql/orders
 
-  ./scripts/backup-restore.sh --check <файл>
-        распознать расшифрованный дамп и показать его содержимое.
-        Ничего не меняет.
+  ./platform/bin/backup-restore.sh --check <file>
+        recognise a decrypted dump and show what is inside it.
+        Changes nothing.
 
-  ./scripts/backup-restore.sh --apply <файл> --into <цель> [--clean] [--yes]
-        восстановить. <цель> — имя базы postgres либо путь к файлу SQLite.
-        --clean   удалить существующие объекты перед восстановлением
-                  (pg_restore --clean --if-exists). БЕЗ него восстановление
-                  в непустую базу упрётся в конфликты имён.
-        --yes     не спрашивать подтверждение (для неинтерактивного запуска)
+  ./platform/bin/backup-restore.sh --apply <file> --into <target> [--clean] [--yes]
+        restore. <target> is a database name or the path to a SQLite file.
+        --clean   drop existing objects before restoring. WITHOUT it, a
+                  restore into a non-empty database runs into name conflicts.
+        --yes     do not ask for confirmation (for non-interactive runs)
 
-Файлы .gpg этот скрипт не принимает намеренно — см. комментарий в его начале.
+This script deliberately does not accept .gpg files — see the header comment.
 EOF
 }
 
@@ -83,14 +83,14 @@ while [ $# -gt 0 ]; do
     --clean) CLEAN=1; shift ;;
     --yes)   ASSUME_YES=1; shift ;;
     --help|-h) usage; exit 0 ;;
-    *) echo "Неизвестный аргумент: $1" >&2; usage >&2; exit 2 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
-die() { echo "Ошибка: $*" >&2; exit 2; }
+die() { echo "Error: $*" >&2; exit 2; }
 
 ENV_BACKUP="$ROOT_DIR/.env-backup"
-[ -f "$ENV_BACKUP" ] || die "нет $ENV_BACKUP"
+[ -f "$ENV_BACKUP" ] || die "no $ENV_BACKUP"
 env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
 
 S3_BUCKET=$(env_get Backup_S3_Bucket)
@@ -100,13 +100,14 @@ AWS_KEY=$(env_get Backup_AWS_Access_Key_Id)
 AWS_SECRET=$(env_get Backup_AWS_Secret_Access_Key)
 DB_PROVIDER="$(stacks_db_provider)"
 
-# Восстановление в СУБД делает поставщик: pg_restore и `mysql <` — знание
-# движка, ровно как дамп. Платформа отвечает за S3, GPG, распознавание файла и
-# подтверждения; что делать с содержимым — знает стек.
+# Restoring into the DBMS is the provider's job: the restore command is engine
+# knowledge, exactly like the dump command. The platform handles S3, GPG, file
+# recognition and confirmations; what to do with the contents is the stack's
+# business.
 db_hook() {
-  [ -n "$DB_PROVIDER" ] || die "поставщик общей БД не включён — восстанавливать некуда"
+  [ -n "$DB_PROVIDER" ] || die "no shared-DB provider is enabled — there is nowhere to restore to"
   local h; h="$(stack_dir "$DB_PROVIDER")/scripts/backup-dump.sh"
-  [ -x "$h" ] || die "у поставщика '$DB_PROVIDER' нет scripts/backup-dump.sh"
+  [ -x "$h" ] || die "provider '$DB_PROVIDER' has no scripts/backup-dump.sh"
   ROOT_DIR="$ROOT_DIR" STACK_DIR="$(stack_dir "$DB_PROVIDER")" "$h" "$@"
 }
 
@@ -119,84 +120,83 @@ aws_cli() {
   fi
 }
 
-# ------------------------------------------------------------------- список
+# ------------------------------------------------------------------- listing
 
 if [ "$MODE" = list ]; then
-  [ -n "$S3_BUCKET" ] || die "Backup_S3_Bucket не задан"
+  [ -n "$S3_BUCKET" ] || die "Backup_S3_Bucket is not set"
   path="s3://$S3_BUCKET/$S3_PREFIX/${TARGET:+$TARGET/}"
   echo "== $path"
   aws_cli s3 ls "$path" --recursive --human-readable 2>/dev/null \
     | tail -50 \
-    || die "не удалось прочитать $path"
+    || die "could not read $path"
   echo
-  echo "Расшифровать (на машине с приватным ключом):"
-  echo "  aws s3 cp s3://$S3_BUCKET/<ключ> - | gpg --decrypt > дамп"
+  echo "To decrypt (on the machine that holds the private key):"
+  echo "  aws s3 cp s3://$S3_BUCKET/<key> - | gpg --decrypt > dump"
   exit 0
 fi
 
-# ------------------------------------------------------- распознавание файла
+# ------------------------------------------------------- recognising the file
 
-[ -n "$FILE" ] || die "не указан файл"
+[ -n "$FILE" ] || die "no file given"
 
-# Проверка на .gpg — ДО проверки существования. Файл, которого нет, чаще всего
-# и есть тот самый случай: человек назвал ключ из S3, ожидая, что скрипт сам
-# скачает и расшифрует. Сообщение про два шага полезнее, чем «нет файла».
+# The .gpg test comes BEFORE the existence test. A file that does not exist is
+# most often exactly this case: someone named an S3 key expecting the script to
+# download and decrypt it. The message about the two steps is more useful than
+# "no such file".
 case "$FILE" in
   *.gpg)
-    echo "Ошибка: '$FILE' зашифрован, а приватного ключа на этой машине нет и быть не должно." >&2
+    echo "Error: '$FILE' is encrypted, and the private key is not on this machine and must not be." >&2
     echo >&2
-    echo "Расшифруйте там, где ключ есть, и принесите результат:" >&2
-    echo "  gpg --decrypt '$(basename "$FILE")' > дамп     # на ноутбуке" >&2
-    echo "  scp дамп ec2-user@devbox:/tmp/" >&2
+    echo "Decrypt it where the key is and bring the result here:" >&2
+    echo "  gpg --decrypt '$(basename "$FILE")' > dump     # on your laptop" >&2
+    echo "  scp dump user@machine:/tmp/" >&2
     exit 2
     ;;
 esac
 
-[ -f "$FILE" ] || die "нет файла '$FILE'"
+[ -f "$FILE" ] || die "no such file '$FILE'"
 
-# Распознаём по содержимому, а не по имени: имя мог поменять кто угодно, а
-# перепутать формат при восстановлении — это применить SQLite-базу поверх
-# postgres или наоборот.
+# The format is recognised by CONTENT, not by name: anyone could have renamed
+# the file, and confusing formats during a restore means applying a SQLite
+# database over a relational one or the other way round.
 #
-# Через od, а не через `head | tr`: дамп — двоичный файл, и `tr` на нём падает
-# с «Illegal byte sequence», как только в первых байтах попадётся
-# невалидная для текущей локали последовательность. Вывод od — чистый ASCII,
-# и разбирать его безопасно при любой локали.
-# Распознавание — в lib-env.sh (backup_file_kind): оно смотрит ВНУТРЬ gzip, а
-# не на обёртку. Здесь остаётся только то, чего библиотека знать не должна, —
-# вопрос поставщику про его собственные форматы.
+# The recognition itself lives in lib-env.sh (backup_file_kind): it looks
+# INSIDE the gzip rather than at the wrapper. What remains here is the one
+# thing the library must not know — asking the provider about its own
+# formats.
 KIND="$(backup_file_kind "$FILE")"
 [ "$KIND" = unknown ] && KIND="db:$(db_hook detect "$FILE" 2>/dev/null || echo unknown)"
 
 human_kind() {
   case "$KIND" in
-    db:*)         echo "дамп СУБД '$DB_PROVIDER', формат: ${KIND#db:}" ;;
-    sqlite_gz)    echo "база SQLite, сжатая gzip" ;;
-    sqlite_plain) echo "база SQLite" ;;
-    tar_gz)       echo "архив каталога или тома (tar.gz)" ;;
-    db:unknown)   echo "формат не опознан ни платформой, ни поставщиком" ;;
+    db:*)         echo "a dump from DBMS '$DB_PROVIDER', format: ${KIND#db:}" ;;
+    sqlite_gz)    echo "a SQLite database, gzip-compressed" ;;
+    sqlite_plain) echo "a SQLite database" ;;
+    tar_gz)       echo "an archive of a directory or volume (tar.gz)" ;;
+    db:unknown)   echo "the format was recognised neither by the platform nor by the provider" ;;
   esac
 }
 
-# ------------------------------------------------------------------ проверка
+# ------------------------------------------------------------------ check
 
 if [ "$MODE" = check ]; then
   bytes=$(stat -c %s "$FILE" 2>/dev/null || stat -f %z "$FILE")
-  echo "Файл:   $FILE"
-  echo "Размер: $bytes б ($((bytes / 1024)) КиБ)"
-  echo "Тип:    $(human_kind)"
+  echo "File: $FILE"
+  echo "Size: $bytes B ($((bytes / 1024)) KiB)"
+  echo "Type: $(human_kind)"
   echo
 
   case "$KIND" in
     tar_gz)
-      echo "== Первые 20 записей архива"
+      echo "== The first 20 entries of the archive"
       tar -tzf "$FILE" | head -20
       ;;
     db:*)
-      # Показать, что внутри дампа, умеет только сам движок. Хук печатает это
-      # сам; платформе достаточно знать, что предпросмотр есть не всегда.
+      # Only the engine itself can show what is inside a dump. The hook prints
+      # that; all the platform needs to know is that a preview is not always
+      # available.
       db_hook inspect "${KIND#db:}" "$FILE" 2>/dev/null \
-        || echo "  (поставщик '$DB_PROVIDER' не умеет показывать содержимое этого дампа)"
+        || echo "  (provider '$DB_PROVIDER' cannot display the contents of this dump)"
       ;;
     sqlite_gz|sqlite_plain)
       tmp=$(mktemp)
@@ -205,73 +205,75 @@ if [ "$MODE" = check ]; then
       echo "== integrity_check"
       sqlite3 "$tmp" 'PRAGMA integrity_check;'
       echo
-      echo "== Таблицы и число строк"
+      echo "== Tables and row counts"
       while IFS= read -r t; do
         printf '  %-34s %s\n' "$t" "$(sqlite3 "$tmp" "SELECT count(*) FROM \"$t\";")"
       done < <(sqlite3 "$tmp" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
       ;;
   esac
   echo
-  echo "Проверка завершена, ничего не изменено."
+  echo "Check complete, nothing was changed."
   exit 0
 fi
 
-# --------------------------------------------------------------- применение
+# --------------------------------------------------------------- applying
 
-[ "$MODE" = apply ] || die "не указан режим (--list / --check / --apply)"
-[ -n "$TARGET" ] || die "не указана цель: --into <база или путь>"
+[ "$MODE" = apply ] || die "no mode given (--list / --check / --apply)"
+[ -n "$TARGET" ] || die "no target given: --into <database or path>"
 
-echo "Файл:   $FILE"
-echo "Тип:    $(human_kind)"
-echo "Цель:   $TARGET"
-[ "$CLEAN" -eq 1 ] && echo "Режим:  --clean — существующие объекты будут УДАЛЕНЫ"
+echo "File:   $FILE"
+echo "Type:   $(human_kind)"
+echo "Target: $TARGET"
+[ "$CLEAN" -eq 1 ] && echo "Mode:   --clean — existing objects will be DROPPED"
 echo
 
 if [ "$ASSUME_YES" -ne 1 ]; then
-  printf 'Восстановление изменит данные. Продолжить? [напечатайте: да] '
+  printf 'Restoring will change data. Continue? [type: yes] '
   read -r answer
-  [ "$answer" = "да" ] || { echo "Отменено."; exit 1; }
+  [ "$answer" = "yes" ] || { echo "Cancelled."; exit 1; }
 fi
 
 case "$KIND" in
   db:unknown)
-    die "формат файла не опознан. Проверьте, что файл расшифрован (.gpg этот скрипт не принимает) и не обрезан"
+    die "the file format was not recognised. Check that the file is decrypted (.gpg is not accepted here) and not truncated"
     ;;
 
   tar_gz)
-    # Автоматически НЕ раскладываем. Источники files: и volume: — это каталоги,
-    # в которые кто-то пишет прямо сейчас: распаковка поверх живого писателя
-    # даёт смесь старого и нового, причём молча. Кто именно пишет, платформа не
-    # знает: том может быть смонтирован в любой контейнер любого стека.
+    # NOT unpacked automatically. files: and volume: sources are directories
+    # something may be writing to right now: unpacking over a live writer gives
+    # a mixture of old and new, silently. The platform does not know who the
+    # writer is: a volume can be mounted into any container of any stack.
     #
-    # Поэтому печатаем готовую команду и останавливаемся. Это единственное
-    # место скрипта, где он отказывается доделать работу, и отказ намеренный.
-    echo "Это архив каталога или тома. Автоматически не раскладываю."
+    # So the ready-made command is printed and the script stops. This is the
+    # only place where it refuses to finish the job, and the refusal is
+    # deliberate.
+    echo "This is an archive of a directory or volume. Not unpacking it automatically."
     echo
-    echo "  1. остановите то, что пишет в '$TARGET' (./stack disable <стек> либо ./dc stop <сервис>)"
+    echo "  1. stop whatever writes to '$TARGET' (./stack disable <stack> or ./dc stop <service>)"
     echo "  2. tar -xzf $FILE -C $(dirname "$TARGET")"
-    echo "  3. поднимите обратно"
+    echo "  3. bring it back up"
     echo
-    echo "Содержимое: ./platform/bin/backup-restore.sh --check $FILE"
+    echo "Contents: ./platform/bin/backup-restore.sh --check $FILE"
     exit 1
     ;;
 
   db:*)
-    # Всё, что относится к СУБД, делает её поставщик: существует ли база, чем
-    # заливать дамп, нужен ли --clean. Платформа сюда не лезет — иначе этот
-    # скрипт пришлось бы форкать под каждый движок.
+    # Everything DBMS-related is done by its provider: whether the database
+    # exists, what loads a dump, whether --clean is needed. The platform stays
+    # out of it — otherwise this script would have to be forked per engine.
     db_hook restore "${KIND#db:}" "$TARGET" "$FILE" "$CLEAN"
-    echo "Готово: '$TARGET' восстановлена."
+    echo "Done: '$TARGET' has been restored."
     ;;
 
   sqlite_gz|sqlite_plain)
-    # Писать в базу под работающим приложением нельзя: оно держит её открытой и
-    # запишет поверх свои страницы. Останавливаем осознанно, руками.
+    # Writing into a database under a running application is not allowed: it
+    # holds the file open and will write its own pages over yours. Stopping is
+    # a deliberate, manual step.
     #
-    # Владельца базы ищем по декларациям, а не по списку имён контейнеров:
-    # захардкоженный список молча устаревает при переименовании сервиса — и
-    # тогда проверка пропускает восстановление поверх живого писателя, то есть
-    # ровно та поломка, от которой она защищает.
+    # The owner is found from declarations rather than a list of container
+    # names: a hardcoded list goes stale silently when a service is renamed —
+    # and then the check waves through a restore over a live writer, which is
+    # exactly the failure it guards against.
         owner=""
     while IFS= read -r st; do
       [ -n "$st" ] || continue
@@ -282,26 +284,26 @@ case "$KIND" in
     done < <(stacks_enabled 2>/dev/null)
 
     if [ -z "$owner" ]; then
-      echo "Предупреждение: ни один включённый стек не объявляет '$TARGET' как Backup_Sqlite." >&2
-      echo "  Проверить, что базу никто не держит открытой, придётся самостоятельно." >&2
+      echo "Warning: no enabled stack declares '$TARGET' as Backup_Sqlite." >&2
+      echo "  You will have to make sure nobody holds the database open yourself." >&2
     else
       while IFS= read -r svc; do
         [ -n "$svc" ] || continue
         while IFS= read -r cid; do
           [ -n "$cid" ] || continue
           [ "$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null)" = running ] || continue
-          die "контейнер '$(docker inspect -f '{{.Name}}' "$cid" | sed 's|^/||')' стека '$owner' работает.
-  Остановите стек и повторите:  ./scripts/stack.sh disable $owner"
+          die "container '$(docker inspect -f '{{.Name}}' "$cid" | sed 's|^/||')' of stack '$owner' is running.
+  Stop the stack and try again:  ./stack disable $owner"
         done < <(service_containers "$svc")
       done < <(stack_services "$owner" 2>/dev/null)
     fi
     if [ -f "$TARGET" ]; then
       backup_of_current="$TARGET.before-restore.$(date -u +%Y%m%dT%H%M%SZ)"
       cp "$TARGET" "$backup_of_current"
-      echo "Прежняя база сохранена: $backup_of_current"
+      echo "The previous database was saved as: $backup_of_current"
     fi
     if [ "$KIND" = sqlite_gz ]; then gunzip -c "$FILE" > "$TARGET"; else cp "$FILE" "$TARGET"; fi
     sqlite3 "$TARGET" 'PRAGMA integrity_check;'
-    echo "Готово: '$TARGET' восстановлена. Поднимите стек: ./scripts/stack.sh enable ${owner:-<стек>}"
+    echo "Done: '$TARGET' has been restored. Bring the stack back up: ./stack enable ${owner:-<stack>}"
     ;;
 esac
