@@ -1,63 +1,67 @@
 # stackyard
 
-Двор, где стоят стеки: платформа для одного хоста, на котором сосуществуют
-несколько независимых проектов, каждый в своём docker-стеке.
+A yard where stacks stand: a platform for a single host on which several
+independent projects live side by side, each in its own docker stack.
 
-Извлечено из двух работающих девбоксов. Настоящих машин здесь нет и быть не
-может: репозиторий публичный, а домены и состав стеков клиента в публичном
-репозитории — ровно та утечка, ради которой разделение и делалось. Каждая
-машина живёт своим приватным репозиторием.
+Extracted from two working devboxes. There are no real machines here and there
+cannot be: the repository is public, and a client's domains and stack list in a
+public repository are exactly the leak the split was made for. Every machine
+lives in its own private repository.
 
-В `tests/machines/` лежат две **синтетические** фикстуры — `alpha` (общий MySQL
-+ PHP) и `beta` (общий Postgres). Платформа считается общей ровно тогда, когда
-обе работают на ней без единой правки: разные СУБД, разные формы стеков, один
-движок.
+`tests/machines/` holds two **synthetic** fixtures — `alpha` (shared MySQL +
+PHP) and `beta` (shared Postgres). The platform counts as shared exactly when
+both run on it without a single edit: different DBMSes, different stack shapes,
+one engine.
 
-## Три слоя
+## Three layers
 
-| Слой | Что знает | Кому |
+| Layer | What it knows | Who gets it |
 |---|---|---|
-| `platform/` | движок: стеки, зависимости, nginx, TLS, systemd. Ни одной машины, ни одной СУБД, ни одного секрета | раздаётся |
-| `profiles/` | переиспользуемые стеки: `mysql`, `pg`, `redis`, `php-fpm` | ваш |
-| машина | сайты, `.env`, состояние — **свой репозиторий**, здесь его нет | приватный, per-client |
+| `platform/` | the engine: stacks, dependencies, nginx, TLS, systemd. No machine, no DBMS, no secret | distributed |
+| `profiles/` | reusable stacks: `mysql`, `pg`, `redis`, `php-fpm` | yours |
+| machine | sites, `.env`, state — **its own repository**, not here | private, per client |
 
-Разделение не косметическое. Платформа не содержит секретов **вообще** — иначе
-раздать её нельзя, а общий на всех клиентов ключ ACME или бакет бэкапа
-означает, что лимиты, доступ и дампы у клиентов общие.
+The split is not cosmetic. The platform contains no secrets **at all** —
+otherwise it cannot be distributed, and an ACME key or a backup bucket shared
+across clients means the rate limits, the access and the dumps are shared too.
 
-## Стек — это каталог
+## A stack is a directory
 
-Всё запускается через `./dc` машины, состав — одна строка `Enabled_Stacks` в
-её `.env-stacks`. Из неё выводятся compose-файлы, include'ы vhost'ов, домены
-сертификатов, юниты systemd и заказы баз.
+Everything runs through the machine's `./dc`; the composition is one
+`Enabled_Stacks` line in its `.env-stacks`. From that line follow the compose
+files, the vhost includes, the certificate domains, the systemd units and the
+database orders.
 
-**Стек объявляет каталог, содержащий `stack.conf`.** Наличие подкаталога —
-тоже объявление: есть `nginx/` — будет include, есть `systemd/` — встанут
-юниты, есть `scripts/health.sh` — `--check` спросит стек, жив ли он, есть
-`scripts/host-setup.sh` — у стека есть хостовая часть.
+**A stack is declared by a directory containing `stack.conf`.** The presence of
+a subdirectory is a declaration too: `nginx/` means an include will be made,
+`systemd/` means units will be installed, `scripts/health.sh` means `--check`
+will ask the stack whether it is alive, `scripts/host-setup.sh` means the stack
+has a host-side part.
 
-## Копировать или подключать
+## Copy or link
 
-Стеки ищутся в двух корнях, машинный первым:
+Stacks are looked up in two roots, the machine one first:
 
 ```
-machines/<имя>/stacks/         свои. Правятся свободно
-machines/<имя>/profile/stacks/ библиотека, приехавшая с профилем
+machines/<name>/stacks/         its own. Edited freely
+machines/<name>/profile/stacks/ the library that came with the profile
 ```
 
-**Подключён** — стек лежит только в профиле; обновление профиля приносит
-правки. **Скопирован** — `stack.conf` лежит в машинном `stacks/`, и машинная
-копия перекрывает профильную; обновления профиля её больше не касаются.
-Отцепиться — значит скопировать каталог целиком; половина копии стеком не
-становится, и видно это по одному `ls stacks/`, а не по записи в конфиге.
+**Linked** — the stack exists only in the profile; updating the profile brings
+the changes with it. **Copied** — `stack.conf` sits in the machine's `stacks/`,
+and the machine copy shadows the profile one; profile updates no longer touch
+it. Detaching means copying the whole directory; half a copy is not a stack,
+and you can see which it is from a single `ls stacks/`, not from an entry in a
+config file.
 
-`.env` стека **всегда** машинный, даже у профильного стека: секрет принадлежит
-машине, а профиль обновляется целиком и затёр бы его.
+A stack's `.env` is **always** the machine's, even for a profile stack: the
+secret belongs to the machine, and the profile is updated wholesale and would
+overwrite it.
 
-## Поставщик БД — роль, а не имя
+## The DB provider is a role, not a name
 
-Движок не знает слов «MySQL» и «Postgres». Он знает, что какой-то включённый
-стек объявил себя поставщиком:
+The engine does not know the words "MySQL" and "Postgres". It knows that some
+enabled stack declared itself a provider:
 
 ```sh
 # profiles/stacks/mysql/stack.conf
@@ -65,7 +69,7 @@ Provides_DB="Mysql"
 DB_Init_Service="mysql-initializer"
 ```
 
-Потребитель заказывает базу ключами с этим префиксом:
+A consumer orders a database with keys carrying that prefix:
 
 ```sh
 # machines/devbox6/stacks/timesheets/stack.conf
@@ -76,75 +80,78 @@ Mysql_Password="${Timesheets_DB_Password}"
 Mysql_Grants="SELECT,INSERT,UPDATE,DELETE"
 ```
 
-Значения — **ссылки** на `.env` стека, не копии. Машина на Postgres включает
-`pg` с `Provides_DB="Postgres"`, и ни одна строка платформы от этого не
-меняется. Что значат ключи сверх обязательных `DB`/`User`/`Password` — знает
-поставщик: `Grants` проверяет `profiles/stacks/mysql/scripts/check-decl.sh`,
-потому что список прав MySQL — это знание про MySQL, а не про платформу.
+The values are **references** into the stack's `.env`, not copies. A machine on
+Postgres enables `pg` with `Provides_DB="Postgres"`, and not one line of the
+platform changes. What the keys beyond the mandatory `DB`/`User`/`Password`
+mean is the provider's business: `Grants` is validated by
+`profiles/stacks/mysql/scripts/check-decl.sh`, because the list of MySQL
+privileges is knowledge about MySQL, not about the platform.
 
-## Работа с машиной
+## Working with a machine
 
 ```sh
 cd machines/devbox6
-./stack list           # что включено и что реально живо
-./stack --check        # декларации, домены, базы, upstream'ы, vhost'ы, юниты
-./stack enable <стек>  # контейнеры, потом vhost — порядок не случаен
-./stack sync           # привести nginx к манифесту
+./stack list           # what is enabled and what is actually alive
+./stack --check        # declarations, domains, databases, upstreams, vhosts, units
+./stack enable <stack> # containers first, then the vhost — the order matters
+./stack sync           # bring nginx in line with the manifest
 ./dc up -d
-sudo ./host-setup      # пакеты, заглушки сертификатов, таймеры, хостовая часть стеков
+sudo ./host-setup      # packages, certificate placeholders, timers, stack host parts
 ```
 
-## Состояние машины
+## Machine state
 
-`machines/<имя>/state/` — всё, что описывает конкретную машину и генерируется:
-сертификаты, `getssl-config`, `databases.yaml` (с паролями), `10-enabled.conf`,
-`nginx-static.generated.yaml`, `bin/getssl`. В git этого нет ни строчки.
+`machines/<name>/state/` is everything that describes this particular machine
+and is generated: certificates, `getssl-config`, `databases.yaml` (with
+passwords), `10-enabled.conf`, `nginx-static.generated.yaml`, `bin/getssl`.
+Not a line of it is in git.
 
-`getssl` там же и по той же причине: он не лежит копией в репозитории, а
-скачивается по `platform/getssl.lock` — закреплённая версия плюс sha256.
-Копия чужого скрипта под GPL-3 в публичном репозитории под MIT неудобна и
-юридически, и по существу: её правят на месте, и разойтись с upstream она
-успевает молча. Сумма нужна ещё и потому, что getssl умеет обновлять сам себя
-(`getssl -u` скачивает свежую версию и переписывает себя поверх); в юнитах
-стоит `-U`, отключающий даже проверку версии, а сумма ловит случай, когда `-u`
-всё-таки запустили руками.
+`getssl` lives there for the same reason: it is not vendored into the
+repository but downloaded per `platform/getssl.lock` — a pinned version plus a
+sha256. A copy of someone else's GPL-3 script inside a public MIT repository is
+awkward both legally and in substance: it gets edited in place, and it drifts
+from upstream silently. The checksum is also there because getssl can update
+itself (`getssl -u` downloads a fresh version and overwrites itself); the units
+pass `-U`, which disables even the version check, and the checksum catches the
+case where someone ran `-u` by hand anyway.
 
-    ./platform/bin/getssl-fetch.sh           # скачать закреплённый
-    ./platform/bin/getssl-fetch.sh --check   # сверить сумму, ничего не менять
-    ./platform/bin/getssl-fetch.sh --force   # вернуть закреплённый поверх
+    ./platform/bin/getssl-fetch.sh           # download the pinned version
+    ./platform/bin/getssl-fetch.sh --check   # verify the checksum, change nothing
+    ./platform/bin/getssl-fetch.sh --force   # put the pinned version back
 
-Отдельный каталог существует потому, что `platform/` и `profile/` — общие:
-в рабочем пространстве это симлинки, на машине вендоренные копии. Запись туда
-либо ломает соседнюю машину, либо пропадает при следующем обновлении.
+The separate directory exists because `platform/` and `profile/` are shared: in
+the workspace they are symlinks, on a machine they are vendored copies. Writing
+there either breaks a neighbouring machine or disappears at the next update.
 
-## Изоляция машин
+## Machine isolation
 
-Платформа и профиль уезжают на **каждую** машину, поэтому секрета в них быть не
-может вообще: он размножился бы по всем клиентам, и обнаружить это постфактум
-нечем. `certs.sh` отказывается работать, если `platform/getssl-config/account.key`
-существует.
+The platform and the profile ship to **every** machine, so a secret cannot live
+in them at all: it would be copied to every client, and there would be nothing
+to detect it with after the fact. `certs.sh` refuses to run if
+`platform/getssl-config/account.key` exists.
 
-Проверяет изоляцию `./bin/audit-isolation.sh`, и живёт он **в рабочем
-пространстве, а не на машине**: машина по определению не видит соседей, и
-общий на всех бакет для неё выглядит ровно как правильно настроенный свой.
-Он ищет:
+Isolation is checked by `./bin/audit-isolation.sh`, and it lives **in the
+workspace, not on a machine**: a machine by definition cannot see its
+neighbours, and a bucket shared by everyone looks to it exactly like a properly
+configured one of its own. It looks for:
 
-- секреты в `platform/` и `profiles/`;
-- совпадение `Platform_Network`, `Platform_Deploy_Dir`, бакета и префикса
-  бэкапа, GPG-получателя, токена и чата оповещений у двух машин;
-- один и тот же пароль под **разными** ключами у разных машин — утёк он у
-  одной, а достанет обе;
-- один ключ ACME-аккаунта у двух машин: это общие лимиты Let's Encrypt и общий
-  доступ на отзыв чужих сертификатов.
+- secrets in `platform/` and `profiles/`;
+- the same `Platform_Network`, `Platform_Deploy_Dir`, backup bucket and prefix,
+  GPG recipient, notification token or chat on two machines;
+- the same password under **different** keys on different machines — leak it on
+  one and it opens both;
+- one ACME account key on two machines: that means shared Let's Encrypt limits
+  and the ability to revoke the other's certificates.
 
-Честная оговорка: домены всё равно публичны через Certificate Transparency в
-момент выпуска. Достигается «на машине клиента A нет инвентаря клиента B», а не
-«домены секретны».
+An honest caveat: domains are public anyway through Certificate Transparency at
+issue time. What is achieved is "client A's machine holds no inventory of
+client B", not "domains are secret".
 
-## Как машина получает платформу
+## How a machine gets the platform
 
-Платформы в git машины **нет**. В репозитории машины лежит только `bootstrap`
-(один файл, чистый bash) и `stackyard.lock` с закреплённой версией:
+The platform is **not** in the machine's git. The machine's repository holds
+only `bootstrap` (one file, plain bash) and `stackyard.lock` with the pinned
+version:
 
 ```
 repo=https://github.com/apankov/stackyard.git
@@ -152,49 +159,50 @@ version=v0.3.0
 commit=019829962cd0be920ebfd59fa675da820652c51a
 ```
 
-`./bootstrap` забирает её в `.stackyard/` (в git не лежит) и подключает как
-`platform/` и `profile/`. Это та же механика, что у `terraform init`,
-`helm dependency update`, `ansible-galaxy install -r` и `npm ci`: в репозитории
-объявление версии, а не копия кода.
+`./bootstrap` fetches it into `.stackyard/` (not in git) and links it in as
+`platform/` and `profile/`. This is the same mechanic as `terraform init`,
+`helm dependency update`, `ansible-galaxy install -r` and `npm ci`: the
+repository declares a version rather than carrying a copy of the code.
 
-Закрепление по **коммиту**, а не по хешу архива: автоматические архивы GitHub
-байт-стабильными не гарантированы, а коммит неизменен по определению. Если тег
-передвинули, `bootstrap` откажется работать, а не подсунет неутверждённый код.
+The pin is by **commit**, not by an archive hash: GitHub's automatic archives
+are not guaranteed byte-stable, while a commit is immutable by definition. If a
+tag was moved, `bootstrap` refuses to run rather than handing over unapproved
+code.
 
-### Развернуть машину
+### Deploy a machine
 
 ```sh
-# на ноутбуке
+# on the laptop
 cd ~/dev/stackyard
 ./bin/new-machine.sh ~/dev/machines/client-acme
 cd ~/dev/machines/client-acme && git init
-$EDITOR .env.example .env-stacks.example   # затем cp без .example
-# описать сайты в stacks/, закоммитить, запушить
+$EDITOR .env.example .env-stacks.example   # then cp without .example
+# describe the sites in stacks/, commit, push
 
-# на сервере
-git clone <репозиторий машины> /mnt/data/client-acme
+# on the server
+git clone <the machine's repository> /mnt/data/client-acme
 cd /mnt/data/client-acme
 ./bootstrap
 sudo ./host-setup
-./stack enable mysql php-fpm сайт
+./stack enable mysql php-fpm site
 ```
 
-### Обновить платформу на машине
+### Update the platform on a machine
 
 ```sh
 cd ~/dev/stackyard && git pull
-./bin/pin.sh ~/dev/machines/client-acme   # покажет дифф платформы, перепишет lock
-cd ~/dev/machines/client-acme && git commit -am "платформа 0.3.0" && git push
-# на сервере: git pull && ./bootstrap && ./stack --check
+./bin/pin.sh ~/dev/machines/client-acme   # shows the platform diff, rewrites the lock
+cd ~/dev/machines/client-acme && git commit -am "platform 0.3.0" && git push
+# on the server: git pull && ./bootstrap && ./stack --check
 ```
 
-В репозитории машины меняются **две строки**, а не шестьдесят файлов. Откат —
-`./bin/pin.sh <машина> --version v0.2.0`.
+**Two lines** change in the machine's repository, not sixty files. Rolling back
+is `./bin/pin.sh <machine> --version v0.2.0`.
 
-Команды «обновить всех» нет намеренно: клиент, которого не трогали, работает на
-своей версии сколько угодно долго.
+There is deliberately no "update everyone" command: a client nobody touched
+keeps running its own version for as long as it likes.
 
-### Кто на какой версии
+### Who is on which version
 
 ```sh
 ./bin/fleet.sh ~/dev/machines/*
@@ -202,57 +210,60 @@ cd ~/dev/machines/client-acme && git commit -am "платформа 0.3.0" && gi
 ```
 
 ```
-МАШИНА        ВЕРСИЯ  ОТСТАЁТ  КОММИТ
-client-acme   v0.3.0  нет      019829962cd0
-devbox6       v0.2.0  1        a6dbe464c8bd
+MACHINE       VERSION  BEHIND  COMMIT
+client-acme   v0.3.0   no      019829962cd0
+devbox6       v0.2.0   1       a6dbe464c8bd
 ```
 
-Обе команды принимают пути; без аргументов читают `~/.stackyard-fleet` по
-строке на путь.
+Both commands take paths; with no arguments they read `~/.stackyard-fleet`, one
+path per line.
 
-Существует ради одного вопроса, на который иначе нет быстрого ответа: доехал ли
-фикс до всех. Отставание считается по коммитам, **затрагивающим платформу** —
-машина, отставшая на двадцать правок README, не отстала ни на что.
+They exist for one question that otherwise has no quick answer: did the fix
+reach everyone. Lag is counted in commits that **touch the platform** — a
+machine twenty README commits behind is behind on nothing.
 
-### Автономный режим
+### Offline mode
 
-`STACKYARD_SOURCE=/путь/к/stackyard ./bootstrap` берёт локальный каталог вместо
-сети — для разработки платформы и для установки без интернета. Расхождение с
-`lock` при этом не отказ, но говорится вслух: иначе машина работала бы не на
-том, что записано, и по `lock` этого не увидеть.
+`STACKYARD_SOURCE=/path/to/stackyard ./bootstrap` takes a local directory
+instead of the network — for developing the platform and for installing without
+internet. A divergence from the `lock` is not a refusal in that mode, but it is
+said out loud: otherwise the machine would be running something other than what
+is written down, and the `lock` would not show it.
 
-`bin/vendor.sh` (копия платформы прямо в репозиторий машины) остался как
-аварийный режим для клиента, которому нужен полностью автономный репозиторий.
-`check-vendor.sh` осмыслен только в нём.
+`bin/vendor.sh` (a copy of the platform straight into the machine's repository)
+remains as an emergency mode for a client who needs a fully self-contained
+repository. `check-vendor.sh` only makes sense there.
 
-## Вендоринг: два режима
+## Vendoring: two modes
 
 ```sh
-./bin/vendor.sh <машина>            # заменить симлинки копиями, записать .vendor.lock
-./bin/vendor.sh <машина> --unlink   # вернуть симлинки (режим разработки)
+./bin/vendor.sh <machine>            # replace the symlinks with copies, write .vendor.lock
+./bin/vendor.sh <machine> --unlink   # restore the symlinks (development mode)
 ```
 
-**Симлинк** — рабочее пространство: обе машины гоняют байт в байт одни файлы,
-расхождение невозможно по построению. Так проверяется, что платформа
-действительно общая.
+**Symlink** is the workspace: both machines run byte-for-byte the same files,
+so divergence is impossible by construction. That is how the platform is proven
+to be shared.
 
-**Копия** — то, что уезжает на машину. Репозиторий машины обязан быть
-самодостаточным: один `clone`, без доступа ко второму репозиторию, без
-`--recursive`, без забытого коммита указателя. Машина работает на той версии,
-с которой её вендорили, — правка платформы в рабочем пространстве до неё не
-доезжает, пока не повторить `vendor.sh`.
+**Copy** is what ships to a machine. A machine's repository must be
+self-contained: one `clone`, with no access to a second repository, no
+`--recursive`, no forgotten pointer commit. The machine runs the version it was
+vendored with — a platform edit in the workspace does not reach it until
+`vendor.sh` is run again.
 
-Цена копии — нельзя с одного взгляда понять, правил ли кто-то платформу на
-месте. Поэтому рядом лежит `.vendor.lock` с версиями и суммами файлов, а
-`platform/bin/check-vendor.sh` сверяет их и ловит все три вида расхождения:
-файл изменён, файл пропал, файл появился сверх манифеста. Проверка стоит
-первой в `host-setup --check`: если платформа не та, всё остальное проверяется
-не тем кодом.
+The price of a copy is that you cannot tell at a glance whether someone edited
+the platform in place. So `.vendor.lock` sits next to it with the versions and
+file checksums, and `platform/bin/check-vendor.sh` verifies them and catches
+all three kinds of divergence: a file changed, a file gone, a file present
+beyond the manifest. That check comes first in `host-setup --check`: if the
+platform is not the right one, everything else is being checked by the wrong
+code.
 
-В ЭТОМ репозитории вендоренные копии в git не лежат — здесь они дубликат. В
-репозитории клиентской машины наоборот: копия и есть то, ради чего вендоринг
-существует, и коммитится вместе с `.vendor.lock`.
+In THIS repository the vendored copies are not in git — here they are a
+duplicate. In a client machine's repository it is the other way round: the copy
+is the whole point of vendoring, and it is committed together with
+`.vendor.lock`.
 
-## Что ещё не сделано
+## What is not done yet
 
 `docs/devel/plans/extraction-backlog.md`.
