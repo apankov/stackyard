@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
-# Завести репозиторий новой машины.
+# Create a new machine's repository.
 #
-# Машина — ОТДЕЛЬНЫЙ репозиторий, приватный. В stackyard её нет и быть не
-# может: stackyard публичный, и домены с именами стеков одного клиента не
-# должны лежать там, где их прочитает другой.
+# A machine is a SEPARATE, private repository. It is not in stackyard and
+# cannot be: stackyard is public, and one client's domains and stack names must
+# not sit where another client can read them.
 #
-# В машину кладётся: скелет каталогов, обёртки, образцы .env, .gitignore и
-# bootstrap с закреплённой версией stackyard. Сама платформа — НЕ кладётся:
-# её приносит bootstrap и держит в .stackyard/, вне git.
+# What goes into a machine: the directory skeleton, the wrappers, the .env
+# examples, a .gitignore and a bootstrap pinned to a stackyard version. The
+# platform itself is NOT placed there: bootstrap fetches it and keeps it in
+# .stackyard/, outside git.
 #
 #   ./bin/new-machine.sh ~/dev/machines/client-acme
 #   ./bin/new-machine.sh ~/dev/machines/client-acme --repo https://github.com/me/stackyard.git
@@ -20,15 +21,15 @@ DEST=""; REPO="https://github.com/apankov/stackyard.git"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    # ${2-}, а не "$2": под set -u забытое значение даёт «$2: unbound
-    # variable» вместо внятного «--repo требует значение».
-    --repo) REPO="${2-}"; [ -n "$REPO" ] || { echo "Ошибка: --repo требует значение" >&2; exit 2; }; shift 2 ;;
-    -*) echo "Неизвестный аргумент: $1" >&2; exit 2 ;;
+    # ${2-} rather than "$2": under set -u a forgotten value gives "$2: unbound
+    # variable" instead of a clear "--repo requires a value".
+    --repo) REPO="${2-}"; [ -n "$REPO" ] || { echo "Error: --repo requires a value" >&2; exit 2; }; shift 2 ;;
+    -*) echo "Unknown argument: $1" >&2; exit 2 ;;
     *)  DEST="$1"; shift ;;
   esac
 done
-[ -n "$DEST" ] || { echo "Использование: $0 <путь-к-новой-машине> [--repo <url>]" >&2; exit 2; }
-[ -e "$DEST" ] && { echo "Ошибка: $DEST уже существует" >&2; exit 2; }
+[ -n "$DEST" ] || { echo "Usage: $0 <path-to-new-machine> [--repo <url>]" >&2; exit 2; }
+[ -e "$DEST" ] && { echo "Error: $DEST already exists" >&2; exit 2; }
 
 NAME="$(basename "$DEST")"
 VERSION="v$(cat "$ROOT/platform/VERSION")"
@@ -37,9 +38,9 @@ COMMIT="$( cd "$ROOT" && git rev-parse HEAD )"
 mkdir -p "$DEST"/{stacks,state/htpasswd,state/certs,dumps,gpg,nginx}
 touch "$DEST/state/.keepit" "$DEST/dumps/.keepit" "$DEST/gpg/.keepit" "$DEST/nginx/.keepit"
 
-# Образцы бэкапа и оповещений. Файлы отдельные от .env намеренно: они НЕ входят
-# в список --env-file docker-compose.sh, и лишний обязательный env-файл был бы
-# ещё одним способом уронить все compose-команды разом.
+# The backup and notification examples. Separate files from .env on purpose:
+# they are NOT in docker-compose.sh's --env-file list, and one more mandatory
+# env file would be another way to break every compose command at once.
 cp "$ROOT/templates/machine/.env-backup.example" "$DEST/.env-backup.example"
 cp "$ROOT/templates/machine/.env-notify.example" "$DEST/.env-notify.example"
 
@@ -47,21 +48,21 @@ cp "$ROOT/templates/machine/bootstrap" "$DEST/bootstrap"
 chmod +x "$DEST/bootstrap"
 
 cat > "$DEST/stackyard.lock" <<EOF
-# На какой версии stackyard работает эта машина.
+# Which stackyard version this machine runs.
 #
-# Закрепление по КОММИТУ, а не по хешу архива: автоматические архивы GitHub
-# байт-стабильными не гарантированы, а коммит неизменен по определению.
-# Тег нужен только чтобы клонировать дешёво; если его передвинут, bootstrap
-# откажется работать, а не подсунет чужой код.
+# Pinned by COMMIT rather than by an archive hash: automatically generated
+# archives are not guaranteed byte-stable, while a commit is immutable by
+# definition. The tag only makes cloning cheap; if someone moves it, bootstrap
+# refuses to work rather than substituting someone else's code.
 #
-# Обновить: ./bin/pin.sh <эта-машина> из stackyard, затем ./bootstrap здесь.
+# To update: ./bin/pin.sh <this-machine> from stackyard, then ./bootstrap here.
 repo=$REPO
 version=$VERSION
 commit=$COMMIT
 EOF
 
-# Обёртки. Три строки каждая, и они единственная причина, по которой из корня
-# машины можно набрать ./stack вместо полного пути внутрь платформы.
+# The wrappers. A few lines each, and the only reason ./stack can be typed from
+# the machine root instead of a full path into the platform.
 while IFS=: read -r name target; do
   case "$name" in ''|\#*) continue ;; esac
   sed "s/@TARGET@/$target/g" "$ROOT/templates/machine/wrapper" > "$DEST/$name"
@@ -69,14 +70,14 @@ while IFS=: read -r name target; do
 done < "$ROOT/templates/machine/wrappers"
 
 cat > "$DEST/.gitignore" <<'EOF'
-# Платформа. В git машины её нет намеренно: она приезжает по stackyard.lock,
-# и копия в репозитории означала бы второй источник правды о том, какой код
-# на машине работает.
+# The platform. Deliberately absent from a machine's git: it arrives according
+# to stackyard.lock, and a copy in the repository would be a second source of
+# truth about which code the machine runs.
 /.stackyard/
 /platform
 /profile
 
-# Секреты и состояние машины.
+# Secrets and machine state.
 .env
 .env-stacks
 .env-backup
@@ -94,53 +95,53 @@ dumps/*
 EOF
 
 cat > "$DEST/.env.example" <<EOF
-# Платформенное. Загружается всегда, для любой compose-команды.
+# Platform-level values. Loaded always, for every compose command.
 #   cp .env.example .env && chmod 600 .env
 
-# Куда развёрнут ЭТОТ репозиторий на сервере.
+# Where THIS repository is deployed on the server.
 Platform_Deploy_Dir=/mnt/data/$NAME
-# Docroot'ы сайтов, вне репозитория.
+# The sites' document roots, outside the repository.
 Platform_Vhosts_Dir=/mnt/data/vhosts
 Platform_Vhosts_Mount=/var/www/vhosts
-# Имя docker-сети. Своё у каждой машины — audit-isolation это проверяет.
+# The docker network's name. Unique per machine — audit-isolation checks that.
 Platform_Network=$NAME-net
-# Отдельный том с данными. Пусто, если такого тома нет.
+# A separate data volume. Empty if there is no such volume.
 Platform_Data_Mount=/mnt/data
 EOF
 
 cat > "$DEST/.env-stacks.example" <<'EOF'
-# Какие стеки включены. Единственный источник правды о составе машины.
-# Стеки берутся из profile/stacks (общие) и stacks/ (свои).
+# Which stacks are enabled. The single source of truth about a machine's
+# composition. Stacks come from profile/stacks (shared) and stacks/ (its own).
 Enabled_Stacks=""
 EOF
 
 cat > "$DEST/README.md" <<EOF
 # $NAME
 
-Машина на stackyard. Платформа в git не лежит — её приносит \`./bootstrap\`
-по версии из \`stackyard.lock\`.
+A stackyard machine. The platform is not kept in git — \`./bootstrap\` fetches
+it at the version recorded in \`stackyard.lock\`.
 
-## Развернуть
+## Deploy
 
 \`\`\`sh
-git clone <этот репозиторий> /mnt/data/$NAME
+git clone <this repository> /mnt/data/$NAME
 cd /mnt/data/$NAME
-./bootstrap                     # платформа $VERSION
+./bootstrap                     # platform $VERSION
 cp .env.example .env && \$EDITOR .env
 cp .env-stacks.example .env-stacks && \$EDITOR .env-stacks
 sudo ./host-setup
-./stack enable <стеки>
+./stack enable <stacks>
 \`\`\`
 
-## Обновить платформу
+## Update the platform
 
-Из stackyard на ноутбуке: \`./bin/pin.sh <путь-к-этой-машине>\`, коммит здесь,
-на сервере \`git pull && ./bootstrap && ./stack --check\`.
+From stackyard on your laptop: \`./bin/pin.sh <path-to-this-machine>\`, commit
+here, then on the server \`git pull && ./bootstrap && ./stack --check\`.
 EOF
 
-echo "Машина заведена: $DEST"
+echo "Machine created: $DEST"
 echo "  stackyard: $VERSION ($COMMIT)"
 echo
-echo "Дальше:"
+echo "Next:"
 echo "  cd $DEST && git init && ./bootstrap"
-echo "  заполнить .env и .env-stacks, описать стеки в stacks/"
+echo "  fill in .env and .env-stacks, describe the stacks in stacks/"
