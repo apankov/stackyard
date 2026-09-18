@@ -18,9 +18,9 @@ What is left in this area:
   `notify.sh` arrive, the checks will already be in place, and that is the
   right order: a check written after an incident is written from the traces of
   one case.
-- **In devbox6 `account.key` is still in git.** The fix belongs there, not
-  here: untrack plus, properly, rotating the account itself — the key is in the
-  history.
+- **On the first source machine `account.key` is still in git.** The fix
+  belongs in that machine's repository, not here: untrack plus, properly,
+  rotating the account itself — the key is in the history.
 
 An honest caveat worth writing into the product promise: domains are public
 anyway through Certificate Transparency at certificate issue time. What
@@ -40,7 +40,7 @@ isolation achieves is "client A's machine holds no inventory of client B", not
   reading this repository alone is enough, with no references to any earlier
   project.
 
-## C. Porting from devbox-asstnt
+## C. Porting from the second source machine
 
 **Done:** `backup.sh`, `check-backups.sh`, `backup-restore.sh`, `notify.sh`,
 `watch-host.sh` and the `devbox-*` units. Knowledge of a specific DBMS was
@@ -107,9 +107,9 @@ emits progress dots. The terminal is not silent.
 Also fixed: **A9/A6/A7** — three lying or dead checks.
 
 Left from the report, in order: ~~A9~~ **A15** (`00-limits.conf` carried over
-from devbox6 into the platform — the zones are not the ones asstnt and ledger
-use, so porting such a machine gives `unknown limit_conn_zone` and a crash
-loop), **A16** (lost `http2 on`), **A10-A13** and block **B**.
+from one source machine into the platform — the zones are not the ones the
+other two use, so porting such a machine gives `unknown limit_conn_zone` and a
+crash loop), **A16** (lost `http2 on`), **A10-A13** and block **B**.
 
 **C5 and C6 are fixed.** The `# shellcheck source=` directives were brought to
 the repository-root form — shellcheck resolves them from the working directory,
@@ -152,8 +152,8 @@ the declared version. A platform that has silently diverged looks healthy.
 
 ## E. Small things found by the extraction
 
-- `stacks/tokensale/compose.yaml` (the asstnt machine) — `MARIADB_ROOT_PASSWORD`
-  in plain text, against the rule "secrets only in `.env`".
+- One source machine's stack had `MARIADB_ROOT_PASSWORD` in its compose.yaml in
+  plain text, against the rule "secrets only in `.env`".
 - `.env-backup.example` there refers to `env/gpg/...` — the path lagged behind
   the move to `platform/`.
 - Both machines still carry commented-out blocks of earlier service variants.

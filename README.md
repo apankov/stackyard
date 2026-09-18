@@ -72,7 +72,7 @@ DB_Init_Service="mysql-initializer"
 A consumer orders a database with keys carrying that prefix:
 
 ```sh
-# machines/devbox6/stacks/timesheets/stack.conf
+# machines/client-acme/stacks/timesheets/stack.conf
 Requires="mysql php-fpm"
 Mysql_DB="${Timesheets_DB_Name}"
 Mysql_User="${Timesheets_DB_User}"
@@ -90,7 +90,7 @@ privileges is knowledge about MySQL, not about the platform.
 ## Working with a machine
 
 ```sh
-cd machines/devbox6
+cd machines/client-acme
 ./stack list           # what is enabled and what is actually alive
 ./stack --check        # declarations, domains, databases, upstreams, vhosts, units
 ./stack enable <stack> # containers first, then the vhost — the order matters
@@ -212,7 +212,7 @@ keeps running its own version for as long as it likes.
 ```
 MACHINE       VERSION  BEHIND  COMMIT
 client-acme   v0.3.0   no      019829962cd0
-devbox6       v0.2.0   1       a6dbe464c8bd
+client-beta   v0.2.0   1       a6dbe464c8bd
 ```
 
 Both commands take paths; with no arguments they read `~/.stackyard-fleet`, one

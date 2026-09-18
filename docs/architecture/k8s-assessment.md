@@ -1,8 +1,8 @@
 # Should the machines move to Kubernetes
 
-Assessed 2026-09-15. The question was put like this: could `devbox6`,
-`devbox-asstnt` and `ledger-devbox` be run through k8s on small machines, what
-would we gain and lose, and what can be taken from the way k8s is designed.
+Assessed 2026-09-15. The question was put like this: could the three machines
+this platform was extracted from be run through k8s on small hosts, what would
+we gain and lose, and what can be taken from the way k8s is designed.
 
 Short answer: **do not move**, but several ideas from its design are worth
 taking, and they are listed at the end — that is the main value of this note.
@@ -10,16 +10,15 @@ taking, and they are listed at the end — that is the main value of this note.
 ## The facts everything rests on
 
 All three machines are of one class: Amazon Linux, **~1 GB RAM, 25 GB disk**.
-`devbox-asstnt` is documented at ~916 MB, of which **~200 MB is free** with
+The second of them is documented at ~916 MB, of which **~200 MB is free** with
 every stack up.
 
-`ledger-devbox` at the time of the assessment was a copy of the `devbox-asstnt`
+The third machine at the time of the assessment was a copy of the second one's
 engine that had drifted by 430 lines in `lib-stacks.sh`, 138 in `lib-env.sh`
-and 185 in `stack.sh`. Its `CLAUDE.md` meanwhile described the stacks
-`sanya-next` and `bod-assistant-2`, which do not exist on that machine: the
-copy dragged someone else's documentation along with it. That is not an
-argument for or against k8s, but it is proof that copies drifting is not a
-hypothesis.
+and 185 in `stack.sh`. Its own documentation meanwhile described two stacks
+that do not exist on that machine at all: the copy dragged someone else's
+documentation along with it. That is not an argument for or against k8s, but it
+is proof that copies drifting is not a hypothesis.
 
 ## Would it fit
 
@@ -136,7 +135,7 @@ Ideas 1-3 come first in the queue: the first fixes real pain on these machines,
 the third closes the hole in fleet updates. Ideas 4-6 are cheaper to discuss
 once we have decided how many machines we serve.
 
-`ledger-devbox` is more useful seen not as a third machine but as the first
+The third machine is more useful seen not as another machine but as the first
 piece of evidence: it drifted before it even started working. Whatever
 mechanism we choose is meaningfully tested on it — can we bring it back to the
 shared engine without losing what was deliberately done there.

@@ -19,8 +19,9 @@ client. The requirements everything follows from:
    the fewer external dependencies its deployment has, the better.
 3. **Divergence must not be silent.** The original problem was stated exactly
    that way: "everything is about to start drifting apart". By the time of the
-   assessment it already had — `ledger-devbox` had drifted hundreds of lines
-   from the reference before it even started working.
+   assessment it already had — a third machine, set up by copying the engine
+   from one of the first two, had drifted hundreds of lines from the reference
+   before it even started working.
 4. **Fleet visibility.** "Did the fix reach every machine" must have a quick
    answer.
 
