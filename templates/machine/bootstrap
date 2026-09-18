@@ -129,6 +129,29 @@ done
   exit 1
 }
 
+# The machine's own step, once the platform is in place.
+#
+# It lives in a separate file because THIS one is a platform file: ./bin/pin.sh
+# overwrites bootstrap from the template whenever they differ, so machine
+# specific code added here would disappear at the next platform update without
+# a word. bootstrap.local belongs to the machine and nobody rewrites it.
+#
+# Anything a particular machine has to fetch or prepare before host-setup goes
+# there: a vendored toolkit pulled from its own repository, a checkout of an
+# application, a directory only this machine needs.
+#
+# A failure is reported but not fatal, and the exit code of bootstrap keeps
+# answering for the platform alone: the platform is already installed by this
+# point, and making an optional machine step able to fail the install would
+# mean a machine that cannot bootstrap because a side repository is down.
+if [ -x "$ROOT/bootstrap.local" ]; then
+  echo
+  echo "Machine step: ./bootstrap.local"
+  ( cd "$ROOT" && ./bootstrap.local ) || echo "WARNING: bootstrap.local exited with $?" >&2
+elif [ -f "$ROOT/bootstrap.local" ]; then
+  echo "WARNING: $ROOT/bootstrap.local is not executable — skipped (chmod +x)" >&2
+fi
+
 # The .stackyard directory was replaced WHOLESALE (rm -rf above), and
 # platform/ is a symlink into it. A container started before that is left
 # bind-mounted onto a deleted directory: the path in docker inspect is

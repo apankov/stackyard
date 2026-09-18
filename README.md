@@ -169,6 +169,14 @@ are not guaranteed byte-stable, while a commit is immutable by definition. If a
 tag was moved, `bootstrap` refuses to run rather than handing over unapproved
 code.
 
+When the platform is in place, `bootstrap` runs `./bootstrap.local` if the
+machine has one. That is where a machine puts what only it needs fetched — a
+toolkit pulled from its own repository, a checkout of an application. It is a
+separate file because `bootstrap` itself is a platform file that `./bin/pin.sh`
+overwrites from the template: machine-specific code inside it would disappear
+at the next update without a word. A failure there is reported and does not
+fail the install — the platform is already installed by that point.
+
 ### Deploy a machine
 
 ```sh
