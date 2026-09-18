@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
-# Сверка вендоренных слоёв с .vendor.lock: та ли версия платформы стоит на
-# машине и не правил ли её кто-нибудь на месте.
+# Comparing the vendored layers against .vendor.lock: is the platform on this
+# machine the version it claims, and has anyone edited it in place?
 #
-# Зачем это нужно отдельной проверкой. Вендорная копия удобна тем, что машина
-# самодостаточна, и опасна ровно тем же: правка платформы прямо на машине
-# работает, выглядит нормально и исчезает при следующем обновлении слоя. Между
-# правкой и пропажей проходят недели, и связать одно с другим уже некому.
+# Why this needs a check of its own. A vendored copy is convenient because the
+# machine is self-contained, and dangerous for exactly the same reason: editing
+# the platform directly on the machine works, looks normal, and disappears at
+# the next update of that layer. Weeks pass between the edit and its
+# disappearance, and by then nobody connects the two.
 #
-#   ./platform/bin/check-vendor.sh   # ничего не меняет, ненулевой код при расхождении
+#   ./platform/bin/check-vendor.sh   # changes nothing, non-zero exit on a mismatch
 
 set -uo pipefail
 
@@ -28,7 +29,7 @@ fi
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 LOCK="$ROOT_DIR/.vendor.lock"
 
-# Нужен ровно ради sha256_file: голый `shasum` есть не везде.
+# Needed purely for sha256_file: a bare `shasum` is not available everywhere.
 # shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 
@@ -37,31 +38,32 @@ ok()   { printf '  [ok]   %s\n' "$1"; }
 warn() { printf '  [!]    %s\n' "$1"; }
 bad()  { printf '  [FAIL] %s\n' "$1"; problems=$((problems + 1)); }
 
-# Режим разработки: слои подключены симлинками в рабочее пространство. Тогда
-# сверять нечего — они и есть источник, разойтись не с чем.
+# Development mode: the layers are symlinked into the workspace. Then there is
+# nothing to compare — they ARE the source, and nothing can drift from it.
 if [ -L "$ROOT_DIR/platform" ]; then
-  ok "platform подключена симлинком — режим разработки, вендорной копии нет"
-  [ -f "$LOCK" ] && warn ".vendor.lock остался от вендорной копии — удалите, он вводит в заблуждение"
+  ok "platform is a symlink — development mode, there is no vendored copy"
+  [ -f "$LOCK" ] && warn ".vendor.lock is left over from a vendored copy — remove it, it is misleading"
   exit 0
 fi
 
 if [ ! -f "$LOCK" ]; then
-  bad "нет .vendor.lock — неизвестно, какой версией платформы пользуется машина"
-  echo "         Завести: ./bin/vendor.sh <машина> из рабочего пространства" >&2
+  bad "no .vendor.lock — it is unknown which platform version this machine uses"
+  echo "         Create it with: ./bin/vendor.sh <machine> from the workspace" >&2
   exit 1
 fi
 
-ok "платформа $(grep '^platform_version=' "$LOCK" | cut -d= -f2), профиль $(grep '^profile_version=' "$LOCK" | cut -d= -f2)"
+ok "platform $(grep '^platform_version=' "$LOCK" | cut -d= -f2), profile $(grep '^profile_version=' "$LOCK" | cut -d= -f2)"
 
-# Сверяем суммы. Читаем из lock, а не пересчитываем «как в vendor.sh»: вторая
-# копия формулы разъезжается с первой молча, и проверка начинает докладывать о
-# расхождении там, где его нет, — после чего её перестают читать.
-# Инструмент проверяем ОДИН раз и до цикла. Иначе на каждый файл печатается и
-# ошибка «нечем считать», и [FAIL] «изменён на месте»: отчёт на сотню строк, в
-# котором настоящая причина стоит первой строкой и в нём тонет.
+# Comparing checksums. They are read from the lock rather than recomputed "the
+# way vendor.sh does it": a second copy of the formula drifts from the first
+# silently, and the check starts reporting a mismatch where there is none —
+# after which it stops being read.
+# The tool is checked ONCE, before the loop. Otherwise every file produces both
+# a "nothing to compute checksums with" error and a [FAIL] "edited in place": a
+# hundred-line report in which the real cause is the first line and drowns.
 sha256_file /dev/null >/dev/null || {
-  echo "Ошибка: проверить вендорную копию нечем." >&2
-  echo "  Поставьте coreutils (sha256sum) или perl (shasum)." >&2
+  echo "Error: nothing available to verify the vendored copy with." >&2
+  echo "  Install coreutils (sha256sum) or perl (shasum)." >&2
   exit 2
 }
 
@@ -71,28 +73,28 @@ while read -r sum path; do
   [ -n "${path:-}" ] || continue
   f="$ROOT_DIR/$path"
   if [ ! -f "$f" ]; then
-    bad "файл пропал: $path"; missing=$((missing + 1)); continue
+    bad "file is gone: $path"; missing=$((missing + 1)); continue
   fi
   if [ "$(sha256_file "$f")" != "$sum" ]; then
-    bad "изменён на месте: $path"; changed=$((changed + 1))
+    bad "edited in place: $path"; changed=$((changed + 1))
   fi
 done < "$LOCK"
 
-# Лишние файлы: слой мог обрасти чем-то, чего в манифесте нет. Это тоже правка
-# на месте, только с другой стороны.
+# Extra files: the layer may have grown something the manifest does not list.
+# That is an in-place edit too, from the other direction.
 for layer in platform profile; do
   [ -d "$ROOT_DIR/$layer" ] || continue
   while IFS= read -r f; do
     rel="$layer/${f#./}"
-    grep -qF "  $rel" "$LOCK" || bad "файл вне манифеста: $rel"
+    grep -qF "  $rel" "$LOCK" || bad "file outside the manifest: $rel"
   done < <(cd "$ROOT_DIR/$layer" && find . -type f -not -name '.DS_Store')
 done
 
 if [ "$problems" -eq 0 ]; then
-  echo "  Вендоренные слои соответствуют .vendor.lock."
+  echo "  The vendored layers match .vendor.lock."
   exit 0
 fi
 echo
-echo "Расхождений: $problems. Правка вендоренного слоя пропадёт при следующем обновлении." >&2
-echo "  Перенесите её в рабочее пространство и повторите ./bin/vendor.sh <машина>." >&2
+echo "Mismatches: $problems. An edit to a vendored layer is lost at the next update." >&2
+echo "  Move it into the workspace and re-run ./bin/vendor.sh <machine>." >&2
 exit 1

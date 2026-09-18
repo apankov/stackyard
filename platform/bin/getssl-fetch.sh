@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 
-# Доставка getssl на машину: скачать закреплённую версию, сверить сумму,
-# положить в state/bin/.
+# Delivering getssl to a machine: download the pinned version, verify its
+# checksum, put it in state/bin/.
 #
-# Зачем отдельным шагом, а не копией в репозитории. getssl — чужой скрипт под
-# GPL-3, и его копия в публичном MIT-репозитории неудобна и юридически, и по
-# существу: копию правят на месте, правки забываются, а разойтись с upstream
-# она успевает молча. Здесь в git лежит только getssl.lock — три строки.
+# Why a step rather than a copy in the repository. getssl is third-party code
+# under GPL-3, and a copy of it inside an MIT-licensed public repository is
+# awkward both legally and practically: a copy gets edited in place, the edits
+# are forgotten, and it drifts from upstream silently. What git holds here is
+# getssl.lock — three lines.
 #
-# Почему state/, а не platform/. Это МАШИННЫЙ артефакт, как сертификаты и как
-# ключ ACME-аккаунта: он скачан на этой машине, из сети, и в репозиторий его
-# класть незачем. state/ у машины уже в .gitignore.
+# Why state/ and not platform/. This is a MACHINE artifact, like the
+# certificates and the ACME account key: it was downloaded on this machine,
+# from the network, and there is no reason to keep it in the repository.
 #
-#   ./platform/bin/getssl-fetch.sh           # скачать, если нужно
-#   ./platform/bin/getssl-fetch.sh --check   # ничего не менять, ненулевой код
-#   ./platform/bin/getssl-fetch.sh --force   # перекачать поверх
+#   ./platform/bin/getssl-fetch.sh           # download when needed
+#   ./platform/bin/getssl-fetch.sh --check   # change nothing, non-zero on drift
+#   ./platform/bin/getssl-fetch.sh --force   # re-download over the top
 
 set -uo pipefail
 
@@ -42,68 +43,69 @@ for a in "$@"; do
   case "$a" in
     --check) CHECK_ONLY=1 ;;
     --force) FORCE=1 ;;
-    *) echo "Неизвестный аргумент: $a" >&2; exit 2 ;;
+    *) echo "Unknown argument: $a" >&2; exit 2 ;;
   esac
 done
 
-[ -f "$LOCK" ] || { echo "Ошибка: нет $LOCK" >&2; exit 2; }
+[ -f "$LOCK" ] || { echo "Error: no $LOCK" >&2; exit 2; }
 
 lock_get() { sed -n "s/^$1=//p" "$LOCK" | head -n 1; }
 REPO=$(lock_get repo); VERSION=$(lock_get version); WANT_SUM=$(lock_get sha256)
 for v in REPO VERSION WANT_SUM; do
-  [ -n "${!v}" ] || { echo "Ошибка: в $LOCK не хватает поля ($v)" >&2; exit 2; }
+  [ -n "${!v}" ] || { echo "Error: $LOCK is missing a field ($v)" >&2; exit 2; }
 done
 
 DEST="$ROOT_DIR/state/bin/getssl"
 
-# Сумма — единственный ответ на вопрос «тот ли это getssl». Ни тега, ни
-# VERSION= внутри скрипта не хватает: `getssl -u` переписывает файл свежей
-# версией, оставляя тег в lock прежним, и машина уезжает на код, которого никто
-# не закреплял. Отсюда и сравнение здесь, а не только при скачивании.
+# The checksum is the only answer to "is this the right getssl". Neither the
+# tag nor the VERSION inside the script is enough: `getssl -u` overwrites the
+# file with a newer version while the tag in the lock stays put, and the
+# machine drifts onto code nobody pinned. Hence the comparison here, not only
+# at download time.
 have_sum=""
 [ -f "$DEST" ] && have_sum=$(sha256_file "$DEST")
 
 if [ "$have_sum" = "$WANT_SUM" ] && [ "$FORCE" -eq 0 ]; then
-  echo "  [ok]   getssl $VERSION на месте ($DEST)"
+  echo "  [ok]   getssl $VERSION is in place ($DEST)"
   exit 0
 fi
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
   if [ -z "$have_sum" ]; then
-    echo "  [FAIL] нет $DEST — ./platform/bin/getssl-fetch.sh" >&2
+    echo "  [FAIL] no $DEST — ./platform/bin/getssl-fetch.sh" >&2
   else
-    echo "  [FAIL] $DEST не совпадает с getssl.lock ($VERSION)" >&2
-    echo "         Так выглядит 'getssl -u', запущенный руками: скрипт обновил сам себя." >&2
-    echo "         Вернуть закреплённый: ./platform/bin/getssl-fetch.sh --force" >&2
+    echo "  [FAIL] $DEST does not match getssl.lock ($VERSION)" >&2
+    echo "         This is what 'getssl -u' run by hand looks like: it updated itself." >&2
+    echo "         Restore the pinned version: ./platform/bin/getssl-fetch.sh --force" >&2
   fi
   exit 1
 fi
 
-# raw.githubusercontent по ТЕГУ, а не по ветке: ветка меняется под ногами, и
-# сумма перестала бы сходиться на ровном месте.
+# raw.githubusercontent by TAG, not by branch: a branch moves under your feet,
+# and the checksum would stop matching for no reason of ours.
 URL="${REPO/github.com/raw.githubusercontent.com}/$VERSION/getssl"
 
-command -v curl >/dev/null 2>&1 || { echo "Ошибка: нет curl — нечем скачать getssl" >&2; exit 2; }
+command -v curl >/dev/null 2>&1 || { echo "Error: no curl — nothing to download getssl with" >&2; exit 2; }
 
 TMP="$DEST.tmp.$$"
 mkdir -p "$(dirname "$DEST")" || exit 2
 trap 'rm -f "$TMP"' EXIT
 
-echo "  ... качаю getssl $VERSION"
+echo "  ... downloading getssl $VERSION"
 if ! curl -fsSL --max-time 60 -o "$TMP" "$URL"; then
-  echo "Ошибка: не скачался $URL" >&2
+  echo "Error: could not download $URL" >&2
   exit 2
 fi
 
-# Сверяем ДО того, как файл встанет на место. Иначе при подменённом ответе
-# машина получила бы рабочий по виду getssl, а узнала бы об этом в лучшем
-# случае при следующей проверке.
+# Verified BEFORE the file is put in place. Otherwise a substituted response
+# would leave the machine with a plausible-looking getssl, and it would find
+# out at best on the next check.
 got_sum=$(sha256_file "$TMP") || exit 2
 if [ "$got_sum" != "$WANT_SUM" ]; then
-  echo "Ошибка: сумма скачанного не совпадает с getssl.lock." >&2
-  echo "  ожидалась: $WANT_SUM" >&2
-  echo "  получена:  $got_sum" >&2
-  echo "  Если версию сдвигали намеренно — обновите sha256 в platform/getssl.lock." >&2
+  echo "Error: the downloaded file's checksum does not match getssl.lock." >&2
+  echo "  expected: $WANT_SUM" >&2
+  echo "  got:      $got_sum" >&2
+  echo "  If the version was moved deliberately, update sha256 in platform/getssl.lock." >&2
   exit 1
 fi
 
