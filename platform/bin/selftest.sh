@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 
-# Тесты движков платформы на синтетических стеках.
+# Tests of the platform's engines against synthetic stacks.
 #
 #   ./platform/bin/selftest.sh
 #
-# Существует потому, что проверить генераторы на боевой машине нельзя, не
-# сломав её: неверный 10-enabled.conf — это отсутствие всех vhost'ов сразу, а
-# неверный nginx-static — пересоздание nginx. Здесь ROOT_DIR подменяется на
-# временный каталог с парой выдуманных стеков, и проверяется ровно тот текст,
-# который генераторы производят.
+# This exists because the generators cannot be exercised on a live machine
+# without breaking it: a wrong include file means no vhosts at all, and a wrong
+# statics file means nginx gets recreated. Here ROOT_DIR is replaced by a
+# temporary directory holding a few invented stacks, and what is checked is
+# exactly the text the generators produce.
 #
-# На shell, а не на чём-то ещё, по той же причине, по которой на shell написан
-# сам предмет: на девбоксе нет ни одного рантайма, и харнесс на другом языке
-# проверял бы что-то другое.
+# In shell, rather than anything else, for the same reason the subject itself
+# is in shell: a machine may carry no other runtime, and a harness in another
+# language would be testing something else.
 
 set -uo pipefail
 
 DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# Корень stackyard, а не машины: предмет здесь — сам движок.
+# The stackyard root rather than a machine's: the subject here is the engine.
 REPO_DIR="$( cd "$DIR0/../.." && pwd )"
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 
-# Машины-фикстуры. Их две и с РАЗНЫМИ СУБД намеренно: платформа считается общей
-# ровно тогда, когда обе работают на ней без единой правки, и проверить это
-# можно только прогнав движок на обеих.
+# Fixture machines. There are two of them, with DIFFERENT database engines, on
+# purpose: the platform counts as shared exactly when both run on it without a
+# single edit, and the only way to check that is to run the engine on both.
 FIXTURES="$REPO_DIR/tests/machines"
 
 failures=0
@@ -31,27 +31,29 @@ check() {
   if [ "$2" = "$3" ]; then
     printf '  ✓ %s\n' "$1"
   else
-    printf '  ✗ %s\n    ожидалось: [%s]\n    получено:  [%s]\n' "$1" "$3" "$2"
+    printf '  ✗ %s\n    expected: [%s]\n    got:      [%s]\n' "$1" "$3" "$2"
     failures=$((failures + 1))
   fi
 }
 
-# fixture <имя-стека> <файл-относительно-стека> <содержимое>
-# Создаёт файл внутри $WORK/stacks/<имя>/, заводя каталоги по пути.
+# fixture <stack name> <path relative to the stack> <contents>
+# Creates a file inside $WORK/stacks/<name>/, making directories along the way.
 fixture() {
   local stack="$1" rel="$2" content="$3"
   mkdir -p "$WORK/stacks/$stack/$(dirname "$rel")"
   printf '%s\n' "$content" > "$WORK/stacks/$stack/$rel"
-  # Стеком каталог делает stack.conf, а не сам факт существования — иначе
-  # stacks/<стек>/.env, который машина заводит ЛЮБОМУ стеку, объявлял бы стек.
-  # Фикстура, задающая только vhost или только compose, без этого не видна
-  # движку вовсе, и половина тестов проверяла бы пустоту.
+  # What makes a directory a stack is stack.conf, not its mere existence —
+  # otherwise stacks/<stack>/.env, which a machine creates for ANY stack, would
+  # declare one. Without this, a fixture defining only a vhost or only a
+  # compose file would be invisible to the engine, and half the tests would be
+  # asserting things about emptiness.
   [ -f "$WORK/stacks/$stack/stack.conf" ] || : > "$WORK/stacks/$stack/stack.conf"
 }
 
-# fixture_root <корень> <стек> <файл> <содержимое>
-# То же, но в указанный корень: проверяем, что движок видит стеки и в машинном
-# stacks/, и в профильном profile/stacks/, и что машинный перекрывает профиль.
+# fixture_root <root> <stack> <file> <contents>
+# The same, but into the given root: this checks that the engine sees stacks in
+# both the machine's stacks/ and the profile's profile/stacks/, and that the
+# machine's copy shadows the profile's.
 fixture_root() {
   local root="$1" stack="$2" rel="$3" content="$4"
   mkdir -p "$WORK/$root/$stack/$(dirname "$rel")"
@@ -63,12 +65,13 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 mkdir -p "$WORK/platform/lib" "$WORK/platform/nginx-vhosts" "$WORK/platform/compose" "$WORK/state" "$WORK/stacks"
-# Обе библиотеки: lib-stacks.sh читает stack.conf без подстановок, lib-env.sh
-# нужен для stack_backup_sources, где подстановки как раз разворачиваются.
+# Both libraries: lib-stacks.sh reads stack.conf without substitutions, while
+# lib-env.sh is needed for stack_backup_sources, where substitutions are
+# expanded.
 cp "$LIB_DIR/lib-stacks.sh" "$LIB_DIR/lib-env.sh" "$WORK/platform/lib/"
 printf 'services:\n  nginx:\n    image: nginx\n' > "$WORK/platform/compose/nginx.yaml"
 
-# Читается подключаемыми ниже библиотеками, а не этим файлом.
+# Read by the libraries sourced below, not by this file.
 # shellcheck disable=SC2034
 ROOT_DIR="$WORK"
 # shellcheck source=platform/lib/lib-stacks.sh
@@ -76,11 +79,12 @@ ROOT_DIR="$WORK"
 # shellcheck source=platform/lib/lib-env.sh
 . "$WORK/platform/lib/lib-env.sh"
 
-echo "== include'ы vhost'ов"
+echo "== vhost includes"
 
-# Два стека, у которых префиксы файлов идут ВРАЗРЕЗ с алфавитом имён: alpha
-# получает 20-, zulu — 10-. Порядок include'ов обязан следовать префиксам, а
-# не именам стеков — от него зависит, какой vhost nginx читает первым.
+# Two stacks whose file prefixes run COUNTER to the alphabetical order of their
+# names: alpha gets 20-, zulu gets 10-. The order of the includes must follow
+# the prefixes rather than the stack names — which vhost nginx reads first
+# depends on it.
 fixture alpha stack.conf 'Requires=""'
 fixture alpha compose.yaml 'services:
   alpha-app:
@@ -100,18 +104,18 @@ printf 'Enabled_Stacks="alpha zulu"\n' > "$WORK/.env-stacks"
 got=$(stacks_include_lines)
 want='include /etc/nginx/stacks/zulu/nginx/*.conf;
 include /etc/nginx/stacks/alpha/nginx/*.conf;'
-check "порядок include'ов следует префиксам файлов, а не именам стеков" "$got" "$want"
+check "include order follows file prefixes, not stack names" "$got" "$want"
 
-echo "== два корня стеков"
+echo "== the two stack roots"
 
-# Главный новый механизм платформы, и до этой секции он не был покрыт ничем.
-# Мутационный прогон показал: выключи профильный корень в stack_dir или в
-# stacks_available — ни один тест не падал.
+# The platform's central mechanism, and a mutation run showed it was covered by
+# nothing: disable the profile root in stack_dir or in stacks_available and not
+# one test failed.
 #
-# Режимы «подключить» и «скопировать» выражены ИМЕННО этими двумя корнями,
-# отдельного переключателя нет. Значит ошибка здесь не ломает что-то заметное,
-# а делает профильный стек невидимым: его preflight не запускается, его
-# stack.conf не читается, его vhost не включается — и всё молча.
+# "Link" and "copy" are expressed by THESE TWO ROOTS and nothing else; there is
+# no separate switch. So a mistake here does not break anything visible — it
+# makes a profile stack invisible: its preflight never runs, its stack.conf is
+# never read, its vhost is never included, all silently.
 fixture_root profile/stacks papa stack.conf 'Requires=""
 Domains="papa.test"'
 fixture_root profile/stacks papa compose.yaml 'services:
@@ -121,62 +125,66 @@ fixture_root profile/stacks papa nginx/50-papa.conf 'server { server_name papa.t
 fixture_root profile/stacks quebec stack.conf 'Requires=""'
 printf 'Enabled_Stacks="papa quebec alpha"\n' > "$WORK/.env-stacks"
 
-check "профильный стек виден в списке" \
+check "a profile stack appears in the list" \
   "$(stacks_available | grep -cx papa)" "1"
-check "каталог профильного стека — профильный" \
+check "a profile stack's directory is the profile's" \
   "$(stack_dir papa)" "$WORK/profile/stacks/papa"
-check "compose профильного стека найден" \
+check "a profile stack's compose file is found" \
   "$(stack_compose_file papa)" "$WORK/profile/stacks/papa/compose.yaml"
-check "домен профильного стека виден" \
+check "a profile stack's domain is visible" \
   "$(stacks_domains | grep -cx papa.test)" "1"
 
-# .env стека ВСЕГДА машинный, даже у профильного: профиль обновляется целиком,
-# и секрет внутри него затёрло бы следующим обновлением.
-check ".env профильного стека — в машинном корне" \
+# A stack's .env is ALWAYS the machine's, even for a profile stack: the profile
+# is updated as a whole, and a secret inside it would be wiped by the next
+# update.
+check "a profile stack's .env is in the machine root" \
   "$(stack_env_file papa)" "$WORK/stacks/papa/.env"
 
-# include обязан указывать в тот корень, где стек лежит на самом деле: иначе
-# после копирования стека в машинный nginx продолжал бы читать профильную копию.
-check "include профильного стека идёт в профильный каталог" \
+# The include must point at the root the stack actually lives in: otherwise,
+# after the stack is copied into the machine's, nginx would keep reading the
+# profile's copy.
+check "a profile stack's include points into the profile directory" \
   "$(stacks_include_lines | grep -c '/etc/nginx/profile-stacks/papa/nginx')" "1"
 
-# Образец .env ищется РЯДОМ СО СТЕКОМ, а сам .env — в машинном корне. Если
-# искать образец по машинному пути, обязательность .env у профильного стека не
-# проверяется вовсе, и стек считается укомплектованным без секретов.
+# The .env example is looked for NEXT TO THE STACK, while the .env itself is in
+# the machine root. Looking for the example along the machine path would mean a
+# profile stack's .env requirement is never checked at all, and the stack
+# counts as complete without its secrets.
 fixture_root profile/stacks papa .env.example 'Papa_Secret=CHANGE_ME'
-# Стек со своими контейнерами обязан иметь compose.yaml. Молчаливая
-# терпимость превращала бы забытый файл в «стек без контейнеров» — рабочий
-# конфиг, в котором ничего не запускается.
+# A stack with containers of its own must have a compose.yaml. Tolerating its
+# absence silently would turn a forgotten file into "a stack without
+# containers" — a valid config in which nothing starts.
 fixture victor stack.conf 'Requires=""'
-check "стек без compose.yaml и без Containers=no — неполон" \
+check "a stack with no compose.yaml and no Containers=no is incomplete" \
   "$(stack_missing_files victor | grep -c 'compose.yaml')" "1"
 fixture whiskey stack.conf 'Requires=""
 Containers="no"'
-check "с Containers=no претензий нет" "$(stack_missing_files whiskey)" ""
+check "with Containers=no there is nothing to report" "$(stack_missing_files whiskey)" ""
 
-check "профильному стеку нужен .env, раз у него есть образец" \
+check "a profile stack needs an .env because it has an example" \
   "$(stack_missing_files papa)" "stacks/papa/.env"
 printf 'x\n' > "$WORK/stacks/papa/.env" 2>/dev/null || { mkdir -p "$WORK/stacks/papa"; printf 'x\n' > "$WORK/stacks/papa/.env"; }
-check "с машинным .env претензий нет" "$(stack_missing_files papa)" ""
+check "with the machine's .env there is nothing to report" "$(stack_missing_files papa)" ""
 
-# Машинный корень перекрывает профильный — это и есть «отцепиться». Объявляет
-# стек тот каталог, где лежит stack.conf: половина копии стеком не становится.
+# The machine root shadows the profile's — that is what detaching means. A
+# stack is declared by the directory holding stack.conf: half a copy is not a
+# stack.
 mkdir -p "$WORK/stacks/papa"
 : > "$WORK/stacks/papa/.env"
-check "каталог с одним .env профильный стек НЕ перекрывает" \
+check "a directory holding only .env does NOT shadow a profile stack" \
   "$(stack_dir papa)" "$WORK/profile/stacks/papa"
 fixture papa stack.conf 'Requires=""
 Domains="papa.test"'
-check "машинная копия перекрывает профильную" \
+check "the machine's copy shadows the profile's" \
   "$(stack_dir papa)" "$WORK/stacks/papa"
-check "include после копирования идёт в машинный каталог" \
+check "after copying, the include points into the machine directory" \
   "$(stacks_include_lines | grep -c '/etc/nginx/stacks/papa/nginx')" "0"
 rm -rf "$WORK/stacks/papa"
 
-# Юнит профильного стека обязан указывать в профильный каталог НА СЕРВЕРЕ.
+# A profile stack's unit must point at the profile directory ON THE SERVER.
 fixture_root profile/stacks papa systemd/devbox-papa-x.service '[Service]
 ExecStart=@STACK_DIR@/scripts/x.sh'
-check "юнит профильного стека указывает в профиль" \
+check "a profile stack's unit points into the profile" \
   "$( DEPLOY_DIR=/srv/m SERVICE_USER=u ONFAILURE= \
       unit_render "$WORK/profile/stacks/papa/systemd/devbox-papa-x.service" papa \
       | grep -c 'ExecStart=/srv/m/profile/stacks/papa/scripts/x.sh' )" "1"
@@ -190,14 +198,14 @@ fixture bravo compose.yaml 'services:
   bravo-app:
     image: alpine'
 
-check "Requires читается" "$(stack_conf_get bravo Requires)" "pg qdrant"
-check "Domains читается" "$(stack_conf_get bravo Domains)" "bravo.test"
-# Ключевое свойство: платформа НЕ разворачивает ${...} в Static. Развернуть его
-# здесь означало бы, что текст спеки nginx зависит от того, есть ли у стека
-# .env — то есть от того, включён ли он.
-check "Static отдаётся дословно, без подстановки" \
+check "Requires is read" "$(stack_conf_get bravo Requires)" "pg qdrant"
+check "Domains is read" "$(stack_conf_get bravo Domains)" "bravo.test"
+# The key property: the platform does NOT expand ${...} in Static. Expanding it
+# here would mean the text of the nginx spec depends on whether a stack has an
+# .env — that is, on whether it is enabled.
+check "Static is returned verbatim, without substitution" \
   "$(stack_conf_get bravo Static)" 'bravo.test:${Bravo_Static_Dir:-./vhosts}/public'
-check "отсутствующий ключ даёт умолчание" "$(stack_conf_get bravo Nope def)" "def"
+check "a missing key yields the default" "$(stack_conf_get bravo Nope def)" "def"
 check "стек без stack.conf не роняет чтение" "$(stack_conf_get nosuch Domains)" ""
 check "stack_requires читает из файла" "$(stack_requires bravo)" "pg qdrant"
 
@@ -213,22 +221,22 @@ with_all=$(stacks_static_content)
 printf 'Enabled_Stacks="alpha"\n' > "$WORK/.env-stacks"
 with_one=$(stacks_static_content)
 
-# Главный инвариант: текст спеки nginx одинаков при любом составе включённых
-# стеков. Иначе выключение стека меняет спеку, а следующий up -d пересоздаёт
-# nginx — способ уронить все сайты разом (CLAUDE.md §3.1).
-check "текст статики не зависит от Enabled_Stacks" "$with_all" "$with_one"
-check "объявленный том попал в файл" \
+# The central invariant: the text of the nginx spec is the same for any set of
+# enabled stacks. Otherwise disabling a stack changes the spec, the next up -d
+# recreates nginx, and every site goes down at once.
+check "the statics text does not depend on Enabled_Stacks" "$with_all" "$with_one"
+check "a declared volume made it into the file" \
   "$(printf '%s' "$with_all" | grep -c 'charlie.test')" "1"
-check "подстановка не развёрнута" \
+check "the substitution was not expanded" \
   "$(printf '%s' "$with_all" | grep -c '${Charlie_Dir:-./vhosts}')" "1"
 
-# Стеки без Static не должны порождать пустой блок volumes: это невалидный
-# yaml, и compose падал бы на КАЖДОЙ команде.
+# Stacks without Static must not produce an empty volumes block: that is
+# invalid YAML, and compose would fail on EVERY command.
 rm -f "$WORK/stacks/charlie/stack.conf" "$WORK/stacks/bravo/stack.conf"
-check "без единого Static получается валидный файл без volumes" \
+check "with no Static at all the file is valid and has no volumes" \
   "$(stacks_static_content | grep -c 'volumes:')" "0"
 
-echo "== домены"
+echo "== domains"
 
 fixture delta stack.conf 'Domains="d1.test d2.test"'
 fixture delta compose.yaml 'services:
@@ -237,13 +245,13 @@ fixture delta compose.yaml 'services:
 fixture bravo stack.conf 'Domains="bravo.test"'
 printf 'Enabled_Stacks="delta bravo"\n' > "$WORK/.env-stacks"
 
-check "домены собираются по включённым стекам, без повторов и отсортированно" \
+check "domains are collected from enabled stacks, deduplicated and sorted" \
   "$(stacks_domains | tr '\n' ' ')" "bravo.test d1.test d2.test "
 
 printf 'Enabled_Stacks="bravo"\n' > "$WORK/.env-stacks"
-check "выключенный стек доменов не даёт" "$(stacks_domains | tr '\n' ' ')" "bravo.test "
+check "a disabled stack contributes no domains" "$(stacks_domains | tr '\n' ' ')" "bravo.test "
 
-echo "== юниты стеков"
+echo "== stack units"
 
 fixture echo1 stack.conf 'Requires=""'
 fixture echo1 compose.yaml 'services:
@@ -255,40 +263,40 @@ WorkingDirectory=@DEPLOY_DIR@
 User=@SERVICE_USER@
 @ONFAILURE@'
 
-check "юниты стека находятся по каталогу, без объявления в stack.conf" \
+check "a stack's units are found by directory, with no declaration in stack.conf" \
   "$(stack_units echo1 | while IFS= read -r f; do basename "$f"; done | tr '\n' ' ')" \
   "devbox-echo1-job.service "
-check "стек без каталога systemd/ юнитов не даёт" "$(stack_units alpha)" ""
+check "a stack without a systemd/ directory contributes no units" "$(stack_units alpha)" ""
 
 rendered=$(DEPLOY_DIR=/opt/devbox SERVICE_USER=ec2-user ONFAILURE='OnFailure=x.service' \
            unit_render "$WORK/stacks/echo1/systemd/devbox-echo1-job.service" echo1)
-check "@STACK_DIR@ подставлен" \
+check "@STACK_DIR@ was substituted" \
   "$(printf '%s' "$rendered" | grep -c '/opt/devbox/stacks/echo1/scripts/job.sh')" "1"
-check "@DEPLOY_DIR@ подставлен" \
+check "@DEPLOY_DIR@ was substituted" \
   "$(printf '%s' "$rendered" | grep -c '^WorkingDirectory=/opt/devbox$')" "1"
-# Плейсхолдер, оставшийся в юните, systemd молча проглотит как часть пути, и
-# таймер будет запускать несуществующую команду каждую ночь.
-check "плейсхолдеров не осталось" \
+# A placeholder left inside a unit is swallowed silently by systemd as part of
+# a path, and the timer then runs a non-existent command every night.
+check "no placeholders remain" \
   "$(printf '%s' "$rendered" | grep -c '@[A-Z_]*@')" "0"
 
-# Объявленный юнит и установленный — разные множества. Их расхождение и есть
-# то, что enable/disable теперь чинят сами, а --check ловит, когда не вышло:
-# у включённого стека задача не выполняется вовсе, у выключенного машина
-# просыпается по таймеру мёртвого стека.
+# Declared units and installed ones are different sets. Their divergence is
+# what enable/disable now reconcile themselves and what --check catches when
+# they could not: for an enabled stack the job never runs at all, and for a
+# disabled one the machine wakes on a dead stack's timer.
 mkdir -p "$WORK/systemd-units"
-# Читается lib-stacks.sh, а не этим файлом.
+# Read by lib-stacks.sh, not by this file.
 # shellcheck disable=SC2034
 SYSTEMD_UNIT_DIR="$WORK/systemd-units"
-check "объявленный, но не установленный юнит в списке установленных не значится" \
+check "a declared but uninstalled unit is not listed as installed" \
   "$(stack_units_installed echo1)" ""
 : > "$WORK/systemd-units/devbox-echo1-job.service"
-check "установленный юнит стека виден" \
+check "an installed stack unit is visible" \
   "$(stack_units_installed echo1)" "devbox-echo1-job.service"
-check "чужой юнит в каталоге стеку не приписывается" \
+check "another stack's unit in the directory is not attributed to this one" \
   "$(: > "$WORK/systemd-units/devbox-other-job.service"; stack_units_installed echo1)" \
   "devbox-echo1-job.service"
 
-echo "== источники бэкапа"
+echo "== backup sources"
 
 fixture foxtrot stack.conf 'Backup_Sqlite="${Foxtrot_DB_Dir}/${Foxtrot_DB_File}"
 Backup_Files="/mnt/data/foxtrot"
@@ -299,35 +307,36 @@ fixture foxtrot compose.yaml 'services:
 printf 'Foxtrot_DB_Dir=/mnt/data/fox\nFoxtrot_DB_File=f.db\n' > "$WORK/stacks/foxtrot/.env"
 printf 'Enabled_Stacks="foxtrot bravo"\n' > "$WORK/.env-stacks"
 
-# Здесь подстановка РАЗВОРАЧИВАЕТСЯ, в отличие от Static: backup.sh работает
-# только по включённым стекам, а у включённого стека .env есть по построению.
-check "Backup_Sqlite развёрнут из .env стека" \
+# Here substitutions ARE expanded, unlike Static: backup.sh works only on
+# enabled stacks, and an enabled stack has an .env by construction.
+check "Backup_Sqlite is expanded from the stack's .env" \
   "$(stack_backup_sources foxtrot | grep '^sqlite:')" "sqlite:/mnt/data/fox/f.db"
-check "Backup_Files попал в список" \
+check "Backup_Files made it into the list" \
   "$(stack_backup_sources foxtrot | grep '^files:')" "files:/mnt/data/foxtrot"
-check "Backup_Volume попал в список" \
+check "Backup_Volume made it into the list" \
   "$(stack_backup_sources foxtrot | grep '^volume:')" "volume:foxtrot-data"
-check "стек без объявлений даёт пусто" "$(stack_backup_sources bravo)" ""
+check "a stack declaring nothing yields nothing" "$(stack_backup_sources bravo)" ""
 
-# Главная защита: забытая переменная в .env стека свернула бы путь в
-# оканчивающийся слэшем, и бэкап источника молча перестал бы сниматься.
-# Отсутствующий бэкап выглядит ровно как источник, которого нет, поэтому
-# молчать здесь нельзя.
+# The main protection: a forgotten variable in a stack's .env would collapse
+# the path into one ending in a slash, and that source would silently stop
+# being backed up. A missing backup looks exactly like a source that does not
+# exist, so silence is not an option here.
 printf 'Foxtrot_DB_Dir=/mnt/data/fox\n' > "$WORK/stacks/foxtrot/.env"
 stack_backup_sources foxtrot >/dev/null 2>&1
-check "неразвёрнутая подстановка — отказ, а не пустой путь" "$?" "1"
-check "и отказ объясняет, чего не хватает" \
+check "an unexpanded substitution is a failure, not an empty path" "$?" "1"
+check "and the failure names what is missing" \
   "$(stack_backup_sources foxtrot 2>&1 >/dev/null | grep -c 'Foxtrot_DB_File')" "1"
 
-# Значения соседнего стека не должны протекать в подстановки этого.
+# One stack's values must not leak into another's substitutions.
 printf 'Foxtrot_DB_Dir=/mnt/data/fox\nFoxtrot_DB_File=f.db\n' > "$WORK/stacks/foxtrot/.env"
 stack_backup_sources foxtrot >/dev/null
-check "окружение стека не протекает в следующий" "$(stack_backup_sources bravo)" ""
+check "a stack's environment does not leak into the next one" "$(stack_backup_sources bravo)" ""
 
-echo "== проверки"
+echo "== declaration checks"
 
-# Стек, нарушающий сразу всё: домен-дубль с delta, относительный host-путь,
-# vhost с чужим server_name, юнит без префикса и таймер без проверки.
+# A stack that violates everything at once: a domain duplicated with delta, a
+# relative host path, a vhost serving someone else's server_name, a unit
+# without the required prefix and a timer with no result check.
 fixture golf stack.conf 'Domains="d1.test"'
 fixture golf compose.yaml 'services:
   golf-app:
@@ -337,8 +346,8 @@ fixture golf compose.yaml 'services:
       - /abs/hardcoded:/other
       - ${Golf_Home_Dir}/ok:/fine
       - somevolume:/named'
-# Настоящие vhost'ы держат server_name отдельной строкой — фикстура обязана
-# выглядеть так же, иначе тест проверяет разбор, которого в жизни не бывает.
+# Real vhosts keep server_name on its own line — the fixture has to look the
+# same, otherwise the test exercises a parse that never occurs in practice.
 fixture golf nginx/50-golf.conf 'server {
     listen      80;
     server_name other.test;
@@ -349,44 +358,45 @@ fixture golf systemd/devbox-golf-job.timer '[Timer]
 OnCalendar=daily'
 printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
 
-check "дубль домена найден" "$(check_domains_unique | wc -l | tr -d ' ')" "1"
-check "дубль домена назван двумя разными стеками" \
+check "a duplicate domain is found" "$(check_domains_unique | wc -l | tr -d ' ')" "1"
+check "a duplicate domain is attributed to two different stacks" \
   "$(check_domains_unique | grep -cE 'is declared by both .* and ' | tr -d ' ')" "1"
 
-# Тот же домен ДВАЖДЫ В ОДНОМ стеке — такая же ошибка, но сообщение «объявлен и
-# в hotel, и в hotel» читается как поломка проверки, а не как находка, и её
-# перестают читать вместе со всем отчётом.
+# The same domain TWICE IN ONE stack is the same mistake, but a message saying
+# "declared by both hotel and hotel" reads as a broken check rather than a
+# finding, and people stop reading it along with the rest of the report.
 fixture hotel stack.conf 'Domains="hotel.test hotel.test"
 Containers="no"'
 printf 'Enabled_Stacks="golf delta hotel"\n' > "$WORK/.env-stacks"
-check "дубль внутри одного стека назван своими словами" \
+check "a duplicate within one stack is described in its own words" \
   "$(check_domains_unique | grep -c 'declared twice by stack hotel' | tr -d ' ')" "1"
-check "про «и в hotel, и в hotel» не сообщается" \
+check "nothing says \"both hotel and hotel\"" \
   "$(check_domains_unique | grep -c 'both hotel and hotel' | tr -d ' ')" "0"
 rm -rf "$WORK/stacks/hotel"
 printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
-check "домен без vhost и vhost без домена — обе стороны" \
+check "a domain without a vhost and a vhost without a domain — both directions" \
   "$(check_domains_match golf | wc -l | tr -d ' ')" "2"
-# CLAUDE.md §7 требует от host-пути обоих свойств сразу: абсолютный И через
-# переменную. Проверяются обе половины, поэтому находок здесь две: относительный
-# путь и захардкоженный. Путь через переменную и именованный том — не находки.
-check "относительный и захардкоженный host-пути найдены, оба вида корректных — нет" \
+# A host path must have both properties at once: absolute AND through a
+# variable. Both halves are checked, so there are two findings here: the
+# relative path and the hardcoded one. A path through a variable and a named
+# volume are not findings.
+check "the relative and hardcoded host paths are found, the two valid ones are not" \
   "$(check_paths_absolute golf | wc -l | tr -d ' ')" "2"
-check "захардкоженный путь назван именно захардкоженным" \
+check "the hardcoded path is named as hardcoded" \
   "$(check_paths_absolute golf | grep -c 'hardcoded host path')" "1"
-check "имя юнита без префикса найдено" "$(check_unit_names golf | wc -l | tr -d ' ')" "1"
-check "таймер без проверки найден" \
+check "a unit name without the prefix is found" "$(check_unit_names golf | wc -l | tr -d ' ')" "1"
+check "a timer with no result check is found" \
   "$(check_timer_has_check golf | grep -c 'devbox-golf-job')" "1"
-check "у корректного стека претензий по путям нет" \
+check "a well-formed stack raises no path findings" \
   "$(check_paths_absolute delta | wc -l | tr -d ' ')" "0"
 
-# Таймер, у которого проверка есть, претензий вызывать не должен.
+# A timer that does have a check must raise nothing.
 fixture golf scripts/check-job.sh '#!/bin/sh
 exit 0'
-check "таймер с scripts/check-<задача>.sh претензий не вызывает" \
+check "a timer with scripts/check-<job>.sh raises nothing" \
   "$(check_timer_has_check golf | grep -c 'devbox-golf-job')" "0"
 
-# Цикл в Requires: hotel -> india -> hotel.
+# A cycle in Requires: hotel -> india -> hotel.
 fixture hotel stack.conf 'Requires="india"'
 fixture hotel compose.yaml 'services:
   hotel-app:
@@ -395,31 +405,34 @@ fixture india stack.conf 'Requires="hotel"'
 fixture india compose.yaml 'services:
   india-app:
     image: alpine'
-check "цикл в Requires найден" "$(check_requires_cycle hotel | wc -l | tr -d ' ')" "1"
-check "стек без зависимостей цикла не даёт" "$(check_requires_cycle delta)" ""
+check "a cycle in Requires is found" "$(check_requires_cycle hotel | wc -l | tr -d ' ')" "1"
+check "a stack without dependencies yields no cycle" "$(check_requires_cycle delta)" ""
 
-# Домешивание в общий сервис nginx — та самая поломка, ради которой есть Static=.
+# Merging into the shared nginx service is the very breakage Static= exists to
+# prevent.
 fixture juliet stack.conf 'Requires=""'
 fixture juliet compose.yaml 'services:
   nginx:
     volumes:
       - /x:/y'
-check "домешивание в общий сервис nginx найдено" \
+check "merging into the shared nginx service is found" \
   "$(check_no_base_service_merge juliet | wc -l | tr -d ' ')" "1"
-check "обычный стек в общий сервис не лезет" "$(check_no_base_service_merge delta)" ""
+check "an ordinary stack does not touch the shared service" "$(check_no_base_service_merge delta)" ""
 
-echo "== проверки под set -e"
+echo "== checks under set -e"
 
-# Этот файл работает под `set -uo pipefail`, а stack.sh — под `set -euo
-# pipefail`, и разница не косметическая. Упавший `grep` (нет каталога nginx/ у
-# стека, нет совпадений в нём) под `set -e` убивает подоболочку цикла целиком,
-# и функция возвращает ПУСТО вместо находок — то есть проверка тихо перестаёт
-# проверять. Именно так блок «Upstream'ы включённых vhost'ов» в `stack.sh
-# --check` печатался пустым: pg идёт в манифесте первым и nginx/ у него нет.
+# This file runs under `set -uo pipefail`, while stack.sh runs under `set -euo
+# pipefail`, and the difference is not cosmetic. A failing `grep` (a stack with
+# no nginx/ directory, or no matches inside one) under `set -e` kills the
+# loop's subshell entirely, and the function returns NOTHING instead of its
+# findings — the check quietly stops checking. That is exactly how the
+# upstreams block of `stack --check` came to print nothing: the first stack in
+# the manifest had no nginx/ directory.
 #
-# Поэтому функции, чей результат читает stack.sh, гоняются ещё и так, как их
-# зовёт он: под errexit и НЕ в составе `&&` — иначе bash отключает errexit
-# внутри функции, и тест проверял бы не то, что происходит на машине.
+# So the functions whose output stack.sh reads are also exercised the way it
+# calls them: under errexit and NOT as part of an `&&` — otherwise bash
+# disables errexit inside the function and the test would be checking something
+# other than what happens on a machine.
 errexit_run() {
   bash -c '
     set -euo pipefail
@@ -430,8 +443,9 @@ errexit_run() {
   ' _ "$WORK" "$@" 2>/dev/null
 }
 
-# mike — стек без vhost'ов, но с объявленным доменом, и в манифесте он ПЕРВЫЙ:
-# на нём и умирал обход. november — обычный стек с proxy_pass.
+# mike is a stack with no vhosts but a declared domain, and it comes FIRST in
+# the manifest: that is where the walk used to die. november is an ordinary
+# stack with a proxy_pass.
 fixture mike stack.conf 'Domains="mike.test"'
 fixture mike compose.yaml 'services:
   mike-app:
@@ -448,14 +462,14 @@ fixture november nginx/70-november.test.conf 'server {
 }'
 printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
 
-check "upstream'ы находятся, хотя первый стек манифеста без nginx/" \
+check "upstreams are found even though the manifest's first stack has no nginx/" \
   "$(errexit_run stacks_upstreams)" "november-app"
 
-# fastcgi_pass наравне с proxy_pass. Не симметрия ради симметрии: nginx
-# резолвит оба при ЧТЕНИИ конфига, и опущенный php-fpm при пересоздании nginx
-# уносит все сайты, включая статические. Раньше это ловилось случайно — через
-# настоящую фикстуру с PHP-сайтом, — а случайное покрытие исчезает при первой
-# же перестановке в тестах.
+# fastcgi_pass alongside proxy_pass. Not symmetry for its own sake: nginx
+# resolves both while READING the config, and a stopped php-fpm takes every
+# site down — static ones included — when nginx is recreated. Covering this by
+# accident, through a realistic PHP fixture, would disappear the first time the
+# tests are rearranged.
 fixture oscar2 stack.conf 'Requires=""'
 fixture oscar2 compose.yaml 'services:
   oscar2-app:
@@ -466,51 +480,54 @@ fixture oscar2 nginx/80-oscar2.conf 'server {
 	}
 }'
 printf 'Enabled_Stacks="mike november oscar2"\n' > "$WORK/.env-stacks"
-check "fastcgi_pass тоже считается upstream'ом" \
+check "fastcgi_pass counts as an upstream too" \
   "$(errexit_run stacks_upstreams | grep -cx 'php-fpm')" "1"
 printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
-check "домен без vhost'а находится под set -e" \
+check "a domain without a vhost is found under set -e" \
   "$(errexit_run check_domains_match mike | wc -l | tr -d ' ')" "1"
-check "vhost без домена находится под set -e" \
+check "a vhost without a domain is found under set -e" \
   "$(errexit_run check_domains_match november | wc -l | tr -d ' ')" "1"
 
-# Код возврата проверки обязан означать «проверить не удалось», а не «претензий
-# нет»: иначе первый же вызов через `||` сработает наоборот.
+# A check's exit status must mean "the check could not be performed", not
+# "nothing to report": otherwise the first call through `||` behaves
+# backwards.
 errexit_run check_no_base_service_merge november >/dev/null
-check "чистый стек не выглядит как ошибка по коду возврата" "$?" "0"
+check "a clean stack does not look like an error by exit status" "$?" "0"
 
-# Список знакомых сервисов — по ВСЕМ стекам, а не по включённым. Иначе
-# контейнер выключенного стека объявлялся бы бесхозным, и «выключен, но
-# остались контейнеры» (лечится через stack.sh disable) слилось бы с «сервиса
-# не объявляет никто» (лечится docker rm -f). Это разные диагнозы.
+# The list of known services covers ALL stacks, not only the enabled ones.
+# Otherwise a disabled stack's container would be declared an orphan, and
+# "disabled but containers remain" (fixed with `stack disable`) would merge
+# with "no stack declares this service" (fixed with docker rm -f). Those are
+# different diagnoses.
 known=$(errexit_run stacks_known_services | sed '/^$/d' | sort -u)
-check "платформенный nginx — знакомый сервис" \
+check "the platform's nginx is a known service" \
   "$(printf '%s\n' "$known" | grep -cx 'nginx')" "1"
-check "сервис включённого стека — знакомый" \
+check "an enabled stack's service is known" \
   "$(printf '%s\n' "$known" | grep -cx 'november-app')" "1"
-check "сервис ВЫКЛЮЧЕННОГО стека тоже знакомый" \
+check "a DISABLED stack's service is known too" \
   "$(printf '%s\n' "$known" | grep -cx 'golf-app')" "1"
 
-# Платформенные сервисы исключаются из сервисов стека: иначе `disable` снёс бы
-# контейнер nginx вместе со всеми сайтами машины.
+# Platform services are excluded from a stack's services: otherwise `disable`
+# would destroy the nginx container together with every site on the machine.
 fixture papa2 stack.conf 'Requires=""'
 fixture papa2 compose.yaml 'services:
   nginx:
     image: alpine
   papa2-app:
     image: alpine'
-check "платформенный сервис не считается сервисом стека" \
+check "a platform service does not count as a stack's service" \
   "$(errexit_run stack_services papa2 | grep -cx nginx)" "0"
-check "собственный сервис стека считается" \
+check "a stack's own service does count" \
   "$(errexit_run stack_services papa2 | grep -cx papa2-app)" "1"
-check "сервиса, которого не объявляет никто, в списке нет" \
+check "a service nobody declares is not in the list" \
   "$(printf '%s\n' "$known" | grep -cx 'stray-app')" "0"
 
-echo "== живой nginx против спеки"
+echo "== the running nginx vs its spec"
 
-# Рендер `docker compose config`: тома в длинной форме, порты рядом и тоже с
-# ключом target. Порт не должен попасть в список монтирований — иначе
-# сравнение с живым контейнером даёт вечное расхождение.
+# A `docker compose config` render: volumes in long form, with ports nearby
+# that also carry a target key. A port must not end up in the mount list —
+# otherwise comparing against the live container yields a permanent
+# mismatch.
 got=$(compose_mount_pairs <<'YAML'
   nginx:
     ports:
@@ -534,9 +551,10 @@ YAML
 )
 want="/srv/repo/platform/nginx-vhosts	/etc/nginx/conf.d
 /srv/repo/stacks	/etc/nginx/stacks"
-check "монтирования разобраны, порт и именованный том — нет" "$got" "$want"
+check "mounts are parsed; the port and the named volume are not" "$got" "$want"
 
-# Вывод `nginx -T`: имён в директиве может быть несколько, `_` — это не домен.
+# `nginx -T` output: a directive may carry several names, and `_` is not a
+# domain.
 got=$(nginx_served_names <<'CONF'
 server {
     listen 80 default_server;
@@ -551,36 +569,37 @@ server {
 }
 CONF
 )
-check "домены работающего nginx разобраны, без повторов и без _" \
+check "the running nginx's domains are parsed, deduplicated and without _" \
   "$got" "api.test
 www.api.test"
 
-# Конфигурация без единого server-блока синтаксически верна: nginx с ней
-# проходит `nginx -t` и не слушает ничего. Пустой список здесь — это отказ,
-# который --check обязан заметить.
-check "конфигурация без server-блоков даёт пустой список" \
+# A configuration with no server block is syntactically valid: nginx passes
+# `nginx -t` with it and listens for nothing. An empty list here is a failure
+# --check must notice.
+check "a configuration without server blocks yields an empty list" \
   "$(printf 'events {}\nhttp {\n  include /etc/nginx/conf.d/*.conf;\n}\n' | nginx_served_names)" ""
 
-echo "== здоровье стеков"
+echo "== stack health"
 
-# Наличие файла — и есть объявление: отдельного списка проверок нет.
+# The presence of the file IS the declaration: there is no separate list of
+# checks.
 fixture oscar stack.conf 'Requires=""'
 fixture oscar compose.yaml 'services:
   oscar-app:
     image: alpine'
 fixture oscar scripts/health.sh '#!/bin/sh
 exit 0'
-check "проверка живости стека находится по пути" \
+check "a stack's liveness check is found by path" \
   "$(errexit_run stack_health_script oscar)" "$WORK/stacks/oscar/scripts/health.sh"
-check "у стека без неё пути нет на диске" \
-  "$([ -f "$(errexit_run stack_health_script november)" ] && echo есть || echo нет)" "нет"
+check "a stack without one has no such file on disk" \
+  "$([ -f "$(errexit_run stack_health_script november)" ] && echo yes || echo no)" "no"
 
-echo "== базы у поставщика"
+echo "== databases at the provider"
 
-# Поставщик БД — РОЛЬ, а не имя. Стек объявляет Provides_DB=<префикс>, и движок
-# собирает заказы по этому префиксу, не зная ни слова «Postgres», ни «MySQL».
-# Проверяем на ВЫДУМАННОМ префиксе: если тест пройдёт с ним, значит в движке не
-# осталось зашитого имени ни одной настоящей СУБД.
+# The DB provider is a ROLE, not a name. A stack declares Provides_DB=<prefix>,
+# and the engine collects orders under that prefix without knowing the word
+# "Postgres" or "MySQL". This is exercised with an INVENTED prefix: if the test
+# passes with it, no real DBMS name is left hardcoded in the engine.
 fixture papa stack.conf 'Provides_DB="Zulu"
 DB_Init_Service="zulu-init"'
 fixture papa compose.yaml 'services:
@@ -605,58 +624,62 @@ fixture lima compose.yaml 'services:
     image: alpine'
 printf 'Enabled_Stacks="papa kilo lima alpha"\n' > "$WORK/.env-stacks"
 
-check "поставщик находится по роли" "$(stacks_db_provider)" "papa"
-check "префикс заказов взят у поставщика" "$(stacks_db_prefix)" "Zulu"
-check "имя инициализатора взято у поставщика" "$(stacks_db_init_service)" "zulu-init"
-check "файл со списком баз лежит в state машины" \
+check "the provider is found by role" "$(stacks_db_provider)" "papa"
+check "the order prefix comes from the provider" "$(stacks_db_prefix)" "Zulu"
+check "the initializer's name comes from the provider" "$(stacks_db_init_service)" "zulu-init"
+check "the database list lives in the machine's state" \
   "$(stacks_databases_file)" "$WORK/state/papa/databases.yaml"
 
 yaml=$(stacks_databases_content)
-check "объявленная база попала в yaml" "$(printf '%s' "$yaml" | grep -c '^- db:')" "2"
-check "имя базы развёрнуто из .env стека" \
+check "a declared database made it into the YAML" "$(printf '%s' "$yaml" | grep -c '^- db:')" "2"
+check "the database name is expanded from the stack's .env" \
   "$(printf '%s' "$yaml" | grep -c "db: 'kilo_stg'")" "1"
-# Пароль с апострофом обязан пережить YAML: в одинарных кавычках он удваивается.
-# Иначе инициализатор прочитает обрезанный пароль и заведёт пользователя, под
-# которым приложение не подключится, — то есть ровно ту поломку, от которой вся
-# эта генерация и затевалась.
-check "апостроф в пароле экранирован" \
+# A password containing an apostrophe must survive YAML: inside single quotes
+# it is doubled. Otherwise the initializer reads a truncated password and
+# creates a user the application cannot authenticate as — exactly the failure
+# this generation exists to prevent.
+check "an apostrophe in a password is escaped" \
   "$(printf '%s' "$yaml" | grep -c "password: 'p@ss''w0rd'")" "1"
-check "необязательный ключ попал, где объявлен" \
+check "an optional key appears where it is declared" \
   "$(printf '%s' "$yaml" | grep -c "dump: 'lima-seed.sql'")" "1"
-# Путь в S3 для SQLite — формула, которую делят backup.sh и check-backups.sh.
-# Проверяется ЗНАЧЕНИЕ, а не только «формула одна»: разъехавшись, они молча
-# кладут и ищут в разных местах.
-check "путь SQLite в S3" "$(sqlite_s3_subpath /var/lib/app/twd-tm.db)" "sqlite/twd-tm"
-check "путь SQLite: расширение .db срезано" "$(sqlite_s3_subpath /x/base.db)" "sqlite/base"
+# The S3 path for SQLite is a formula shared by backup.sh and
+# check-backups.sh. The VALUE is checked, not merely "there is one formula":
+# once they drift, one stores and the other looks in different places.
+check "the S3 path for SQLite" "$(sqlite_s3_subpath /var/lib/app/twd-tm.db)" "sqlite/twd-tm"
+check "the S3 path for SQLite drops the .db extension" "$(sqlite_s3_subpath /x/base.db)" "sqlite/base"
 
-check "стек без объявления в yaml не попадает" \
+check "a stack that declares nothing stays out of the YAML" \
   "$(printf '%s' "$yaml" | grep -c 'alpha')" "0"
 
-# Выключенному стеку базу заводить незачем. Обратной поломки нет: инициализатор
-# ничего не удаляет, поэтому disable базу не трогает, а enable её вернёт.
+# A disabled stack has no use for a database. There is no failure in the other
+# direction: the initializer deletes nothing, so disable leaves the database
+# alone and enable brings it back.
 printf 'Enabled_Stacks="papa lima"\n' > "$WORK/.env-stacks"
-check "выключенный стек базу не объявляет" \
+check "a disabled stack declares no database" \
   "$(stacks_databases_content | grep -c 'kilo')" "0"
 
-# Без включённого поставщика заказывать не у кого — и это законное состояние, а
-# не поломка: машине с одним прокси-стеком общая СУБД не нужна.
+# With no provider enabled there is nobody to order from — and that is a
+# legitimate state rather than a breakage: a machine with a single proxy stack
+# needs no shared DBMS.
 printf 'Enabled_Stacks="lima"\n' > "$WORK/.env-stacks"
-check "без поставщика yaml пуст" "$(stacks_databases_content)" ""
-check "без поставщика путь к файлу пуст" "$(stacks_databases_file)" ""
+check "without a provider the YAML is empty" "$(stacks_databases_content)" ""
+check "without a provider the file path is empty" "$(stacks_databases_file)" ""
 printf 'Enabled_Stacks="papa lima"\n' > "$WORK/.env-stacks"
 
-# Частичная декларация — отказ, а не половина записи: пользователь без пароля
-# был бы создан с пустым паролем и пустил бы кого угодно, кто дотянется до порта.
+# A partial declaration is a failure rather than half an entry: a user without
+# a password would be created with an empty one and would let in anyone who can
+# reach the database port.
 fixture mike stack.conf 'Zulu_DB="mike"'
 fixture mike compose.yaml 'services:
   mike-app:
     image: alpine'
 printf 'Enabled_Stacks="papa lima mike"\n' > "$WORK/.env-stacks"
-check "частичная декларация найдена" "$(check_db_decl mike | wc -l | tr -d ' ')" "1"
-check "полная декларация претензий не вызывает" "$(check_db_decl lima)" ""
-check "стек без заказа претензий не вызывает" "$(check_db_decl alpha)" ""
+check "a partial declaration is found" "$(check_db_decl mike | wc -l | tr -d ' ')" "1"
+check "a complete declaration raises nothing" "$(check_db_decl lima)" ""
+check "a stack that orders nothing raises nothing" "$(check_db_decl alpha)" ""
 
-# Два стека на одну базу — спор за владельца и почти наверняка опечатка.
+# Two stacks on one database is a fight over ownership and almost certainly a
+# typo.
 fixture november stack.conf 'Zulu_DB="lima"
 Zulu_User="november"
 Zulu_Password="x"'
@@ -664,76 +687,82 @@ fixture november compose.yaml 'services:
   november-app:
     image: alpine'
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
-check "дубль имени базы найден" "$(check_databases_unique | wc -l | tr -d ' ')" "1"
+check "a duplicate database name is found" "$(check_databases_unique | wc -l | tr -d ' ')" "1"
 
-# Двух поставщиков быть не может: заказы различаются префиксом, а не адресатом,
-# и второй с тем же префиксом тихо перехватывал бы чужие декларации.
+# There cannot be two providers: orders are distinguished by prefix rather than
+# by addressee, and a second provider with the same prefix would quietly
+# intercept declarations meant for the first.
 fixture quebec stack.conf 'Provides_DB="Zulu"
 DB_Init_Service="other-init"'
 fixture quebec compose.yaml 'services:
   quebec:
     image: alpine'
 printf 'Enabled_Stacks="papa quebec"\n' > "$WORK/.env-stacks"
-check "два поставщика сразу найдены" "$(check_db_providers_unique | wc -l | tr -d ' ')" "1"
+check "two providers at once are found" "$(check_db_providers_unique | wc -l | tr -d ' ')" "1"
 printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
 
-echo "== реестры образов"
+echo "== image registries"
 
-# Стек, который тянет готовый образ из ECR и пинится по digest'у, — та самая
-# раскладка, ради которой существует scripts/registry.sh.
+# A stack that pulls a prebuilt image from a registry and is pinned by digest
+# is exactly the arrangement registry.sh exists for.
 fixture oscar stack.conf 'Image_Tag="master"'
 fixture oscar compose.yaml 'services:
   oscar-app:
     image: 111.dkr.ecr.eu-north-1.amazonaws.com/oscar@${Oscar_Image_Digest:?not set in stacks/oscar/.env — run ./scripts/registry.sh pin oscar}'
-# papa — образ из реестра, но Image_Tag не объявлен: digest обновлять нечем.
+# papa: an image from a registry, but no Image_Tag declared — nothing to
+# refresh the digest from.
 fixture papa compose.yaml 'services:
   papa-app:
     image: 111.dkr.ecr.eu-north-1.amazonaws.com/papa@${Papa_Image_Digest}'
-# quebec — Image_Tag объявлен, а образ с Docker Hub: пинить нечего.
+# quebec: Image_Tag declared, but the image comes from Docker Hub — nothing to
+# pin.
 fixture quebec stack.conf 'Image_Tag="master"'
 fixture quebec compose.yaml 'services:
   quebec-app:
     image: alpine:3.20'
 printf 'Enabled_Stacks="oscar papa quebec"\n' > "$WORK/.env-stacks"
 
-# Значение `image:` берётся целиком: в подстановке с `:?` есть пробелы, и
-# обрезка по ним оставила бы половину имени образа — а по нему purge ищет, что
-# удалять с диска.
-check 'имя образа с пробелами в подстановке не обрезается' \
+# The `image:` value is taken whole: a `:?` substitution contains spaces, and
+# splitting on them would leave half an image name — and purge uses that name
+# to decide what to delete from disk.
+check 'an image name with spaces inside a substitution is not truncated' \
   "$(stack_images oscar)" \
   '111.dkr.ecr.eu-north-1.amazonaws.com/oscar@${Oscar_Image_Digest:?not set in stacks/oscar/.env — run ./scripts/registry.sh pin oscar}'
 
-check "реестр у образа Docker Hub пустой" "$(image_registry 'alpine:3.20')" ""
-check "реестр у образа с путём, но без точки, пустой" "$(image_registry 'library/alpine:3.20')" ""
-check "реестр ECR распознан" \
+check "a Docker Hub image has no registry host" "$(image_registry 'alpine:3.20')" ""
+check "an image with a path but no dot has no registry host" "$(image_registry 'library/alpine:3.20')" ""
+check "an ECR registry is recognised" \
   "$(image_registry '111.dkr.ecr.eu-north-1.amazonaws.com/oscar@sha256:ab')" \
   "111.dkr.ecr.eu-north-1.amazonaws.com"
-check "реестр с портом распознан" "$(image_registry 'localhost:5000/x')" "localhost:5000"
+check "a registry with a port is recognised" "$(image_registry 'localhost:5000/x')" "localhost:5000"
 
-check "стек с Hub-образом внешних реестров не даёт" "$(stack_registry_images quebec)" ""
-check "реестры перечисленных стеков" "$(stacks_registries oscar quebec)" \
+check "a stack with a Hub image yields no external registries" "$(stack_registry_images quebec)" ""
+check "the registries of the listed stacks" "$(stacks_registries oscar quebec)" \
   "111.dkr.ecr.eu-north-1.amazonaws.com"
 
-# Тег без digest'а и digest без тега — половины одной пары, и каждая по
-# отдельности бесполезна: записывать резолв некуда либо обновлять нечем.
-check "digest без Image_Tag найден" "$(check_image_decl papa | wc -l | tr -d ' ')" "1"
-check "Image_Tag без внешнего реестра найден" "$(check_image_decl quebec | wc -l | tr -d ' ')" "1"
-check "согласованная пара претензий не вызывает" "$(check_image_decl oscar)" ""
+# A tag without a digest and a digest without a tag are halves of one pair, and
+# each is useless alone: there is nowhere to write the resolution, or nothing
+# to refresh it from.
+check "a digest without Image_Tag is found" "$(check_image_decl papa | wc -l | tr -d ' ')" "1"
+check "an Image_Tag without an external registry is found" "$(check_image_decl quebec | wc -l | tr -d ' ')" "1"
+check "a consistent pair raises nothing" "$(check_image_decl oscar)" ""
 
-# Стек вовсе без образов из реестра не должен убивать обход под errexit: в
-# манифесте он бывает первым, и тогда список реестров получился бы пустым.
-check "реестры находятся под set -e, хотя первый стек манифеста без реестра" \
+# A stack with no registry images at all must not kill the walk under errexit:
+# it is sometimes first in the manifest, and the registry list would then come
+# out empty.
+check "registries are found under set -e even though the manifest's first stack has none" \
   "$(errexit_run stacks_registries quebec oscar)" "111.dkr.ecr.eu-north-1.amazonaws.com"
 
-echo "== гигиена платформы"
+echo "== platform hygiene"
 
-# Классы дефектов, на которых я уже попадался. Проверяем не конкретные места, а
-# сам класс: конкретное чинится один раз, класс возвращается.
+# Classes of defect that have occurred before. What is checked is the CLASS,
+# not a particular place: a particular instance is fixed once, a class comes
+# back.
 #
-# Везде -I: без него любой бинарный файл, случайно оказавшийся в дереве
-# (например, .swp от открытого редактора), даёт строку «Binary file ... matches»
-# и роняет сразу несколько гардов — то есть тесты падают из-за постороннего
-# файла, а не из-за кода.
+# -I everywhere: without it any binary file that happens to be in the tree (a
+# .swp from an open editor, say) produces a "Binary file ... matches" line and
+# breaks several guards at once — the tests would fail because of an unrelated
+# file rather than because of the code.
 
 # 1. Путь к стеку, собранный строкой, слеп к профильному корню: такой стек
 #    просто не находится, и его preflight/health/stack.conf молча не читаются.
