@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
 
-# Подготовка машины под девбокс: то, что делается один раз и не относится ни к
-# одному стеку в отдельности — пакеты, заглушечные сертификаты, таймеры
-# systemd. Хостовые нужды самих стеков делают их же scripts/host-setup.sh.
+# Preparing a machine: the things done once that belong to no single stack —
+# packages, placeholder certificates, systemd timers. A stack's own host-level
+# needs are handled by its scripts/host-setup.sh.
 #
-# Смысл существования: эти шаги делались руками и по памяти (bootstrap.sh плюс
-# устная традиция), а забытый шаг проявляется не сразу. Забыли таймеры —
-# сертификаты не продлеваются, и видно это только когда они кончились.
+# Why it exists: these steps used to be done by hand and from memory, and a
+# forgotten one does not show up immediately. Forget the timers and
+# certificates stop being renewed — which becomes visible only once they have
+# expired.
 #
-# Скрипт идемпотентен: ставит только недостающее, повторный запуск безопасен.
+# The script is idempotent: it installs only what is missing, and running it
+# again is safe.
 #
-#   sudo ./host-setup            # проверить и доустановить
-#   ./host-setup --check         # только проверить, без root и без
-#                                           # изменений; код 1 = чего-то нет
+#   sudo ./host-setup      # check and install what is missing
+#   ./host-setup --check   # check only, without root and without changes;
+#                          # exit code 1 means something is missing
 #
-# Чего он НЕ делает (и не должен): не заполняет секреты, не трогает DNS, не
-# поднимает стеки. Это интерактивные шаги, они в README.
+# What it does NOT do, and must not: it does not fill in secrets, does not
+# touch DNS, does not bring stacks up. Those are interactive steps and live in
+# the README.
 
 set -euo pipefail
 
 DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# Каталог МАШИНЫ, а не платформы. Обычно его задаёт обёртка ./stack в корне
-# машины; запасной вариант — на два уровня вверх от platform/bin, чтобы скрипт
-# работал и при прямом вызове.
+# The MACHINE's directory, not the platform's. Normally set by a wrapper in the
+# machine root; the fallback is two levels up from platform/bin, so the script
+# also works when invoked directly.
 if [ -z "${ROOT_DIR:-}" ]; then
   ROOT_DIR="$( cd "$DIR0/../.." && pwd )"
   # On a machine, platform/ is a symlink into .stackyard/, and the `cd -P`
@@ -42,8 +45,8 @@ CHECK_ONLY=0
 if [ "${1:-}" = "--check" ]; then
   CHECK_ONLY=1
 elif [ $# -gt 0 ]; then
-  echo "Неизвестный аргумент: $1" >&2
-  echo "Использование: sudo $0 [--check]" >&2
+  echo "Unknown argument: $1" >&2
+  echo "Usage: sudo $0 [--check]" >&2
   exit 2
 fi
 
@@ -55,12 +58,13 @@ WARNINGS=0
 # shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 
-# Только платформенные значения. Читаем через lib-env.sh, а не grep'ом: он один
-# разворачивает ${...} и снимает кавычки так же, как это делает docker compose,
-# — иначе проверка и контейнер видели бы разные значения.
+# Platform-level values only. Read through lib-env.sh rather than with grep: it
+# is the only thing that expands ${...} and strips quotes the way docker
+# compose does — otherwise the check and the container would see different
+# values.
 #
-# .env стеков здесь НЕ читаются: платформа не знает, какие ключи в них лежат.
-# Свои значения проверяет сам стек, в scripts/host-setup.sh.
+# Stack .env files are NOT read here: the platform does not know which keys
+# they hold. A stack validates its own values, in its scripts/host-setup.sh.
 ENV_VARS=(); env_load_files "$ENV_FILE"
 
 ok()   { echo "  [ok]   $1"; }
@@ -68,29 +72,31 @@ warn() { echo "  [!]    $1"; WARNINGS=$((WARNINGS + 1)); }
 bad()  { echo "  [FAIL] $1"; PROBLEMS=$((PROBLEMS + 1)); }
 step() { echo; echo "== $1"; }
 
-# Пакеты, которые ставит сам скрипт. Каждый — предусловие конкретного шага, а
-# не «на всякий случай»: openssl даёт заглушки сертификатов и dhparam, bzip2
-# нужен сжатию дампов, gnupg2 — шифрованию бэкапа, logrotate — ротации логов
-# nginx (пакета nginx на хосте нет, значит и /etc/logrotate.d/nginx нет).
+# The packages this script installs. Each one is a precondition for a specific
+# step rather than a "just in case": openssl produces the placeholder
+# certificates and dhparam, bzip2 compresses dumps, gnupg encrypts backups,
+# logrotate rotates the nginx logs (there is no nginx package on the host, so
+# there is no /etc/logrotate.d/nginx either).
 #
-# Список платформенный, а не постековый, намеренно: выключение стека не должно
-# снимать пакет, который нужен кому-то ещё.
-# Имена ОБЩИЕ; в имена дистрибутива их переводит pkg_name ниже. Общий список
-# здесь потому, что предусловие — это возможность (шифровать, сжимать), а не
-# строка из каталога пакетов конкретного дистрибутива.
+# The list is platform-level rather than per-stack on purpose: disabling a
+# stack must not remove a package someone else needs.
+#
+# The names here are GENERIC; pkg_name below translates them into a
+# distribution's names. Generic because a precondition is a capability (to
+# encrypt, to compress), not a line from one distribution's package index.
 PACKAGES=(logrotate openssl bzip2 gnupg sqlite curl git)
 
-# Менеджер пакетов. Определяем, а не предполагаем: платформа раздаётся, и
-# зашитый dnf означает, что на Debian/Ubuntu первая же установка упирается в
-# «dnf: command not found» — с подсказкой, которую невозможно выполнить.
+# The package manager is detected, not assumed: the platform is distributed,
+# and a hardcoded one means that on another distribution the first install runs
+# into "command not found" — with advice that cannot be followed.
 PKG_MGR=""
 for m in apt-get dnf yum apk zypper; do  # pkg-mgr-ok
   command -v "$m" >/dev/null 2>&1 && { PKG_MGR="$m"; break; }
 done
 
-# Имя пакета в терминах дистрибутива. Совпадает не всегда: gnupg против gnupg2,
-# sqlite3 против sqlite. Ошибка здесь выглядит как «пакета не существует» — то
-# есть как проблема машины, а не как наша.
+# The package name in a distribution's own terms. They do not always match:
+# gnupg versus gnupg2, sqlite3 versus sqlite. A mistake here looks like "no
+# such package" — that is, like the machine's problem rather than ours.
 pkg_name() {
   case "$PKG_MGR:$1" in
     apt-get:gnupg|apk:gnupg)   echo gnupg ;;
@@ -118,136 +124,140 @@ pkg_install_cmd() {
     yum)     echo "sudo yum install -y" ;;  # pkg-mgr-ok
     apk)     echo "sudo apk add" ;;  # pkg-mgr-ok
     zypper)  echo "sudo zypper install -y" ;;  # pkg-mgr-ok
-    *)       echo "(менеджер пакетов не определён)" ;;
+    *)       echo "(package manager not detected)" ;;
   esac
 }
 
-# ---------------------------------------------------------------- 1. базовое
+# ---------------------------------------------------------------- 1. basics
 
-step "Окружение"
+step "Environment"
 
 if [ "$CHECK_ONLY" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
-  echo "Ошибка: нужны права root. Запустите: sudo $0" >&2
-  echo "  Либо посмотрите, чего не хватает, без изменений: $0 --check" >&2
+  echo "Error: root privileges are required. Run: sudo $0" >&2
+  echo "  Or see what is missing, without changing anything: $0 --check" >&2
   exit 1
 fi
 
 command -v systemctl >/dev/null 2>&1 \
-  && ok "systemd на месте" \
-  || bad "нет systemctl — таймеры ставить нечем, машине нужен другой планировщик"
+  && ok "systemd is present" \
+  || bad "no systemctl — there is nothing to install timers into; this machine needs another scheduler"
 
 if command -v docker >/dev/null 2>&1; then
   ok "docker: $(docker --version 2>/dev/null | head -n 1)"
   if docker compose version >/dev/null 2>&1; then
-    ok "docker compose (плагин v2)"
+    ok "docker compose (v2 plugin)"
   else
-    bad "нет 'docker compose' — docker-compose.sh не заработает (нужен плагин v2, не docker-compose v1)"
+    bad "no 'docker compose' — docker-compose.sh will not work (the v2 plugin is required, not docker-compose v1)"
   fi
   docker info >/dev/null 2>&1 \
-    && ok "демон docker отвечает" \
-    || bad "демон docker не отвечает: sudo systemctl enable --now docker"
+    && ok "the docker daemon is responding" \
+    || bad "the docker daemon is not responding: sudo systemctl enable --now docker"
 else
-  # Установку docker намеренно не автоматизируем: она тянет за собой членство
-  # в группе docker, а оно применяется только после перелогина — то есть
-  # скрипт всё равно не смог бы завершить дело за один проход.
-  bad "нет docker. Поставить его пакетом вашего дистрибутива, затем: sudo systemctl enable --now docker && sudo usermod -aG docker \$USER (и перелогиниться)"
+  # Installing docker is deliberately not automated: it entails membership in
+  # the docker group, which takes effect only after a re-login — so the script
+  # could not finish the job in one pass anyway.
+  bad "no docker. Install it from your distribution, then: sudo systemctl enable --now docker && sudo usermod -aG docker \$USER (and log in again)"
 fi
 
-# ------------------------------------------------------ 2. внешний том
+# ------------------------------------------------------ 2. the external volume
 
 DATA_MOUNT="$(env_get Platform_Data_Mount)"
 if [ -n "$DATA_MOUNT" ]; then
-  step "Внешний том $DATA_MOUNT"
+  step "External volume $DATA_MOUNT"
 
-  # Машина, у которой данные лежат на ОТДЕЛЬНОМ томе, объявляет его в
-  # Platform_Data_Mount. Если том не смонтирован, `docker run -v` заводит под
-  # точкой монтирования пустые каталоги, а СУБД инициализирует в них чистый
-  # датадир. Снаружи это неотличимо от потери данных: сайт открывается, базы
-  # пустые, и всё записано на не тот диск. Поэтому [FAIL], а не предупреждение.
+  # A machine whose data lives on a SEPARATE volume declares it in
+  # Platform_Data_Mount. If that volume is not mounted, `docker run -v` creates
+  # empty directories under the mount point and the DBMS initialises a fresh
+  # data directory inside them. From the outside this is indistinguishable from
+  # data loss: the site comes up, the databases are empty, and everything has
+  # been written to the wrong disk. Hence [FAIL] rather than a warning.
   #
-  # Пустое значение — законное состояние, а не забывчивость: на машине, где
-  # /mnt/data просто каталог корневого раздела, эта проверка была бы вечной
-  # ложной тревогой, а ложная тревога быстро учит не читать отчёт.
+  # An empty value is a legitimate state, not forgetfulness: on a machine where
+  # the data directory is just a directory on the root partition, this check
+  # would be a permanent false alarm — and a false alarm quickly teaches people
+  # not to read the report.
   if mountpoint -q "$DATA_MOUNT" 2>/dev/null; then
-    ok "$DATA_MOUNT смонтирован"
+    ok "$DATA_MOUNT is mounted"
   else
-    bad "$DATA_MOUNT НЕ точка монтирования — внешний том не подключён; базы поднимать нельзя"
-    echo "         Проверить: lsblk; findmnt $DATA_MOUNT"
+    bad "$DATA_MOUNT is NOT a mount point — the external volume is not attached; do not start databases"
+    echo "         Check with: lsblk; findmnt $DATA_MOUNT"
   fi
 else
-  step "Внешний том"
-  ok "Platform_Data_Mount не задан — отдельного тома на этой машине нет"
+  step "External volume"
+  ok "Platform_Data_Mount is not set — this machine has no separate volume"
 fi
 
 # ------------------------------------------------------------------ 3. .env
 
-step "Вендоренные слои"
+step "Vendored layers"
 
-# Раньше остальных проверок: если платформа на машине не та, что заявлена, или
-# её правили на месте, всё, что проверяется ниже, проверяется не тем кодом.
+# Before every other check: if the platform on the machine is not the version
+# it claims, or was edited in place, then everything checked below is being
+# checked by the wrong code.
 "$DIR0/check-vendor.sh" | sed 's/^/  /' || PROBLEMS=$((PROBLEMS + 1))
 
-step "Файлы окружения"
+step "Environment files"
 
 if [ ! -f "$ENV_FILE" ]; then
-  bad "нет $ENV_FILE — cp .env.example .env && chmod 600 .env, затем заполнить"
+  bad "no $ENV_FILE — cp .env.example .env && chmod 600 .env, then fill it in"
 else
-  ok ".env на месте"
+  ok ".env is present"
 
   DEPLOY=$(env_get Platform_Deploy_Dir)
-  # Частый способ выстрелить себе в ногу: .env скопировали с другой машины, и
-  # он указывает на чужой путь. Всё остальное после этого «работает», но
-  # монтирует не тот каталог.
+  # A common way to shoot yourself in the foot: .env was copied from another
+  # machine and points at that machine's path. Everything afterwards "works"
+  # while mounting the wrong directory.
   if [ "$DEPLOY" != "$ROOT_DIR" ]; then
-    bad "Platform_Deploy_Dir='$DEPLOY', а репозиторий лежит в '$ROOT_DIR'"
+    bad "Platform_Deploy_Dir='$DEPLOY', while the repository is at '$ROOT_DIR'"
   else
-    ok "Platform_Deploy_Dir совпадает с каталогом репозитория"
+    ok "Platform_Deploy_Dir matches the repository directory"
   fi
 
   NET=$(env_get Platform_Network)
 
   if [ -z "$NET" ]; then
-    bad "Platform_Network не задана в .env"
+    bad "Platform_Network is not set in .env"
   elif docker network inspect "$NET" >/dev/null 2>&1; then
-    ok "docker-сеть '$NET' существует"
+    ok "docker network '$NET' exists"
   else
-    warn "docker-сети '$NET' пока нет — её создаст docker-compose.sh при первом запуске"
+    warn "docker network '$NET' does not exist yet — docker-compose.sh will create it on first use"
   fi
 fi
 
-# Какие стеки включены и чего им не хватает — спрашиваем у lib-stacks.sh, а не
-# перечисляем здесь: состав определяет Enabled_Stacks в .env-stacks, и второй
-# список означал бы ровно тот разъезд, от которого этот скрипт защищает.
+# Which stacks are enabled and what they are missing is asked of lib-stacks.sh
+# rather than listed here: the set is defined by Enabled_Stacks in .env-stacks,
+# and a second list would be exactly the drift this script guards against.
 if [ -f "$ROOT_DIR/.env-stacks" ]; then
-  ok ".env-stacks (включено: $(stacks_enabled 2>/dev/null | tr '\n' ' '))"
+  ok ".env-stacks (enabled: $(stacks_enabled 2>/dev/null | tr '\n' ' '))"
 else
-  warn "нет .env-stacks — включёнными считаются все стеки с полным набором файлов (cp .env-stacks.example .env-stacks)"
+  warn "no .env-stacks — every stack with a complete file set counts as enabled (cp .env-stacks.example .env-stacks)"
 fi
 
 for stack in $(stacks_enabled 2>/dev/null); do
   missing=$(stack_missing_files "$stack" | tr '\n' ' ')
   if [ -z "$(echo $missing)" ]; then
-    ok "стек $stack: файлы на месте"
+    ok "stack $stack: all files present"
   else
     for f in $missing; do
       if [ -f "$ROOT_DIR/$f.example" ]; then
-        bad "стек $stack: нет $f — cp $f.example $f && chmod 600 $f, затем заполнить секреты"
+        bad "stack $stack: no $f — cp $f.example $f && chmod 600 $f, then fill in the secrets"
       else
-        bad "стек $stack: нет $f"
+        bad "stack $stack: no $f"
       fi
     done
   fi
 done
 
-# ---------------------------------------------------------------- 4. пакеты
+# ---------------------------------------------------------------- 4. packages
 
-step "Незаполненные секреты"
+step "Unfilled secrets"
 
-# Образцы .env несут CHANGE_ME там, где значение обязано быть задано: без него
-# `--examples` не смог бы проверить синтаксис compose на машине без секретов.
-# Цена этого удобства — плейсхолдер, который легко скопировать и не заметить,
-# поэтому он проверяется здесь. Ищем по ЗНАЧЕНИЮ, а не по списку ключей:
-# платформа не знает, какие ключи заведёт очередной стек.
+# The .env examples carry CHANGE_ME wherever a value must be supplied: without
+# it, `--examples` could not validate compose syntax on a machine that holds no
+# secrets. The price of that convenience is a placeholder which is easy to copy
+# and overlook, so it is checked here. Searched for by VALUE rather than
+# against a list of keys: the platform does not know which keys the next stack
+# will introduce.
 left=0
 for f in "$ROOT_DIR"/.env "$ROOT_DIR"/.env-backup "$ROOT_DIR"/.env-notify "$ROOT_DIR"/stacks/*/.env; do
   [ -f "$f" ] || continue
@@ -255,17 +265,17 @@ for f in "$ROOT_DIR"/.env "$ROOT_DIR"/.env-backup "$ROOT_DIR"/.env-notify "$ROOT
     case "$line" in \#*|'') continue ;; esac
     case "${line#*=}" in
       CHANGE_ME|'"CHANGE_ME"'|"'CHANGE_ME'")
-        bad "${f#"$ROOT_DIR"/}: ${line%%=*} не заполнен (осталось CHANGE_ME)"; left=$((left + 1)) ;;
+        bad "${f#"$ROOT_DIR"/}: ${line%%=*} is not filled in (still CHANGE_ME)"; left=$((left + 1)) ;;
     esac
   done < "$f"
 done
-[ "$left" -eq 0 ] && ok "незаполненных значений нет"
+[ "$left" -eq 0 ] && ok "no unfilled values"
 
-step "Пакеты"
+step "Packages"
 
 if [ -z "$PKG_MGR" ]; then
-  bad "менеджер пакетов не опознан (искали apt-get, dnf, yum, apk, zypper)"
-  echo "         Поставьте вручную: ${PACKAGES[*]}"
+  bad "package manager not recognised (looked for apt-get, dnf, yum, apk, zypper)"
+  echo "         Install by hand: ${PACKAGES[*]}"
 else
   MISSING_PKGS=()
   for pkg in "${PACKAGES[@]}"; do
@@ -275,35 +285,37 @@ else
 
   if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
     if [ "$CHECK_ONLY" -eq 1 ]; then
-      bad "не установлены: ${MISSING_PKGS[*]} ($(pkg_install_cmd) ${MISSING_PKGS[*]})"
+      bad "not installed: ${MISSING_PKGS[*]} ($(pkg_install_cmd) ${MISSING_PKGS[*]})"
     else
-      echo "  ... установка ($PKG_MGR): ${MISSING_PKGS[*]}"
+      echo "  ... installing ($PKG_MGR): ${MISSING_PKGS[*]}"
       case "$PKG_MGR" in
         apt-get) apt-get update -qq && apt-get install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
         dnf|yum) "$PKG_MGR" install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
         apk)     apk add "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
         zypper)  zypper install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
       esac
-      for pkg in "${MISSING_PKGS[@]}"; do ok "$pkg (установлен)"; done
+      for pkg in "${MISSING_PKGS[@]}"; do ok "$pkg (installed)"; done
     fi
   fi
 fi
 
-# Пакеты поставлены — но проверять надо КОМАНДЫ. Имя пакета у каждого
-# дистрибутива своё и уже один раз подвело (gnupg против gnupg2), а `gpg`,
-# которого нет, ломает шифрование дампов одинаково везде. Список ровно
-# соответствует тому, что зовут скрипты platform/bin.
+# The packages are installed — but what has to be checked is the COMMANDS. Each
+# distribution names its packages differently (that difference has already
+# caught us once), while a missing `gpg` breaks dump encryption identically
+# everywhere. The list matches exactly what the scripts in platform/bin call.
 #
-# Отсутствие — предупреждение, а не отказ: sqlite3 нужен только машине с
-# sqlite-источниками, curl — только машине с оповещениями, и [FAIL] там, где
-# возможности просто не пользуются, быстро учит не читать отчёт. Исключение —
-# openssl и git: без первого не выпустить даже заглушку сертификата, без
-# второго не обновить слои через ./bootstrap.
-step "Команды платформы"
+# A missing command is a warning rather than a failure: sqlite3 is needed only
+# by a machine with SQLite sources, curl only by a machine with notifications,
+# and a [FAIL] for a capability nobody uses quickly teaches people not to read
+# the report. The exceptions are openssl and git: without the first not even a
+# placeholder certificate can be produced, without the second the layers cannot
+# be updated by ./bootstrap.
+step "Platform commands"
 
-# Команда и пакет зовутся по-разному чаще, чем кажется: gpg приезжает в gnupg,
-# sqlite3 — в sqlite. Подсказка «поставьте пакет gpg» невыполнима, а выглядит
-# как рабочая, и человек тратит время на несуществующий пакет.
+# A command and its package are named differently more often than one expects:
+# gpg arrives in gnupg, sqlite3 in sqlite. Advice to "install the gpg package"
+# cannot be followed while looking perfectly workable, and someone spends time
+# on a package that does not exist.
 pkg_for_cmd() {
   case "$1" in
     gpg)     echo gnupg ;;
@@ -318,53 +330,56 @@ check_cmd() {
   if command -v "$cmd" >/dev/null 2>&1; then
     ok "$cmd — $why"
   elif [ "$sev" = bad ]; then
-    bad "нет $cmd — $why ($hint)"
+    bad "no $cmd — $why ($hint)"
   else
-    warn "нет $cmd — $why ($hint)"
+    warn "no $cmd — $why ($hint)"
   fi
 }
 
-check_cmd openssl bad  "заглушки сертификатов и dhparam (certs.sh)"
-check_cmd git     bad  "обновление слоёв (./bootstrap)"
-check_cmd gpg     warn "шифрование дампов (backup.sh)"
-check_cmd bzip2   warn "сжатие дампов (backup.sh)"
-check_cmd gzip    warn "чтение и запись дампов (backup.sh, backup-restore.sh)"
-check_cmd tar     warn "архивы файловых источников (backup.sh)"
-check_cmd sqlite3 warn "снятие копии sqlite-баз (backup.sh)"
-check_cmd curl    warn "оповещения (notify.sh)"
+check_cmd openssl bad  "placeholder certificates and dhparam (certs.sh)"
+check_cmd git     bad  "updating the layers (./bootstrap)"
+check_cmd gpg     warn "encrypting dumps (backup.sh)"
+check_cmd bzip2   warn "compressing dumps (backup.sh)"
+check_cmd gzip    warn "reading and writing dumps (backup.sh, backup-restore.sh)"
+check_cmd tar     warn "archiving file sources (backup.sh)"
+check_cmd sqlite3 warn "taking copies of SQLite databases (backup.sh)"
+check_cmd curl    warn "notifications (notify.sh)"
 
-# aws — единственная команда, надобность которой объявлена, а не постоянна.
-# Спрашиваем у стеков и у .env-backup, а не держим свой список: иначе второй
-# стек с образом из ECR потребовал бы правки здесь, и про неё бы забыли.
+# aws is the one command whose necessity is declared rather than constant. It
+# is asked of the stacks and of .env-backup rather than kept in a list here:
+# otherwise a second stack pulling from a registry would require an edit here,
+# and that edit would be forgotten.
 #
-# Отвечает ли роль инстанса — вопрос отдельный, его задаёт registry.sh --check:
-# наличие команды и наличие прав не одно и то же, и второе без сети не узнать.
-# shellcheck disable=SC2119  # список стеков у stacks_registries необязателен
+# Whether the instance's role answers is a separate question, asked by
+# registry.sh --check: having the command and having the permissions are not
+# the same thing, and the second cannot be learned without the network.
+# shellcheck disable=SC2119  # the stack list is optional for stacks_registries
 REGISTRIES="$(stacks_registries 2>/dev/null | tr '\n' ' ')"
 if [ -n "${REGISTRIES// /}" ]; then
   command -v aws >/dev/null 2>&1 \
-    && ok "aws — образы из реестров: $REGISTRIES" \
-    || bad "нет aws, а стеки тянут образы из ECR ($REGISTRIES) — pull не пройдёт"
+    && ok "aws — images from registries: $REGISTRIES" \
+    || bad "no aws, while stacks pull images from a registry ($REGISTRIES) — pulls will fail"
 elif [ -f "$ROOT_DIR/.env-backup" ]; then
   command -v aws >/dev/null 2>&1 \
-    && ok "aws — выгрузка бэкапов в S3" \
-    || bad "нет aws, а .env-backup настроен — backup.sh не выгрузит дампы"
+    && ok "aws — uploading backups to S3" \
+    || bad "no aws, while .env-backup is configured — backup.sh will not upload dumps"
 else
-  ok "aws не нужен: ни реестров образов, ни .env-backup"
+  ok "aws is not needed: no image registries, no .env-backup"
 fi
 
-# --------------------------------------------------- 5. хостовая часть стеков
+# --------------------------------------------------- 5. stacks' host-level needs
 
-step "Хостовая часть стеков"
+step "Stacks' host-level needs"
 
-# Не всё, что нужно стеку, живёт в контейнере. Стеку php-fpm нужен шим
-# /usr/local/bin/php, стеку mysql — _db/db.conf. Раньше и то, и другое стояло
-# прямо здесь, и платформа знала про PHP и про MySQL.
+# Not everything a stack needs lives inside a container: one may need a shim on
+# the host's PATH, another a configuration file for an external toolkit. Doing
+# that here would mean the platform knowing about each stack's technology.
 #
-# Теперь это делает сам стек: наличие scripts/host-setup.sh — и есть
-# объявление, отдельного ключа для него не нужно, как и для health.sh.
-# Контракт: идемпотентен, понимает --check (ничего не менять, ненулевой код
-# при нехватке), получает в окружении ROOT_DIR и STACK_DIR.
+# Instead the stack does it itself: the presence of scripts/host-setup.sh IS
+# the declaration, no separate key is needed for it, just as with health.sh.
+# The contract: idempotent, understands --check (change nothing, non-zero exit
+# when something is missing), receives ROOT_DIR and STACK_DIR in its
+# environment.
 for stack in $(stacks_enabled 2>/dev/null); do
   hook="$(stack_dir "$stack")/scripts/host-setup.sh"
   [ -x "$hook" ] || continue
@@ -381,22 +396,22 @@ done
 TOTAL_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
 SWAP_MB=$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
 if [ "${TOTAL_MB:-0}" -gt 0 ]; then
-  step "Память"
+  step "Memory"
   if [ "$SWAP_MB" -eq 0 ] && [ "$TOTAL_MB" -lt 4096 ]; then
-    warn "RAM ${TOTAL_MB}M, swap нет — сборка образов может упасть по памяти"
+    warn "RAM ${TOTAL_MB}M, no swap — an image build may fail for lack of memory"
   else
     ok "RAM ${TOTAL_MB}M, swap ${SWAP_MB}M"
   fi
 fi
 
-# ------------------------------------------------- 8. сертификаты и таймеры
+# ------------------------------------------------- 8. certificates and timers
 
-step "Заглушки сертификатов и таймеры"
+step "Placeholder certificates and timers"
 
-# getssl не лежит в репозитории — он скачивается по platform/getssl.lock.
-# Раньше проверки таймеров: без него юниты ставить некуда, и отказ «таймер
-# есть, продления нет» выглядел бы так же, как исправная машина, которой
-# нечего продлевать.
+# getssl is not kept in the repository — it is downloaded according to
+# platform/getssl.lock. Before the timer checks: without it there is nowhere to
+# install the units, and a failure of the form "there is a timer but no
+# renewals" would look exactly like a healthy machine with nothing to renew.
 if [ "$CHECK_ONLY" -eq 1 ]; then
   "$DIR0/getssl-fetch.sh" --check || PROBLEMS=$((PROBLEMS + 1))
 else
@@ -405,12 +420,12 @@ fi
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
   [ -f "$ROOT_DIR/state/certs/nginx-selfsigned.crt" ] \
-    && ok "заглушечный сертификат есть" \
-    || bad "нет заглушек сертификатов — ./platform/bin/certs.sh (без них nginx не стартует с новым vhost)"
+    && ok "the placeholder certificate exists" \
+    || bad "no placeholder certificates — ./platform/bin/certs.sh (without them nginx will not start with a new vhost)"
 
-  # Платформенные таймеры — всегда; таймеры стеков — по включённым. Поимённый
-  # список означал бы, что на машине без такого стека проверка требует таймер,
-  # которого там быть и не должно.
+  # Platform timers always; stack timers according to what is enabled. A list
+  # by name would mean that on a machine without such a stack the check demands
+  # a timer that has no business being there.
   EXPECTED_TIMERS=(getssl-renew.timer getssl-check.timer)
   while IFS= read -r stack; do
     [ -n "$stack" ] || continue
@@ -423,54 +438,54 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
 
   for t in "${EXPECTED_TIMERS[@]}"; do
     systemctl is-enabled "$t" >/dev/null 2>&1 \
-      && ok "$t включён" \
-      || bad "$t не установлен — sudo ./platform/bin/systemd.sh"
+      && ok "$t is enabled" \
+      || bad "$t is not installed — sudo ./platform/bin/systemd.sh"
   done
 
-  # Старый планировщик. Оставленная строка в кроне означает, что getssl
-  # работает дважды — из cron и из таймера, — а два параллельных продления
-  # спорят за один ACME-аккаунт и за один каталог.
+  # The old scheduler. A leftover cron line means getssl runs twice — from cron
+  # and from the timer — and two parallel renewals fight over one ACME account
+  # and one directory.
   if sudo -n true 2>/dev/null || [ "$(id -u)" -eq 0 ]; then
-    # Ищем по путям ЭТОЙ машины, а не по зашитому имени: имя конкретного
-    # девбокса в платформе означало бы, что на любой другой машине проверка
-    # молча проходит, ничего не найдя.
+    # Searched for by THIS machine's paths rather than a hardcoded name: a
+    # specific machine's name inside the platform would mean the check silently
+    # passes on every other machine, having found nothing.
     if grep -qsF "$ROOT_DIR" /etc/crontab /etc/cron.d/* 2>/dev/null \
        || grep -qsE 'getssl|backup\.sh' /etc/crontab /etc/cron.d/* 2>/dev/null; then
-      bad "в cron остались задачи этой машины — они дублируют таймеры systemd; уберите их"
+      bad "cron still holds jobs for this machine — they duplicate the systemd timers; remove them"
       grep -nsE "$ROOT_DIR|getssl|backup\.sh" /etc/crontab /etc/cron.d/* 2>/dev/null | sed 's/^/         /'
     else
-      ok "в cron задач этой машины нет"
+      ok "cron holds no jobs for this machine"
     fi
   fi
 else
-  # certs.sh — от имени владельца репозитория, а НЕ от root: getssl в таймере
-  # работает под этим же пользователем и позже перезапишет заглушки настоящими
-  # сертификатами. Root-овые файлы он молча заменить не сможет.
+  # certs.sh runs as the repository's owner, NOT as root: the getssl timer runs
+  # as that same user and will later overwrite the placeholders with real
+  # certificates. Root-owned files it cannot silently replace.
   SERVICE_USER=$(stat -c '%U' "$ROOT_DIR" 2>/dev/null || stat -f '%Su' "$ROOT_DIR")
-  echo "  ... заглушки сертификатов (от имени $SERVICE_USER)"
-  # ROOT_DIR передаётся ЯВНО через env: sudo сбрасывает окружение (env_reset),
-  # и экспортированная обёрткой переменная до дочернего процесса не доходит. Без
-  # неё certs.sh вычисляет корень от своего пути — а лежит он в
-  # .stackyard/platform/bin, то есть корнем оказывается .stackyard, и скрипт
-  # ищет .env там. Отказ выглядит как «нет .env» на машине, где .env есть.
+  echo "  ... placeholder certificates (as $SERVICE_USER)"
+  # ROOT_DIR is passed EXPLICITLY through env: sudo resets the environment, so a
+  # variable exported by the wrapper never reaches the child process. Without
+  # it certs.sh derives the root from its own path — which is inside
+  # .stackyard/platform/bin, making .stackyard the root, and the script looks
+  # for .env there. The failure reads as "no .env" on a machine that has one.
   sudo -u "$SERVICE_USER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh" | sed 's/^/      /'
 
-  echo "  ... таймеры systemd"
+  echo "  ... systemd timers"
   "$DIR0/systemd.sh" | sed 's/^/      /'
 fi
 
-# ------------------------------------------------------------------ 9. итог
+# ------------------------------------------------------------------ 9. summary
 
 echo
 if [ "$PROBLEMS" -gt 0 ]; then
-  echo "Не готово: проблем — $PROBLEMS, предупреждений — $WARNINGS."
-  [ "$CHECK_ONLY" -eq 1 ] && echo "Починить то, что чинится автоматически: sudo $0"
+  echo "Not ready: problems — $PROBLEMS, warnings — $WARNINGS."
+  [ "$CHECK_ONLY" -eq 1 ] && echo "Fix what can be fixed automatically: sudo $0"
   exit 1
 fi
 
-echo "Хост готов. Предупреждений: $WARNINGS."
+echo "The host is ready. Warnings: $WARNINGS."
 echo
-echo "Проверить состояние в любой момент:"
+echo "To check the state at any time:"
 echo "  $0 --check"
 echo "  ./stack --check"
 echo "  systemctl list-timers 'getssl-*' 'devbox-*'"
