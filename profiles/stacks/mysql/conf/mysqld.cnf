@@ -1,0 +1,23 @@
+# Settings for the shared mysqld. From a file, not from a `SET GLOBAL` after
+# startup: a global variable lives until the container is next restarted, and
+# the setting disappears exactly when the container is recreated -- that is, in
+# the middle of an ordinary `up -d`.
+#
+# Verification must ask the RUNNING server rather than read this file: if the
+# image reads its configs from somewhere other than /etc/mysql/conf.d, the file
+# is in place and the setting is not. That is what the stack's scripts/health.sh
+# does.
+
+[mysqld]
+
+# ONLY_FULL_GROUP_BY is off: legacy Kohana code writes GROUP BY without listing
+# every column, and with the mode on those queries fail.
+# MySQL 5.5 does not have this mode in its defaults at all; the line here guards
+# against a move to 5.7+, where it is on by default.
+sql_mode = NO_ENGINE_SUBSTITUTION
+
+character-set-server = utf8
+collation-server     = utf8_general_ci
+
+[client]
+default-character-set = utf8
