@@ -9,12 +9,13 @@ services:
     networks:
       - shared_network
     volumes:
-      - ${Pg_Data_Dir:?задайте Pg_Data_Dir в stacks/pg/.env}:/var/lib/postgresql/data
+      - ${Pg_Data_Dir:?set Pg_Data_Dir in stacks/pg/.env}:/var/lib/postgresql/data
     environment:
-      # Слева контракт образа, справа наши имена. Префикс намеренно Pg_, а не
-      # Postgres_: Postgres_* — это ключи ЗАКАЗА базы, которые пишут стеки-
-      # потребители. Назови мы свои суперюзерские креды тем же префиксом, стек
-      # pg выглядел бы для генератора как собственный потребитель.
+      # The image's contract on the left, our own names on the right. The
+      # prefix is deliberately Pg_ and not Postgres_: Postgres_* are the keys of
+      # a database ORDER, written by consumer stacks. Had we named our
+      # superuser credentials with the same prefix, the generator would see the
+      # pg stack as a consumer of itself.
       - POSTGRES_USER=${Pg_Root_User:?}
       - POSTGRES_PASSWORD=${Pg_Root_Password:?}
       - POSTGRES_DB=${Pg_Root_DB:-postgres}
@@ -31,8 +32,9 @@ services:
       - shared_network
     volumes:
       - ${Pg_Stack_Dir:-${Platform_Deploy_Dir}/profile/stacks/pg}/db-init/initializer.sh:/initializer.sh:ro
-      # Список баз — в машинном state/, а не рядом со скриптом: внутрь profile/
-      # писать нельзя, следующее обновление профиля его затрёт.
+      # The database list lives in the machine's state/, not next to the
+      # script: writing inside profile/ is not allowed, the next profile update
+      # would overwrite it.
       - ${Platform_Deploy_Dir:?}/state/pg/databases.yaml:/config/databases.yaml:ro
       - ${Platform_Deploy_Dir:?}/dumps:/dumps:ro
     environment:

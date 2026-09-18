@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 #
-# Проверка заказа базы у ЭТОГО поставщика. Зовётся платформой (check_db_decl)
-# для каждого стека-потребителя; в окружении STACK_NAME, DB_PREFIX, ROOT_DIR.
+# Validation of a database order against THIS provider. Called by the platform
+# (check_db_decl) for every consumer stack; STACK_NAME, DB_PREFIX and ROOT_DIR
+# are in the environment.
 #
-# Здесь, а не в платформе, потому что список допустимых прав — это знание про
-# MySQL. Платформа, знающая слово GRANT, снова стала бы непереносимой на
-# машину с другой СУБД — ровно то, от чего мы ушли.
+# It lives here and not in the platform because the list of valid privileges is
+# knowledge about MySQL. A platform that knows the word GRANT would again be
+# unportable to a machine with a different DBMS -- exactly what we moved away
+# from.
 #
-# Печатает по строке на проблему и молчит, когда её нет.
+# Prints one line per problem and stays silent when there is none.
 
 set -uo pipefail
 
-# Обе библиотеки: lib-stacks знает, в каком корне лежит стек, lib-env — как
-# читать .env. Собирать пути руками здесь было нельзя вдвойне: профильный
-# stack.conf грузился ПОСЛЕ машинного и перебивал его — наоборот к stack_dir,
-# где машинный корень первый. Стек, скопированный из профиля и поправленный,
-# проверялся бы по старому, профильному значению.
+# Both libraries: lib-stacks knows which root the stack lives in, lib-env knows
+# how to read a .env. Assembling the paths by hand here was doubly wrong: the
+# profile stack.conf was loaded AFTER the machine one and shadowed it -- the
+# reverse of stack_dir, where the machine root comes first. A stack copied out
+# of the profile and edited would be validated against the old profile value.
 # shellcheck source=platform/lib/lib-stacks.sh
 . "${ROOT_DIR:?}/platform/lib/lib-stacks.sh"
 # shellcheck source=platform/lib/lib-env.sh
@@ -26,22 +28,22 @@ ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$(stack_env_file "$s")" "$(stack_c
 user="$(env_get "${prefix}_User")"
 [ -n "$user" ] || exit 0
 
-# Предел длины имени пользователя в MySQL 5.5 — 16 символов (в 8.0 их 32).
-# Более длинное имя обрезается при создании, и объявленное перестаёт совпадать
-# с существующим: инициализатор заводит пользователя заново на каждом прогоне и
-# каждый раз докладывает о расхождении пароля.
+# The user name length limit in MySQL 5.5 is 16 characters (32 in 8.0). A
+# longer name is truncated at creation, and the declared one stops matching the
+# existing one: the initializer creates the user afresh on every run and reports
+# a password divergence every time.
 [ "${#user}" -le 16 ] || \
-  printf 'стек %s: имя пользователя %s длиннее 16 символов — MySQL 5.5 его обрежет\n' "$s" "$user"
+  printf 'stack %s: user name %s is longer than 16 characters -- MySQL 5.5 will truncate it\n' "$s" "$user"
 
-# Права разбираем здесь, а не в контейнере: опечатка иначе всплывает
-# синтаксической ошибкой MySQL в логе одноразового контейнера, который снаружи
-# выглядит просто как `exited`.
+# Privileges are parsed here rather than in the container: otherwise a typo
+# surfaces as a MySQL syntax error in the log of a one-shot container that from
+# the outside looks simply like `exited`.
 for g in $(env_get "${prefix}_Grants" "SELECT,INSERT,UPDATE,DELETE" | tr ',' ' '); do
   case "$(printf '%s' "$g" | tr 'a-z' 'A-Z')" in
     SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|INDEX|ALTER|REFERENCES|TRIGGER| \
     EXECUTE|LOCK|"CREATE VIEW"|"SHOW VIEW"|"CREATE ROUTINE"|"ALTER ROUTINE"|"CREATE TEMPORARY TABLES") ;;
     ALL|"ALL PRIVILEGES")
-      printf 'стек %s: %s_Grants=ALL включает DROP и GRANT OPTION — перечислите нужное явно\n' "$s" "$prefix" ;;
-    *) printf 'стек %s: непонятное право в %s_Grants: %s\n' "$s" "$prefix" "$g" ;;
+      printf 'stack %s: %s_Grants=ALL includes DROP and GRANT OPTION -- list what you need explicitly\n' "$s" "$prefix" ;;
+    *) printf 'stack %s: unrecognized privilege in %s_Grants: %s\n' "$s" "$prefix" "$g" ;;
   esac
 done

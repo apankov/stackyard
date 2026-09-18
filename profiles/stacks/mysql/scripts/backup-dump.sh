@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 #
-# Дампы и восстановление общего MySQL. Тот же контракт, что у поставщика pg —
-# см. profiles/stacks/pg/scripts/backup-dump.sh. Платформа про mysqldump не
-# знает и знать не должна.
+# Dumps and restores for the shared MySQL. The same contract as the pg
+# provider's -- see profiles/stacks/pg/scripts/backup-dump.sh. The platform does
+# not know about mysqldump and must not.
 #
-# Пароль root везде уходит через MYSQL_PWD, а не аргументом: всё, что стоит в
-# argv, видно в `ps` любому процессу контейнера.
+# The root password always goes through MYSQL_PWD rather than an argument:
+# anything in argv is visible in `ps` to every process in the container.
 
 set -uo pipefail
 
 C=mysqld
 
-# Пароль читается ЛЕНИВО, только когда он действительно нужен.
+# The password is read LAZILY, only when it is actually needed.
 #
-# ext и detect — чистые функции: первая отвечает строкой, вторая смотрит на
-# магию файла. Читая пароль при старте, скрипт падал бы на них на машине без
-# настроенного .env — то есть проверка, которой credentials не нужны, требовала
-# бы credentials.
+# ext and detect are pure functions: the first answers with a string, the second
+# looks at the file's magic. Reading the password at startup would make the
+# script fail on those on a machine with no configured .env -- i.e. a check that
+# needs no credentials would demand credentials.
 PW=""
 need_pw() {
   [ -n "$PW" ] && return 0
@@ -24,7 +24,7 @@ need_pw() {
   . "${ROOT_DIR:?}/platform/lib/lib-env.sh"
   ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ROOT_DIR/stacks/mysql/.env"
   PW="$(env_get Mysql_Root_Password)"
-  [ -n "$PW" ] || { echo "в stacks/mysql/.env нет Mysql_Root_Password" >&2; exit 2; }
+  [ -n "$PW" ] || { echo "stacks/mysql/.env has no Mysql_Root_Password" >&2; exit 2; }
 }
 
 q() { need_pw; docker exec -e MYSQL_PWD="$PW" "$C" mysql -uroot -N -B -e "$1" 2>/dev/null; }
@@ -33,13 +33,13 @@ case "${1:-}" in
   check)
     need_pw
     docker exec -e MYSQL_PWD="$PW" "$C" mysqladmin ping -uroot --silent >/dev/null 2>&1 \
-      || { echo "контейнер $C не отвечает на mysqladmin ping" >&2; exit 1; }
+      || { echo "container $C does not answer mysqladmin ping" >&2; exit 1; }
     ;;
 
   list)
-    # Системные базы исключены: information_schema и performance_schema —
-    # представления, их дамп не восстанавливается; mysql — учётки, они уходят
-    # отдельно, через globals.
+    # System databases are excluded: information_schema and performance_schema
+    # are views and their dump cannot be restored; mysql holds the accounts, and
+    # those go separately, through globals.
     q "SELECT schema_name FROM information_schema.schemata
        WHERE schema_name NOT IN ('information_schema','performance_schema','mysql','sys')
        ORDER BY schema_name"
@@ -47,20 +47,24 @@ case "${1:-}" in
 
   dump)
     need_pw
-    # --single-transaction: снимок без блокировки таблиц, InnoDB это умеет.
-    # Без него дамп боевой базы останавливает запись на всё время дампа.
-    # --routines и --events: иначе процедуры и планировщик молча не уедут.
-    docker exec -e MYSQL_PWD="$PW" -e DB="${2:?нужно имя базы}" "$C" \
+    # --single-transaction: a snapshot without locking the tables, which InnoDB
+    # supports. Without it, dumping a production database stops writes for the
+    # whole duration of the dump.
+    # --routines and --events: otherwise procedures and the scheduler silently
+    # stay behind.
+    docker exec -e MYSQL_PWD="$PW" -e DB="${2:?a database name is required}" "$C" \
       sh -c 'mysqldump -uroot --single-transaction --routines --events --default-character-set=utf8 "$DB"' \
       | gzip -9
     ;;
 
   globals)
-    # Аналог pg_dumpall --globals-only: учётки и их гранты. Без них
-    # восстановленная база есть, а подключиться к ней некому.
+    # The equivalent of pg_dumpall --globals-only: accounts and their grants.
+    # Without them the restored database exists but there is nobody to connect
+    # to it with.
     #
-    # Через SHOW GRANTS, а не дампом таблицы mysql.user: формат этой таблицы
-    # меняется между версиями, и дамп из 5.5 в 8.0 не заливается вовсе.
+    # Through SHOW GRANTS rather than a dump of the mysql.user table: that
+    # table's layout changes between versions, and a dump from 5.5 does not load
+    # into 8.0 at all.
     while IFS= read -r acct; do
       [ -n "$acct" ] || continue
       echo "-- $acct"
@@ -89,13 +93,14 @@ case "${1:-}" in
   restore)
     need_pw
     fmt="${2:?}"; target="${3:?}"; file="${4:?}"; clean="${5:-0}"
-    # Базу не создаём: её заводит инициализатор из databases.yaml, и создание
-    # здесь означало бы второе место, решающее про кодировку и владельца.
+    # We do not create the database: the initializer creates it from
+    # databases.yaml, and creating it here would mean a second place deciding
+    # the character set and the owner.
     exists="$(q "SELECT 1 FROM information_schema.schemata WHERE schema_name='$target'")"
-    [ "$exists" = "1" ] || { echo "базы $target нет — создайте её (./dc up -d mysql-initializer) и повторите" >&2; exit 1; }
+    [ "$exists" = "1" ] || { echo "database $target does not exist -- create it (./dc up -d mysql-initializer) and retry" >&2; exit 1; }
 
-    # --clean у MySQL нет: аналог — DROP всех таблиц перед заливкой. Делаем
-    # только по явному запросу, потому что это необратимо.
+    # MySQL has no --clean: the equivalent is DROPping every table before
+    # loading. We do it only on explicit request, because it is irreversible.
     if [ "$clean" -eq 1 ]; then
       while IFS= read -r t; do
         [ -n "$t" ] || continue
@@ -106,7 +111,7 @@ case "${1:-}" in
     case "$fmt" in
       sqlgz) gunzip -c "$file" | docker exec -i -e MYSQL_PWD="$PW" -e DB="$target" "$C" sh -c 'mysql -uroot "$DB"' ;;
       sql)   docker exec -i -e MYSQL_PWD="$PW" "$C" sh -c 'mysql -uroot' < "$file" ;;
-      *)     echo "неизвестный формат: $fmt" >&2; exit 1 ;;
+      *)     echo "unknown format: $fmt" >&2; exit 1 ;;
     esac
     ;;
 

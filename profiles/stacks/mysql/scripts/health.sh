@@ -1,53 +1,57 @@
 #!/usr/bin/env bash
 #
-# Живость общего MySQL для `stack.sh --check`.
+# Liveness of the shared MySQL for `stack.sh --check`.
 #
-# Спрашиваем у работающего сервера, а не смотрим на файлы: конфиг на диске
-# может быть верным, а образ — читать конфиги из другого каталога, и тогда
-# sql_mode не тот, что объявлен, при полностью исправном на вид контейнере.
+# We ask the running server instead of looking at files: the config on disk can
+# be correct while the image reads its configs from a different directory, and
+# then sql_mode is not the declared one on a container that looks perfectly
+# healthy.
 #
-# Контракт: без root, ничего не меняет, укладывается в 10 секунд, первая строка
-# вывода становится причиной в отчёте. В окружении есть STACK_DIR и ROOT_DIR.
+# Contract: no root, changes nothing, finishes within 10 seconds, and the first
+# line of output becomes the reason in the report. STACK_DIR and ROOT_DIR are in
+# the environment.
 
 set -uo pipefail
 
-# Через lib-env.sh, а не grep'ом: пароль лежит в .env стека, и он единственный,
-# кто знает про разворачивание ${...} и снятие кавычек. Однострочник вернул бы
-# пароль вместе с кавычками, и health.sh докладывал бы о мёртвой базе при живой.
+# Through lib-env.sh rather than grep: the password lives in the stack's .env,
+# and lib-env.sh is the only thing that knows about expanding ${...} and
+# stripping quotes. A one-liner would return the password with the quotes still
+# on it, and health.sh would report a dead database against a live one.
 #
-# Путь к библиотеке — platform/lib/. Здесь стоял scripts/lib-env.sh из devbox6,
-# и проверка падала на КАЖДОМ прогоне `--check` с «No such file or directory».
-# Соседние скрипты стека (check-decl.sh, host-setup.sh, backup-dump.sh) путь
-# имели верный — опечатка была ровно в одном месте и жила, потому что её
-# следствие выглядело как «стек не отвечает», а не как сломанный скрипт.
+# The library path is platform/lib/. A path from an older layout once sat here,
+# and the check failed on EVERY `--check` run with "No such file or directory".
+# The neighbouring stack scripts (check-decl.sh, host-setup.sh, backup-dump.sh)
+# had the right path -- the typo was in exactly one place and survived because
+# its effect looked like "the stack does not answer" rather than a broken
+# script.
 #
 # shellcheck source=platform/lib/lib-stacks.sh
 . "${ROOT_DIR:?}/platform/lib/lib-stacks.sh"
 # shellcheck source=platform/lib/lib-env.sh
 . "$ROOT_DIR/platform/lib/lib-env.sh"
 
-# .env стека — через stack_env_file, а не от STACK_DIR. У профильного стека
-# STACK_DIR указывает в profile/, где .env не лежит по построению: секрет
-# принадлежит машине. Подставив туда STACK_DIR, проверка врала бы «нет
-# Mysql_Root_Password» при исправном файле — и вечно красный блок перестал бы
-# читаться целиком, вместе с настоящими находками.
+# The stack's .env comes through stack_env_file, not from STACK_DIR. For a
+# profile stack STACK_DIR points into profile/, where no .env lives by
+# construction: the secret belongs to the machine. With STACK_DIR there the
+# check would lie "no Mysql_Root_Password" against a healthy file -- and a
+# permanently red block stops being read at all, real findings included.
 ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$(stack_env_file mysql)"
 
 PW="$(env_get Mysql_Root_Password)"
-[ -n "$PW" ] || { echo "в stacks/mysql/.env нет Mysql_Root_Password"; exit 1; }
+[ -n "$PW" ] || { echo "stacks/mysql/.env has no Mysql_Root_Password"; exit 1; }
 
-# Пароль уходит через MYSQL_PWD, а не аргументом: всё, что стоит в argv, видно
-# в `ps` любому процессу контейнера.
+# The password goes through MYSQL_PWD rather than an argument: anything in argv
+# is visible in `ps` to every process in the container.
 q() { docker exec -e MYSQL_PWD="$PW" mysqld mysql -uroot -N -B -e "$1" 2>/dev/null; }
 
-q 'SELECT 1' >/dev/null || { echo "mysqld не отвечает на запрос"; exit 1; }
+q 'SELECT 1' >/dev/null || { echo "mysqld does not answer a query"; exit 1; }
 
-# Режим проверяем именно эффективный. Забытая или неприменённая строка sql_mode
-# ломает не соединение, а отдельные запросы legacy-кода — то есть отказ,
-# который выглядит как баг приложения, а не как неверная настройка СУБД.
+# We check the effective mode. A forgotten or unapplied sql_mode line breaks
+# individual queries in legacy code rather than the connection -- a failure that
+# looks like an application bug, not like a misconfigured DBMS.
 mode="$(q 'SELECT @@GLOBAL.sql_mode')"
 case "$mode" in
-  *ONLY_FULL_GROUP_BY*) echo "в sql_mode есть ONLY_FULL_GROUP_BY — legacy-запросы будут падать: $mode"; exit 1 ;;
+  *ONLY_FULL_GROUP_BY*) echo "sql_mode contains ONLY_FULL_GROUP_BY -- legacy queries will fail: $mode"; exit 1 ;;
 esac
 
-echo "mysqld отвечает, sql_mode=${mode:-<пусто>}"
+echo "mysqld answers, sql_mode=${mode:-<empty>}"

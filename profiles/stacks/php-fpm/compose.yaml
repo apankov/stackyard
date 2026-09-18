@@ -1,5 +1,5 @@
-# PHP 5.6 FastCGI. База образа (alpine 3.8, пакеты php5) — EOL намеренно:
-# сайты, ради которых он существует, на современном PHP не работают.
+# PHP 5.6 FastCGI. The image base (alpine 3.8, php5 packages) is EOL on
+# purpose: the sites it exists for do not run on a modern PHP.
 services:
   php-fpm:
     build:
@@ -10,9 +10,9 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      # Единственный том — общий каталог docroot'ов, тот же, что у nginx. Ничего
-      # постекового сюда не домешивается, поэтому спека постоянна и выключение
-      # чужого стека её не меняет.
+      # The only volume is the shared docroot directory, the same one nginx
+      # gets. Nothing per-stack is mixed in here, so the spec is constant and
+      # disabling somebody else's stack does not change it.
       - ${Platform_Vhosts_Dir:?}:${Platform_Vhosts_Mount:?}
     networks:
       - shared_network

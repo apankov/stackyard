@@ -1,91 +1,96 @@
-# Базы, пользователи и права общего MySQL
+# Databases, users and privileges of the shared MySQL
 
-`databases.yaml` в этом каталоге **генерируется** — правки переживут ровно до
-следующего `./scripts/stack.sh sync`. В git его нет: внутри пароли всех баз
-машины, поэтому файл серверный и лежит с `chmod 600`.
+`databases.yaml` in this directory is **generated** — edits survive exactly
+until the next `./scripts/stack.sh sync`. It is not in git: it contains the
+passwords of every database on the machine, so the file is server-side and
+carries `chmod 600`.
 
-## Откуда он берётся
+## Where it comes from
 
-Из деклараций самих стеков. Стеку, которому нужна база, дописывают несколько
-строк в его `stack.conf`:
+From the stacks' own declarations. A stack that needs a database gets a few
+lines added to its `stack.conf`:
 
 ```sh
 Requires="mysql"
 Mysql_DB="${Newapp_DB_Name}"
 Mysql_User="${Newapp_DB_User}"
 Mysql_Password="${Newapp_DB_Password}"
-Mysql_Grants="SELECT,INSERT,UPDATE,DELETE"   # необязательно, это и есть умолчание
-Mysql_Dump="seed.sql"                        # необязательно, см. ниже
+Mysql_Grants="SELECT,INSERT,UPDATE,DELETE"   # optional, this is also the default
+Mysql_Dump="seed.sql"                        # optional, see below
 ```
 
-В `stack.conf` попадают **ссылки** на переменные, а не значения: секрет
-остаётся в `stacks/<стек>/.env`, который на сервере и с `chmod 600`.
-Разворачивает их платформа в момент генерации.
+What goes into `stack.conf` are **references** to variables, not values: the
+secret stays in `stacks/<stack>/.env`, which is server-side and `chmod 600`.
+The platform expands them at generation time.
 
-Второе место, где записаны те же имя, пользователь и пароль, разъезжается с
-`.env` стека молча: приложение получает `Access denied for user` при живой
-базе, и видно это только в его логах, часы спустя после `up -d`.
+A second place holding the same name, user and password drifts away from the
+stack's `.env` silently: the application gets `Access denied for user` against
+a healthy database, and it shows only in the application's log, hours after
+`up -d`.
 
-## Права
+## Privileges
 
-Умолчание — `SELECT,INSERT,UPDATE,DELETE`, и это сознательно **не**
-`ALL PRIVILEGES`. В `ALL` входят `DROP`, `ALTER`, `CREATE USER` и `GRANT
-OPTION`: приложение с угнанным паролем сносит собственную базу и раздаёт доступ
-дальше. Стеку, который сам накатывает схему, нужны `CREATE,ALTER,INDEX` — это
-решение стека, и объявляется оно явно.
+The default is `SELECT,INSERT,UPDATE,DELETE`, and it is deliberately **not**
+`ALL PRIVILEGES`. `ALL` includes `DROP`, `ALTER`, `CREATE USER` and `GRANT
+OPTION`: an application with a stolen password wipes its own database and hands
+access further on. A stack that applies its own schema needs
+`CREATE,ALTER,INDEX` — that is the stack's decision, and it is declared
+explicitly.
 
-Пользователь заводится ровно как `'имя'@'%'`. В MySQL учётка — это пара
-(пользователь, хост), и `'app'@'%'` с `'app'@'localhost'` — две разные записи
-с разными правами и паролями. Контейнеры ходят в mysqld по bridge-сети со
-случайных адресов, поэтому работает только `'%'`; вторая пара дала бы учётку,
-в которую попадает часть подключений, с «Access denied» при верном пароле.
+The user is created exactly as `'name'@'%'`. In MySQL an account is a (user,
+host) pair, and `'app'@'%'` and `'app'@'localhost'` are two different records
+with different privileges and passwords. Containers reach mysqld over the
+bridge network from random addresses, so only `'%'` works; a second pair would
+give an account that some connections land on, with "Access denied" under a
+correct password.
 
-## Что делает `initializer.sh`
+## What `initializer.sh` does
 
-Контейнер одноразовый, но поднимается при **каждом** `up -d`, поэтому всё
-ниже идемпотентно.
+The container is one-shot but comes up on **every** `up -d`, so everything
+below is idempotent.
 
-- **Пользователя нет** — создаётся с объявленным паролем.
-- **Пользователь есть** — пароль не меняется, но проверяется пробным
-  подключением. Не совпал — контейнер печатает, что чинить, и падает ненулевым
-  кодом. `SET PASSWORD` намеренно не делается: пароль, поменянный руками и не
-  записанный в `.env`, был бы молча перезаписан при следующем `up -d`.
-- **Базы нет** — создаётся с `CHARACTER SET utf8`. Не `utf8mb4`: в MySQL 5.5
-  предел индексного ключа InnoDB — 767 байт, и `VARCHAR(255)` под `utf8mb4`
-  (1020 байт) в индекс не влезает. Отказ приходит на миграции, а не при
-  запросе, и выглядит как баг приложения.
-- **База есть** — не трогается вовсе.
-- **Прав не хватает** — выдаются.
-- **Прав больше объявленного** — **не отзываются**, печатается ошибка с готовой
-  командой. Снятое право ломает приложение в момент, никак с этим не связанный;
-  а молчать нельзя, потому что весь смысл ограниченных прав в том, что их набор
-  известен.
+- **No user** — created with the declared password.
+- **User exists** — the password is not changed, but it is verified with a
+  trial connection. On a mismatch the container prints what to fix and exits
+  non-zero. `SET PASSWORD` is deliberately not done: a password changed by hand
+  and not written into `.env` would be silently overwritten on the next
+  `up -d`.
+- **No database** — created with `CHARACTER SET utf8`. Not `utf8mb4`: in MySQL
+  5.5 the InnoDB index key limit is 767 bytes, and a `VARCHAR(255)` under
+  `utf8mb4` (1020 bytes) does not fit into an index. The refusal arrives on the
+  migration rather than on a query, and it looks like an application bug.
+- **Database exists** — not touched at all.
+- **Privileges missing** — granted.
+- **Privileges beyond the declaration** — **not revoked**; an error is printed
+  with a ready-made command. A removed privilege breaks the application at a
+  moment unrelated to it; and staying silent is not an option, because the
+  whole point of limited privileges is that the set is known.
 
-`Mysql_Dump` накатывается **только при создании базы**, из каталога `dumps/` в
-корне репозитория. Иначе каждый `up -d` заливал бы seed поверх живых данных.
+`Mysql_Dump` is loaded **only when the database is created**, from the `dumps/`
+directory at the repository root. Otherwise every `up -d` would pour the seed
+over live data.
 
-## Завести базу новому приложению
+## Give a new application a database
 
 ```sh
 cp stacks/newapp/.env.example stacks/newapp/.env && chmod 600 stacks/newapp/.env
-$EDITOR stacks/newapp/.env          # имя базы, пользователь, пароль
+$EDITOR stacks/newapp/.env          # database name, user, password
 ./scripts/stack.sh enable newapp    # sync + up -d + mysql-initializer + vhost
 docker logs mysql-initializer
 ```
 
-Отдельного «разового шага настройки» здесь нет намеренно. Разовый скрипт,
-который надо не забыть запустить, — это шаг, который забудут: на новой машине,
-при восстановлении из бэкапа, при переносе стека. Объявление в `stack.conf`
-отрабатывает само и столько раз, сколько потребуется.
+There is deliberately no separate "one-time setup step" here. A one-off script
+you have to remember to run is a step that will be forgotten: on a new machine,
+during a restore from backup, when a stack is moved. A declaration in
+`stack.conf` runs by itself, as many times as needed.
 
-## Проверить
+## Verify
 
 ```bash
-./scripts/stack.sh --check          # блок «Базы общего MySQL»
+./scripts/stack.sh --check          # the "Shared databases" block
 docker logs mysql-initializer
-cd _db && ./dbquery.sh "SHOW GRANTS FOR 'newapp'@'%'"
 ```
 
-У `mysql-initializer` нет `restart: always`, поэтому его падение снаружи
-выглядит просто как `exited`. Именно поэтому `--check` отдельно смотрит на его
-код выхода — иначе громкое сообщение уехало бы в журнал, куда никто не смотрит.
+`mysql-initializer` has no `restart: always`, so from the outside its failure
+looks simply like `exited`. That is precisely why `--check` looks at its exit
+code separately — otherwise the loud message would go to a log nobody reads.

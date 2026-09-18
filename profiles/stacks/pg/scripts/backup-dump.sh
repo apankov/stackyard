@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 #
-# Дампы и восстановление общего PostgreSQL. Зовётся платформой
+# Dumps and restores for the shared PostgreSQL. Called by the platform
 # (platform/bin/{backup,check-backups,backup-restore}.sh).
 #
-# Здесь, а не в платформе, потому что pg_dump — знание про Postgres. Платформа,
-# знающая эти команды, требовала бы форка под каждую машину с другой СУБД, то
-# есть возвращала бы ту самую копию платформы, от которой мы уходили.
+# It lives here and not in the platform because pg_dump is knowledge about
+# Postgres. A platform that knew these commands would need a fork for every
+# machine with a different DBMS -- i.e. it would bring back the very copy of the
+# platform we were moving away from.
 #
-#   check                                 СУБД отвечает? код и причина в stderr
-#   list                                  имена баз, по одной на строку
-#   dump <db>                             дамп базы в stdout, уже сжатый
-#   globals                               роли и гранты в stdout; пусто — законно
-#   ext                                   расширение файла дампа
-#   detect <файл>                         формат одним словом
-#   inspect <формат> <файл>               показать содержимое
-#   restore <формат> <цель> <файл> <clean> залить дамп
+#   check                                  is the DBMS answering? code and reason on stderr
+#   list                                   database names, one per line
+#   dump <db>                              dump of the database on stdout, already compressed
+#   globals                                roles and grants on stdout; empty is legitimate
+#   ext                                    the dump file's extension
+#   detect <file>                          the format in one word
+#   inspect <format> <file>                show the contents
+#   restore <format> <target> <file> <clean> load a dump
 
 set -uo pipefail
 
@@ -24,25 +25,25 @@ x() { docker exec "$@"; }
 case "${1:-}" in
   check)
     x "$C" sh -c 'pg_isready -U $POSTGRES_USER -d postgres' >/dev/null 2>&1 \
-      || { echo "контейнер $C не отвечает на pg_isready" >&2; exit 1; }
+      || { echo "container $C does not answer pg_isready" >&2; exit 1; }
     ;;
 
   list)
-    # Спрашиваем у самой СУБД: захардкоженный список означал бы, что следующая
-    # заведённая база молча останется без бэкапа.
+    # We ask the DBMS itself: a hardcoded list would mean the next database
+    # created silently goes without a backup.
     x -e SQL="SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY datname" "$C" \
       sh -c 'PGPASSWORD=$POSTGRES_PASSWORD psql -U $POSTGRES_USER -d postgres -tAqc "$SQL"'
     ;;
 
   dump)
-    # -Fc: формат, из которого можно восстановить выборочно и который сам сжат.
-    x -e DB="${2:?нужно имя базы}" "$C" \
+    # -Fc: a format that allows selective restore and is compressed itself.
+    x -e DB="${2:?a database name is required}" "$C" \
       sh -c 'PGPASSWORD=$POSTGRES_PASSWORD pg_dump -U $POSTGRES_USER -d "$DB" -Fc -Z 9'
     ;;
 
   globals)
-    # Роли, пароли и гранты. Без них восстановленная база есть, а подключиться
-    # к ней некому.
+    # Roles, passwords and grants. Without them the restored database exists
+    # but there is nobody to connect to it with.
     x "$C" sh -c 'PGPASSWORD=$POSTGRES_PASSWORD pg_dumpall -U $POSTGRES_USER --globals-only'
     ;;
 
@@ -67,11 +68,12 @@ case "${1:-}" in
     fmt="${2:?}"; target="${3:?}"; file="${4:?}"; clean="${5:-0}"
     case "$fmt" in
       custom)
-        # База должна существовать: pg_restore -d в неё подключается, а не
-        # создаёт. Заводит базы инициализатор из databases.yaml.
+        # The database must exist: pg_restore -d connects to it, it does not
+        # create it. Databases are created by the initializer from
+        # databases.yaml.
         exists=$(x -e DB="$target" "$C" \
           sh -c 'PGPASSWORD=$POSTGRES_PASSWORD psql -U $POSTGRES_USER -d postgres -tAqc "SELECT 1 FROM pg_database WHERE datname='"'"'$DB'"'"'"' 2>/dev/null | tr -d '\r')
-        [ "$exists" = "1" ] || { echo "базы $target нет — создайте её (./dc up -d db-initializer) и повторите" >&2; exit 1; }
+        [ "$exists" = "1" ] || { echo "database $target does not exist -- create it (./dc up -d db-initializer) and retry" >&2; exit 1; }
         args="--no-password"; [ "$clean" -eq 1 ] && args="$args --clean --if-exists"
         x -i -e DB="$target" -e ARGS="$args" "$C" \
           sh -c 'PGPASSWORD=$POSTGRES_PASSWORD pg_restore -U $POSTGRES_USER -d "$DB" $ARGS' < "$file"
@@ -79,7 +81,7 @@ case "${1:-}" in
       sql)
         x -i "$C" sh -c 'PGPASSWORD=$POSTGRES_PASSWORD psql -U $POSTGRES_USER -d postgres -v ON_ERROR_STOP=1' < "$file"
         ;;
-      *) echo "неизвестный формат: $fmt" >&2; exit 1 ;;
+      *) echo "unknown format: $fmt" >&2; exit 1 ;;
     esac
     ;;
 

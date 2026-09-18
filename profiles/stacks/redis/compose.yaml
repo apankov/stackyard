@@ -6,7 +6,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ${Redis_Data_Dir:?задайте Redis_Data_Dir в stacks/redis/.env}:/data
+      - ${Redis_Data_Dir:?set Redis_Data_Dir in stacks/redis/.env}:/data
     networks:
       - shared_network
 

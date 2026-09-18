@@ -1,56 +1,58 @@
-# Базы и пользователи общего postgres
+# Databases and users of the shared postgres
 
-`databases.yaml` в этом каталоге **генерируется** — правки переживут ровно до
-следующего `./scripts/stack.sh sync`. В git его нет: внутри пароли всех баз
-машины, поэтому файл серверный и лежит с `chmod 600`.
+`databases.yaml` in this directory is **generated** — edits survive exactly
+until the next `./scripts/stack.sh sync`. It is not in git: it contains the
+passwords of every database on the machine, so the file is server-side and
+carries `chmod 600`.
 
-## Откуда он берётся
+## Where it comes from
 
-Из деклараций самих стеков. Стеку, которому нужна база, дописывают три строки
-в его `stack.conf`:
+From the stacks' own declarations. A stack that needs a database gets three
+lines added to its `stack.conf`:
 
 ```sh
 Requires="pg"
 Postgres_DB="${Sage_DB_Name}"
 Postgres_User="${Sage_DB_User}"
 Postgres_Password="${Sage_DB_Password}"
-Postgres_Dump="seed.sql"     # необязательно, см. ниже
+Postgres_Dump="seed.sql"     # optional, see below
 ```
 
-В `stack.conf` попадают **ссылки** на переменные, а не значения: секрет
-остаётся в `stacks/<стек>/.env`, который на сервере и с `chmod 600`.
-Разворачивает их платформа в момент генерации.
+What goes into `stack.conf` are **references** to variables, not values: the
+secret stays in `stacks/<stack>/.env`, which is server-side and `chmod 600`.
+The platform expands them at generation time.
 
-Второе место, где записаны те же имя, пользователь и пароль, разъезжается с
-`.env` стека молча: приложение получает `P1000 / password authentication
-failed` при живой базе, и видно это только в его логах, часы спустя после
-`up -d`.
+A second place holding the same name, user and password drifts away from the
+stack's `.env` silently: the application gets `P1000 / password authentication
+failed` against a healthy database, and it shows only in the application's log,
+hours after `up -d`.
 
-## Что делает `initializer.sh`
+## What `initializer.sh` does
 
-Идемпотентен: существующие пользователи и базы не пересоздаются.
+Idempotent: existing users and databases are not recreated.
 
-- **Пользователя нет** — создаётся с объявленным паролем.
-- **Пользователь есть** — пароль не меняется, но проверяется пробным
-  подключением. Не совпал — контейнер печатает, что чинить, и падает ненулевым
-  кодом. `ALTER USER` намеренно не делается: пароль, поменянный руками в psql и
-  не записанный в `.env`, был бы молча перезаписан при следующем `up -d`.
-- **Базы нет** — создаётся с `OWNER` = объявленный пользователь. Это важно для
-  Prisma: с PG15 схема `public` принадлежит `pg_database_owner`, и без
-  правильного владельца `prisma migrate deploy` не создаст таблицы.
-- **База есть** — не трогается вовсе.
+- **No user** — created with the declared password.
+- **User exists** — the password is not changed, but it is verified with a
+  trial connection. On a mismatch the container prints what to fix and exits
+  non-zero. `ALTER USER` is deliberately not done: a password changed by hand
+  in psql and not written into `.env` would be silently overwritten on the next
+  `up -d`.
+- **No database** — created with `OWNER` = the declared user. That matters for
+  Prisma: since PG15 the `public` schema belongs to `pg_database_owner`, and
+  without the right owner `prisma migrate deploy` will not create the tables.
+- **Database exists** — not touched at all.
 
-`Postgres_Dump` накатывается **только при создании базы**, из каталога
-`dumps/` в корне репозитория. Иначе каждый `up -d` заливал бы seed поверх
-живых данных.
+`Postgres_Dump` is loaded **only when the database is created**, from the
+`dumps/` directory at the repository root. Otherwise every `up -d` would pour
+the seed over live data.
 
-## Проверить
+## Verify
 
 ```bash
-./scripts/stack.sh --check          # блок «Базы общего postgres»
+./scripts/stack.sh --check          # the "Shared databases" block
 docker logs db-initializer
 ```
 
-У `db-initializer` нет `restart: always`, поэтому его падение снаружи выглядит
-просто как `exited`. Именно поэтому `--check` отдельно смотрит на его код
-выхода — иначе громкое сообщение уехало бы в журнал, куда никто не смотрит.
+`db-initializer` has no `restart: always`, so from the outside its failure looks
+simply like `exited`. That is precisely why `--check` looks at its exit code
+separately — otherwise the loud message would go to a log nobody reads.
