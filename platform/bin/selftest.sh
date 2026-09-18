@@ -764,87 +764,89 @@ echo "== platform hygiene"
 # breaks several guards at once — the tests would fail because of an unrelated
 # file rather than because of the code.
 
-# 1. Путь к стеку, собранный строкой, слеп к профильному корню: такой стек
-#    просто не находится, и его preflight/health/stack.conf молча не читаются.
-#    Единственный законный способ — stack_dir и производные от него.
+# 1. A stack path built as a string is blind to the profile root: such a stack
+#    simply is not found, and its preflight/health/stack.conf are silently
+#    never read. The only legitimate way is stack_dir and what derives from it.
 #
-#    Ищем сам ПРИЗНАК — литерал '/stacks/' сразу перед подстановкой, — а не
-#    конкретные имена переменных: прошлая версия проверки перечисляла ROOT_DIR
-#    и stacks_root, из-за чего не видела ни $root, ни ${DEPLOY_DIR:?}, ни один
-#    файл в profiles/. Она давала ноль совпадений при шести настоящих случаях,
-#    то есть служила разрешением не думать про класс.
+#    What is searched for is the SYMPTOM — the literal '/stacks/' immediately
+#    before a substitution — rather than particular variable names: a guard
+#    listing specific names misses $root, ${DEPLOY_DIR:?} and every file under
+#    profiles/, matching nothing while six real cases exist, and thereby serves
+#    as permission not to think about the class.
 #
-#    Законные исключения помечаются в коде комментарием # stack-path-ok:
-#    их два вида — определение самих корней и .env стека, который по замыслу
-#    ВСЕГДА машинный. Пометка грепается, то есть исключение видно и его можно
-#    пересчитать; молчаливого исключения быть не должно.
+#    Legitimate exceptions are marked in the code with # stack-path-ok. There
+#    are two kinds: the definition of the roots themselves, and a stack's .env,
+#    which by design is ALWAYS the machine's. The marker is greppable, so an
+#    exception is visible and countable; there must be no silent one.
 built=$(grep -rInE '/stacks/\$' \
           "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin \
           "$REPO_DIR"/profiles 2>/dev/null \
         | grep -v 'stack-path-ok' \
         | grep -vE '(selftest|mutate)\.sh:' || true)
-check "путь к стеку нигде не собирается строкой" "$built" ""
+check "no stack path is built as a string" "$built" ""
 
-# 2. Запись в platform/ или profile/: это общие слои, bootstrap перезаписывает
-#    их целиком. Записанное туда исчезает при следующем обновлении, а до того
-#    лежит в слое, который раздаётся всем машинам.
-#    Ищем любую запись, а не только `>`: cp, tee и >> туда же. И смотрим все
-#    каталоги, где может оказаться пишущий код, а не только два.
+# 2. Writing into platform/ or profile/: these are shared layers, and bootstrap
+#    overwrites them wholesale. Anything written there disappears at the next
+#    update, and until then sits in a layer distributed to every machine.
+#
+#    Any kind of write is searched for, not just `>`: cp, tee and >> count
+#    too. And every directory that might hold writing code is examined, not
+#    two of them.
 writes=$(grep -rInE '(>>?|tee|cp|mkdir -p|install) +[^|#]*\$\{?(ROOT_DIR|REPO_DIR|Platform_Deploy_Dir)[^ "]*/(platform|profile)/' \
            "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin \
            "$REPO_DIR"/profiles 2>/dev/null \
         | grep -v 'stack-path-ok' | grep -vE '(selftest|mutate)\.sh:' || true)
-check "в общие слои никто не пишет" "$writes" ""
+check "nothing writes into the shared layers" "$writes" ""
 
-# 3. `sudo -u` обязан пробрасывать ROOT_DIR через env: sudo сбрасывает
-#    окружение, и скрипт платформы вычислит корень от своего пути — а лежит он
-#    в .stackyard/platform/bin, то есть корнем станет .stackyard. Отказ
-#    выглядит как «нет .env» на машине, где .env есть.
+# 3. `sudo -u` must pass ROOT_DIR through env: sudo resets the environment, and
+#    a platform script would then derive the root from its own path — which is
+#    inside .stackyard/platform/bin, making .stackyard the root. The failure
+#    reads as "no .env" on a machine that has one.
 badsudo=$(grep -rIn 'sudo -u' "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
           | grep -vE ':[0-9]+:[[:space:]]*#' \
           | grep -vE '(selftest|mutate)\.sh:' \
           | grep -v 'env ROOT_DIR=' || true)
-check "sudo -u пробрасывает ROOT_DIR" "$badsudo" ""
+check "sudo -u passes ROOT_DIR through" "$badsudo" ""
 
-# 3. Менеджер пакетов и команды дистрибутива не зашиваются: платформа
-#    раздаётся, и `dnf` в ней означает, что на Debian/Ubuntu установка упирается
-#    в «dnf: command not found» — с подсказкой, которую невозможно выполнить.
-#    Ровно это и случилось на первом же реальном сервере.
+# 4. Package-manager commands are not hardcoded: the platform is distributed,
+#    and naming one means that on another distribution the first install runs
+#    into "command not found" — with advice that cannot be followed.
 #
-#    Сама абстракция (она обязана перечислить менеджеры) помечена в коде
-#    # pkg-mgr-ok — как и другие законные исключения: пометка грепается, то
-#    есть исключение видно и его можно пересчитать.
+#    The abstraction itself, which has to enumerate the managers, is marked
+#    # pkg-mgr-ok in the code, like the other legitimate exceptions: the marker
+#    is greppable, so an exception is visible and countable.
 hardpm=$(grep -rInE '(^|[^_[:alnum:]])(dnf|yum|apt-get|apk add|zypper) ' \
            "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin 2>/dev/null \
          | grep -vE ':[0-9]+:[[:space:]]*#' \
          | grep -v 'pkg-mgr-ok' || true)
-check "команды менеджера пакетов не зашиты" "$hardpm" ""
+check "package-manager commands are not hardcoded" "$hardpm" ""
 
-# 3. Директива `# shellcheck source=` обязана резолвиться ОТ КОРНЯ репозитория:
-#    именно так шеллчек её и ищет — от рабочего каталога, а не от проверяемого
-#    файла. Форма ../lib/... выглядела верной и молча не резолвилась, а SC1091
-#    идёт уровнем info, то есть при -S error его не видно вовсе. Итог: -x был
-#    включён, а каждый скрипт линтился в изоляции, и опечатка в пути к
-#    библиотеке доживала до рантайма (ровно так уцелел дефект A9).
+# 5. A `# shellcheck source=` directive must resolve FROM THE REPOSITORY ROOT:
+#    that is how shellcheck looks for it — relative to the working directory,
+#    not to the file being checked. A ../lib/... form looks correct and
+#    silently fails to resolve, and SC1091 is an info-level finding, so at
+#    -S error it is invisible. The result: -x is enabled while every script is
+#    linted in isolation, and a typo in a library path survives to runtime.
 badsrc=""
 while IFS= read -r line; do
   [ -n "$line" ] || continue
   t="${line##*source=}"; t="${t%% *}"
   [ -f "$REPO_DIR/$t" ] || badsrc="$badsrc ${line%%:*}:$t"
-#    Ищем НАСТОЯЩУЮ форму директивы (строка целиком — комментарий шеллчека), а
-#    не подстроку: иначе проверка ловит собственный образец поиска и рассказ о
-#    том, что она проверяет. На этом я попался трижды подряд.
+#    What is searched for is the REAL form of the directive (a whole line that
+#    is a shellcheck comment) rather than a substring: otherwise the check
+#    matches its own search pattern and the prose describing what it checks.
 done < <(grep -rInE '^[[:space:]]*# shellcheck source=' "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib \
            "$REPO_DIR"/bin "$REPO_DIR"/tests "$REPO_DIR"/profiles 2>/dev/null)
-check "директивы shellcheck source= резолвятся" "$badsrc" ""
+check "shellcheck source= directives resolve" "$badsrc" ""
 
-# 3. Ссылка на платформенный compose-файл, которого нет. Так в stack.sh жил
-#    `-f platform/compose/php-fpm.yaml`, оставшийся с тех пор, когда php-fpm был
-#    платформенным: compose падал на несуществующем -f, 2>/dev/null это съедал,
-#    и целый блок проверки был мёртв на всех машинах.
-#    Строки-комментарии пропускаем: guard про КОД, а не про прозу. Объяснение
-#    прошлого дефекта неизбежно содержит имя файла, которого больше нет, и
-#    ловить его — значит заставлять стирать объяснения.
+# 6. A reference to a platform compose file that does not exist. A stale `-f`
+#    makes compose fail on a non-existent file, a nearby 2>/dev/null swallows
+#    it, and a whole block of checks is dead on every machine.
+#
+#    Comment lines are skipped: this guard is about CODE, not prose. An
+#    explanation of a past defect inevitably contains the name of a file that
+#    no longer exists, and catching that would mean forcing explanations to be
+#    erased.
 badref=""
 for ref in $(grep -rIhE 'platform/compose/[A-Za-z0-9_.-]+\.yaml' \
                "$REPO_DIR"/platform/bin "$REPO_DIR"/bin 2>/dev/null \
@@ -853,59 +855,61 @@ for ref in $(grep -rIhE 'platform/compose/[A-Za-z0-9_.-]+\.yaml' \
   case "$ref" in *.generated.yaml) continue ;; esac
   [ -f "$REPO_DIR/$ref" ] || badref="$badref $ref"
 done
-check "ссылок на несуществующие файлы платформы нет" "$badref" ""
+check "there are no references to non-existent platform files" "$badref" ""
 
-# 4. Скрипты стеков подключают библиотеки по пути platform/lib/. Путь из
-#    devbox6 (scripts/lib-env.sh) переживал перенос незамеченным, потому что
-#    его следствие выглядело как «стек не отвечает», а не как сломанный скрипт.
+# 7. Stack scripts source the libraries from platform/lib/. A path from an
+#    older layout survives a move unnoticed, because its consequence looks like
+#    "the stack does not answer" rather than like a broken script.
 badlib=$(grep -rIn 'ROOT_DIR[^"]*}\?/scripts/lib-' "$REPO_DIR"/profiles "$REPO_DIR"/platform 2>/dev/null \
          | grep -vE ':[0-9]+:[[:space:]]*#' || true)
-check "стеки подключают библиотеки из platform/lib" "$badlib" ""
+check "stacks source their libraries from platform/lib" "$badlib" ""
 
-# 3. Имя конкретной машины или клиента в публичном слое. Репозиторий публичный;
-#    кроме утечки это ещё и проверка, которая на другой машине молча проходит.
+# 8. A specific machine's or client's name inside a shared layer. The
+#    repository is public; besides the leak, such a name also makes any check
+#    built around it pass silently on every other machine.
 names=$(grep -rniE 'devbox6|devbox-asstnt|12devs|my-new-site|pankov\.me|filinn|pckup|sanya|quotrum|tokensale' \
           "$REPO_DIR"/platform "$REPO_DIR"/profiles "$REPO_DIR"/bin 2>/dev/null \
         | grep -v '^Binary' | grep -v 'selftest\.sh:[0-9]*:names=' \
         | grep -vE ':[0-9]+:[[:space:]]*#' || true)
-check "имён машин и клиентов в платформе нет" "$names" ""
+check "no machine or client names appear in the platform" "$names" ""
 
-# 5. Команда, которой на чужой машине может не быть, либо ведущая себя там
-#    иначе. Пять отказов подряд на первом реальном сервере были именно такими,
-#    и ни один не поймали тесты: у меня всё стояло. Поэтому ловим класс —
-#    прямой вызов в обход обёртки из lib-env.sh, — а не конкретный вызов.
-#    Законное место обёрток одно, оно помечено # portable-ok.
+# 9. A command that may be absent on another machine, or behave differently
+#    there. Such failures are not caught by tests written on a machine where
+#    everything happens to be installed. So what is caught is the CLASS — a
+#    direct call bypassing the wrapper in lib-env.sh — rather than a particular
+#    call. The wrappers have one legitimate home, marked # portable-ok.
 
-#    5a. shasum/sha256sum. Отсутствие первого давало ПУСТУЮ сумму, она не
-#        совпадала ни с чем, и check-vendor докладывал, что на месте правили
-#        каждый файл платформы: отсутствие инструмента выглядело как диверсия.
+#    9a. shasum/sha256sum. A missing tool yields an EMPTY checksum, which
+#        matches nothing, and check-vendor then reports that every platform
+#        file was edited in place: an absent tool looks like sabotage.
 badsha=$(grep -rInE '(^|[^_[:alnum:]])(shasum|sha256sum)[[:space:]]' \
            "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin "$REPO_DIR"/tests 2>/dev/null \
          | grep -vE ':[0-9]+:[[:space:]]*#' \
          | grep -vE '(selftest|mutate)\.sh:' | grep -v 'portable-ok' || true)
-check "суммы считаются через sha256_file" "$badsha" ""
+check "checksums go through sha256_file" "$badsha" ""
 
-#    5b. timeout — из GNU coreutils, в macOS и BSD его нет вовсе. Без него
-#        сторож просто не запускается, и --check зависает ровно там, где
-#        сторож и был нужен: на неотвечающем health.sh.
+#    9b. timeout comes from GNU coreutils and does not exist on macOS or BSD at
+#        all. Without it the watchdog simply never starts, and --check hangs
+#        exactly where the watchdog was needed: on an unresponsive health.sh.
 badto=$(grep -rInE '(^|[^_[:alnum:]-])timeout[[:space:]]+"?\$' \
           "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin 2>/dev/null \
         | grep -vE ':[0-9]+:[[:space:]]*#' \
         | grep -vE '(selftest|mutate)\.sh:' | grep -v 'portable-ok' || true)
-check "сторож времени идёт через run_with_timeout" "$badto" ""
+check "the timeout watchdog goes through run_with_timeout" "$badto" ""
 
-#    5c. `find -printf` — расширение GNU; BSD find на нём падает целиком.
-#        Вызов был обёрнут в 2>/dev/null || true, поэтому падал молча: счётчик
-#        выше говорил «невыгруженных дампов N», а список под ним был пуст.
+#    9c. `find -printf` is a GNU extension; BSD find fails on it entirely. Such
+#        a call wrapped in 2>/dev/null || true fails silently: a counter above
+#        says "N unuploaded dumps" while the list below it comes out empty.
 badfp=$(grep -rIn -- '-printf' "$REPO_DIR"/platform "$REPO_DIR"/bin "$REPO_DIR"/tests 2>/dev/null \
         | grep -v 'platform/getssl' | grep -vE '(selftest|mutate)\.sh:' \
         | grep -vE ':[0-9]+:[[:space:]]*#' || true)
-check "find -printf (только GNU) не используется" "$badfp" ""
+check "find -printf (GNU only) is not used" "$badfp" ""
 
-#    5d. `date -j -f` без -u и без %z в формате разбирает строку как ЛОКАЛЬНОЕ
-#        время. Метки S3 приходят в UTC, поэтому к востоку от Гринвича свежий
-#        бэкап выглядел устаревшим, а к западу — устаревший проходил проверку.
-#        Второе хуже: проверка свежести бэкапов, которая молча одобряет старый.
+#    9d. `date -j -f` without -u and without %z in the format reads the string
+#        as LOCAL time. S3 timestamps arrive in UTC, so east of Greenwich a
+#        fresh backup looks stale, and west of it a stale backup passes the
+#        check. The second is worse: a freshness check that silently approves
+#        an old backup.
 badtz=""
 while IFS= read -r line; do
   [ -n "$line" ] || continue
@@ -914,37 +918,39 @@ while IFS= read -r line; do
 done < <(grep -rIn 'date -j' "$REPO_DIR"/platform/bin "$REPO_DIR"/platform/lib "$REPO_DIR"/bin 2>/dev/null \
          | grep -v 'platform/getssl' | grep -vE '(selftest|mutate)\.sh:' \
          | grep -vE ':[0-9]+:[[:space:]]*#')
-check "разбор времени BSD-датой не считает UTC локальным" "$badtz" ""
+check "BSD date parsing does not treat UTC as local" "$badtz" ""
 
-# 6. `declare -gA` — это bash >= 4.2, а штатный /bin/bash в macOS остался 3.2.
-#    Без явной проверки версии библиотека молча загружалась с пустым ENV_VARS:
-#    каждый env_get возвращал умолчание, и скрипт делал не то, о чём просили.
-#    Попасть на 3.2 легче всего через sudo — он чистит PATH.
+# 10. `declare -gA` requires bash >= 4.2, while the stock /bin/bash on macOS is
+#     still 3.2. Without an explicit version check the library loads silently
+#     with an empty ENV_VARS: every env_get returns its default, and the script
+#     does something other than what was asked. The easiest way to land on 3.2
+#     is sudo, which sanitises PATH.
 badbv=""
 for f in $(grep -rIl 'declare -gA' "$REPO_DIR"/platform/lib 2>/dev/null); do
   grep -q 'BASH_VERSINFO' "$f" || badbv="$badbv $f"
 done
-check "declare -gA прикрыт проверкой версии bash" "$badbv" ""
+check "declare -gA is guarded by a bash version check" "$badbv" ""
 
-# 7. Разбор аргументов: `WANT="$2"; shift 2` под set -u на забытом значении
-#    даёт «$2: unbound variable» — сообщение про внутренности скрипта вместо
-#    сообщения про то, чего не хватает в командной строке.
+# 11. Argument parsing: `WANT="$2"; shift 2` under set -u with a forgotten
+#     value gives "$2: unbound variable" — a message about the script's
+#     internals instead of one about what is missing on the command line.
 badsh=$(grep -rIn 'shift 2' "$REPO_DIR"/bin "$REPO_DIR"/platform/bin 2>/dev/null \
         | grep -vE ':[0-9]+:[[:space:]]*#' \
         | grep -vE '(selftest|mutate)\.sh:' | grep -v '${2-}' || true)
-check "необязательный аргумент читается как \${2-}" "$badsh" ""
+check "an optional argument is read as \${2-}" "$badsh" ""
 
-# 8. Поиск дубликатов через `prev` в awk обязан требовать, чтобы вторая строка
-#    была от ДРУГОЙ машины. Один и тот же ключ у одной машины лежит сразу в
-#    двух файлах (Mysql_Root_Password в .env и в stacks/mysql/.env), и без
-#    этого условия аудит изоляции докладывал «ключ одинаков у машин X и X».
-#    Ложная тревога в проверке безопасности хуже её отсутствия: её учатся не
-#    читать, а вместе с ней перестают читать и настоящую находку.
-#    Смотрим не на строку и не на файл, а на ОКНО вокруг каждого сравнения.
-#    Построчно нельзя: сравнение источников стоит строкой ниже, внутри того же
-#    awk-выражения. По файлу целиком — тоже: в audit-isolation.sh таких awk два,
-#    и исправленный прикрывал собой сломанный (ровно так эта проверка и
-#    пропустила первую мутацию).
+# 12. Duplicate detection through `prev` in awk must require the second line to
+#     come from a DIFFERENT source. The same key of one machine lives in two
+#     files at once, and without that condition the isolation audit reports
+#     "the key is identical on machines X and X". A false alarm in a security
+#     check is worse than no check: people learn not to read it, and stop
+#     reading the genuine findings alongside.
+#
+#     What is examined is neither a line nor a file but a WINDOW around each
+#     comparison. Line by line will not do: the source comparison sits on the
+#     next line, inside the same awk program. Whole-file will not do either:
+#     one file holds two such awk programs, and the corrected one would cover
+#     for the broken one.
 baddup=""
 while IFS=: read -r f n _; do
   [ -n "${n:-}" ] || continue
@@ -952,84 +958,86 @@ while IFS=: read -r f n _; do
     || baddup="$baddup $f:$n"
 done < <(grep -rIn '$1 == prev' "$REPO_DIR"/bin "$REPO_DIR"/platform 2>/dev/null \
          | grep -vE '(selftest|mutate)\.sh:')
-check "поиск дубликатов отличает источник от самого себя" "$baddup" ""
+check "duplicate detection tells a source from itself" "$baddup" ""
 
-# 9. Чужой код копией в репозитории. Копия getssl весила 155 КБ, лежала под
-#    GPL-3 в публичном репозитории под MIT и успела обрасти локальными
-#    правками, про которые никто уже не помнил, откуда они. Теперь такие вещи
-#    закрепляются lock-файлом и скачиваются на машину; проверяем, что копия не
-#    вернулась и что ссылки на неё не остались.
+# 13. Third-party code kept as a copy in the repository. Such a copy is both a
+#     licensing problem in a permissively licensed public repository and a
+#     drift problem: it accumulates local edits nobody remembers the origin of.
+#     Third-party tools are pinned by a lock file and downloaded onto the
+#     machine instead; this checks that no copy has come back and that no
+#     references to one remain.
 #
-#    Признак копии — исполняемый файл вне bin/ и lib/ длиннее 500 строк:
-#    маленькие шаблоны и конфиги так не выглядят.
+#     The symptom of a copy: an executable file outside bin/ and lib/ longer
+#     than 500 lines. Small templates and configs do not look like that.
 vendored=""
 while IFS= read -r f; do
   case "$f" in */bin/*|*/lib/*) continue ;; esac
   [ -x "$f" ] || continue
   [ "$(wc -l < "$f")" -gt 500 ] && vendored="$vendored $f"
 done < <(find "$REPO_DIR/platform" "$REPO_DIR/profiles" -type f 2>/dev/null)
-check "чужой код не лежит копией в платформе" "$vendored" ""
+check "no third-party code is kept as a copy in the platform" "$vendored" ""
 
-#    Хвост ([^-.a-zA-Z0-9]|$) обязателен с обеих сторон: без «|$» шаблон не
-#    видел ссылку в КОНЦЕ строки — а именно так она и выглядит в ExecStart.
+#     The trailing ([^-.a-zA-Z0-9]|$) is required: without the "|$" the pattern
+#     misses a reference at the END of a line — which is exactly how one looks
+#     in an ExecStart.
 stale=$(grep -rInE 'platform/getssl([^-.a-zA-Z0-9]|$)' "$REPO_DIR"/platform "$REPO_DIR"/bin "$REPO_DIR"/templates 2>/dev/null \
         | grep -vE '(selftest|mutate)\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
-check "ссылок на убранную копию getssl не осталось" "$stale" ""
+check "no references to the removed getssl copy remain" "$stale" ""
 
-# 10. Корень машины, вычисленный от пути скрипта. На машине platform/ — это
-#     симлинк в .stackyard/, и `cd -P` его разворачивает: два уровня вверх дают
-#     .stackyard, а не машину. Скрипт после этого заводит state/ внутри слоя,
-#     который перезаписывается при каждом ./bootstrap. Замечено на живом
-#     сервере: htpasswd.sh положил файл в .stackyard/state/ и там же его искал,
-#     так что «пусто» он печатал совершенно честно.
+# 14. The machine root derived from a script's own path. On a machine,
+#     platform/ is a symlink into .stackyard/, and `cd -P` resolves it: two
+#     levels up gives .stackyard rather than the machine. A script then creates
+#     state/ inside the layer that is overwritten by every ./bootstrap — and,
+#     for instance, writes a password file where nothing will look for it while
+#     honestly reporting that the file is empty.
 badroot=""
 for f in $(grep -rIl 'cd "$DIR0/../\.\." && pwd' "$REPO_DIR"/platform/bin 2>/dev/null); do
   grep -q '\.stackyard' "$f" || badroot="$badroot $f"
 done
-check "ROOT_DIR не остаётся внутри .stackyard" "$badroot" ""
+check "ROOT_DIR does not stay inside .stackyard" "$badroot" ""
 
-# 11. Взаимоисключающие флаги htpasswd. -i читает пароль со стдина, -b берёт его
-#     ТРЕТЬИМ аргументом; вместе они означают «жду третий аргумент», которого
-#     нет, и htpasswd печатает usage и выходит. На сервере это выглядит как
-#     сломанный скрипт, а не как неверные флаги. Прогоном не проверить: htpasswd
-#     живёт в контейнере, а selftest работает без docker.
+# 15. Mutually exclusive htpasswd flags. -i reads the password from stdin, -b
+#     takes it as the THIRD argument; together they mean "waiting for a third
+#     argument" that never comes, and htpasswd prints its usage and exits. On a
+#     server that looks like a broken script rather than like wrong flags. It
+#     cannot be exercised by running it: htpasswd lives in a container, and
+#     selftest runs without docker.
 badflags=$(grep -n 'FLAGS=' "$REPO_DIR/platform/bin/htpasswd.sh" 2>/dev/null \
            | grep -E '\-[a-zA-Z]*i[a-zA-Z]*b|\-[a-zA-Z]*b[a-zA-Z]*i' || true)
-check "htpasswd: -i и -b не стоят вместе" "$badflags" ""
+check "htpasswd: -i and -b are never used together" "$badflags" ""
 
-# 12. Обёртки машины перечислены одним списком (templates/machine/wrappers), и
-#     каждая цель обязана существовать: опечатка здесь даёт машине точку входа,
-#     которая падает на "Платформы нет" — то есть сообщением про bootstrap,
-#     хотя bootstrap ни при чём.
+# 16. The machine's wrappers are listed once (templates/machine/wrappers), and
+#     every target must exist: a typo here gives a machine an entry point that
+#     fails with "the platform is missing" — a message about bootstrap, while
+#     bootstrap has nothing to do with it.
 badwrap=""
 while IFS=: read -r name target; do
   case "$name" in ''|\#*) continue ;; esac
   [ -f "$REPO_DIR/platform/bin/$target" ] || badwrap="$badwrap $name->$target"
 done < "$REPO_DIR/templates/machine/wrappers"
-check "цели обёрток машины существуют" "$badwrap" ""
+check "every wrapper target exists" "$badwrap" ""
 
-# 13. Одна функция, определённая дважды. В bash побеждает ПОСЛЕДНЕЕ
-#     определение, а первое остаётся мёртвым кодом, который выглядит живым:
-#     правку в нём вносят, тестируют — и ничего не меняется. Хуже, если копии
-#     разошлись: тогда перестановка блоков местами молча возвращает старое
-#     поведение.
+# 17. One function defined twice. In bash the LAST definition wins, and the
+#     first remains dead code that still looks live: an edit is made to it,
+#     tested, and nothing changes. Worse if the copies have diverged: swapping
+#     the blocks then silently restores the older behaviour.
 dupfn=""
 while IFS= read -r f; do
   while IFS= read -r fn; do
     [ "$(grep -cE "^${fn}\(\) \{" "$f")" -gt 1 ] && dupfn="$dupfn $(basename "$f"):$fn"
   done < <(grep -oE '^[a-z_][a-z_0-9]*\(\) \{' "$f" | sed 's/() {//' | sort -u)
 done < <(find "$REPO_DIR/platform/lib" "$REPO_DIR/platform/bin" "$REPO_DIR/bin" -name '*.sh' 2>/dev/null)
-check "ни одна функция не определена дважды" "$dupfn" ""
+check "no function is defined twice" "$dupfn" ""
 
-# 14. Образец мутации, переставший совпадать с кодом. Мутация, которая не
-#     наложилась, НИЧЕГО не проверяет, а узнаётся это только после полного
-#     прогона — десять минут спустя, и то если читать вывод целиком.
+# 18. A mutation pattern that no longer matches the code. A mutation that fails
+#     to apply verifies NOTHING, and that is otherwise discovered only after a
+#     full run — ten minutes later, and only if the whole output is read.
 #
-#     Проверяется ПЕРВАЯ строка образца, а не весь он: многострочные образцы
-#     mutate.sh собирает из \n, и повторять здесь его разбор целиком означало
-#     бы завести вторую реализацию, которая разойдётся с первой. Первой строки
-#     хватает, чтобы поймать переименование или перевод — то, ради чего гард и
-#     нужен, — и она не даёт ложных срабатываний.
+#     The FIRST line of each pattern is checked rather than the whole pattern:
+#     multi-line patterns are assembled by mutate.sh from \n, and repeating its
+#     parsing in full here would mean a second implementation that drifts from
+#     the first. One line is enough to catch a rename or a translation — what
+#     the guard exists for — and it produces no false alarms.
 stale_mut=""
 while IFS= read -r line; do
   case "$line" in *"@@"*) ;; *) continue ;; esac
@@ -1038,13 +1046,14 @@ while IFS= read -r line; do
   name="${body%%@@*}"; rest="${body#*@@}"
   file="${rest%%@@*}"; rest="${rest#*@@}"
   pat="${rest%%@@*}"
-  pat="${pat%%\\n*}"          # только первая строка
-  # sed, а не ${pat//...}: в шаблоне подстановки обратный слэш экранирует
-  # следующий символ, поэтому \\& означает просто «&» и замена молчит вхолостую.
+  pat="${pat%%\\n*}"          # the first line only
+  # sed rather than ${pat//...}: in a substitution pattern a backslash escapes
+  # the next character, so \\& means merely "&" and the replacement silently
+  # does nothing.
   pat="$(printf '%s' "$pat" | sed 's/\\&/\&/g')"
   [ -n "$pat" ] || continue
   if [ ! -f "$REPO_DIR/$file" ]; then
-    stale_mut="$stale_mut [нет файла: $file]"
+    stale_mut="$stale_mut [no such file: $file]"
   elif ! grep -qF -- "$pat" "$REPO_DIR/$file"; then
     stale_mut="$stale_mut [$name]"
   fi
