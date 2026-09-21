@@ -236,7 +236,7 @@ while IFS=$'\t' read -r name mib; do
     # No compose project label at all: the container was started outside this
     # repository. It eats the same memory.
     stack="—"; role="outside the project"
-  elif printf '%s\n' "$PLATFORM_SERVICES" | grep -qxF "$svc"; then
+  elif list_has "$PLATFORM_SERVICES" "$svc"; then
     stack="platform"; role="platform"
   else
     stack="$(printf '%s\n' "$SERVICE_TO_STACK" | awk -F'\t' -v s="$svc" '$1 == s { print $2; exit }')"

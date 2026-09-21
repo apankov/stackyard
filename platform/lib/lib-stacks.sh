@@ -502,7 +502,7 @@ check_no_base_service_merge() {
     # precisely when there is NOTHING to report. Harmless while it is called
     # through process substitution, but the first `check_... || die` call site
     # would behave backwards.
-    if printf '%s\n' "$base" | grep -qx -- "$svc"; then
+    if list_has "$base" "$svc"; then
       printf 'stack %s: merges into shared service %s — declare static content via Static= in stack.conf\n' "$s" "$svc"
     fi
   done < <(_stacks_yaml_keys "$(stack_compose_file "$s")" services)
@@ -813,7 +813,7 @@ stack_services() {
   base_services=$(platform_services)
   while IFS= read -r svc; do
     [ -n "$svc" ] || continue
-    if printf '%s\n' "$base_services" | grep -qx -- "$svc"; then
+    if list_has "$base_services" "$svc"; then
       echo "Warning: stack '$s' merges into shared service '$svc' — it will be neither stopped nor removed" >&2
       continue
     fi
@@ -1063,7 +1063,7 @@ check_limit_zones() {
           done < <(stacks_enabled 2>/dev/null) \
           | sed -E 's/.*zone=//; s/limit_conn[[:space:]]+//' | sort -u )
   for z in $used; do
-    printf '%s\n' "$defined" | grep -qx "$z" \
+    list_has "$defined" "$z" \
       || printf 'a vhost references rate-limit zone %s, which nobody defines — nginx will not start\n' "$z"
   done
   return 0

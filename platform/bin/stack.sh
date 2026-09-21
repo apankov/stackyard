@@ -490,7 +490,7 @@ verb_enable() {
   for s in "${want[@]}"; do
     while IFS= read -r u; do
       [ -n "$u" ] || continue
-      stack_units_installed "$s" | grep -qxF "$(basename "$u")" || need_units=1
+      list_has "$(stack_units_installed "$s")" "$(basename "$u")" || need_units=1
     done < <(stack_units "$s")
   done
   if [ "$need_units" -eq 1 ]; then
@@ -1103,7 +1103,7 @@ verb_check() {
   while IFS=$'\t' read -r cname csvc; do
     [ -n "$cname" ] || continue
     seen=$((seen + 1))
-    if [ -n "$csvc" ] && printf '%s\n' "$known" | grep -qxF "$csvc"; then continue; fi
+    if [ -n "$csvc" ] && list_has "$known" "$csvc"; then continue; fi
     orphans=$((orphans + 1))
     bad "container $cname belongs to no stack (service '${csvc:-unlabelled}') — docker rm -f $cname"
   done < <(project_containers)
@@ -1129,7 +1129,7 @@ verb_check() {
   while IFS= read -r s; do
     while IFS= read -r unit; do
       [ -n "$unit" ] || continue
-      stack_units_installed "$s" | grep -qxF "$(basename "$unit")" && continue
+      list_has "$(stack_units_installed "$s")" "$(basename "$unit")" && continue
       units_wrong=$((units_wrong + 1))
       bad "$s: unit $(basename "$unit") is declared but not installed — sudo ./platform/bin/systemd.sh"
     done < <(stack_units "$s")
