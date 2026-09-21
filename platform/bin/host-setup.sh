@@ -108,11 +108,37 @@ pkg_name() {
   esac
 }
 
+# The command a package is wanted FOR. A package counts as present when its
+# command is present, whatever the package is called locally.
+#
+# Distributions ship the same command under different package names, and some
+# ship a stripped variant that CONFLICTS with the full one: on Amazon Linux
+# 2023 gnupg2-minimal and curl-minimal provide gpg and curl while refusing to
+# coexist with gnupg2 and curl. Checking the package name there asks for an
+# install that cannot succeed, on a machine where nothing is actually missing.
+pkg_command() {
+  case "$1" in
+    gnupg)  echo gpg ;;
+    sqlite) echo sqlite3 ;;
+    *)      echo "$1" ;;
+  esac
+}
+
 pkg_installed() {
   case "$PKG_MGR" in
     apt-get) dpkg -s "$1" >/dev/null 2>&1 ;;  # pkg-mgr-ok
     dnf|yum|zypper) rpm -q "$1" >/dev/null 2>&1 ;;  # pkg-mgr-ok
     apk)     apk info -e "$1" >/dev/null 2>&1 ;;  # pkg-mgr-ok
+    *)       return 1 ;;
+  esac
+}
+
+pkg_install() {
+  case "$PKG_MGR" in
+    apt-get) apt-get update -qq && apt-get install -y "$@" ;;  # pkg-mgr-ok
+    dnf|yum) "$PKG_MGR" install -y "$@" ;;  # pkg-mgr-ok
+    apk)     apk add "$@" ;;  # pkg-mgr-ok
+    zypper)  zypper install -y "$@" ;;  # pkg-mgr-ok
     *)       return 1 ;;
   esac
 }
@@ -280,7 +306,11 @@ else
   MISSING_PKGS=()
   for pkg in "${PACKAGES[@]}"; do
     real="$(pkg_name "$pkg")"
-    if pkg_installed "$real"; then ok "$real"; else MISSING_PKGS+=("$real"); fi
+    if command -v "$(pkg_command "$pkg")" >/dev/null 2>&1 || pkg_installed "$real"; then
+      ok "$real"
+    else
+      MISSING_PKGS+=("$real")
+    fi
   done
 
   if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
@@ -288,13 +318,17 @@ else
       bad "not installed: ${MISSING_PKGS[*]} ($(pkg_install_cmd) ${MISSING_PKGS[*]})"
     else
       echo "  ... installing ($PKG_MGR): ${MISSING_PKGS[*]}"
-      case "$PKG_MGR" in
-        apt-get) apt-get update -qq && apt-get install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
-        dnf|yum) "$PKG_MGR" install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
-        apk)     apk add "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
-        zypper)  zypper install -y "${MISSING_PKGS[@]}" ;;  # pkg-mgr-ok
-      esac
-      for pkg in "${MISSING_PKGS[@]}"; do ok "$pkg (installed)"; done
+      # The install runs inside `if` on purpose. Under set -e a failing package
+      # manager would otherwise end the whole run right here — and everything
+      # after this step is the part that actually provisions the machine: the
+      # stacks' host parts, the placeholder certificates, the systemd timers.
+      # A machine would then be left without timers because one package name
+      # was wrong, and the exit code would blame the packages.
+      if pkg_install "${MISSING_PKGS[@]}"; then
+        for pkg in "${MISSING_PKGS[@]}"; do ok "$pkg (installed)"; done
+      else
+        bad "could not install: ${MISSING_PKGS[*]} — install by hand and re-run"
+      fi
     fi
   fi
 fi
