@@ -984,12 +984,26 @@ verb_check() {
       [ "$empty" -eq 0 ] && ok "the container can see the contents of its mounted directories"
     fi
 
-    served="$(docker exec nginx nginx -T 2>/dev/null | nginx_served_names)"
+    # Same two-step treatment as the spec above, for the same reason: a
+    # `nginx -T` that died halfway still prints valid configuration up to that
+    # point, and the comparison would then report the vhosts it never reached
+    # as "not served". On a machine this size that is not hypothetical — the
+    # dump is the whole configuration, and it competes for memory with
+    # everything else this check runs.
+    local dump dump_rc=0
+    dump="$(docker exec nginx nginx -T 2>/dev/null)" || dump_rc=$?
+    if [ "$dump_rc" -ne 0 ]; then
+      served=""
+    else
+      served="$(printf '%s\n' "$dump" | nginx_served_names)"
+    fi
     # ALL names are needed here, aliases included: those are what the server
     # blocks serve. stacks_domains returns only the primary ones, which measure
     # certificates rather than vhosts.
     declared="$(stacks_domain_names)"
-    if [ -z "$served" ]; then
+    if [ "$dump_rc" -ne 0 ]; then
+      warn "could not read the running configuration (nginx -T exited $dump_rc) — domains not compared"
+    elif [ -z "$served" ]; then
       bad "the running nginx serves NO domains at all — ./dc up -d --force-recreate nginx"
     else
       for dom in $declared; do
