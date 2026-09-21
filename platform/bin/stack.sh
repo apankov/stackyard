@@ -938,12 +938,12 @@ verb_check() {
       local live="$1" spec="$2" p out=""
       while IFS= read -r p; do
         [ -n "$p" ] || continue
-        printf '%s\n' "$live" | grep -qxF "$p" && continue
+        list_has "$live" "$p" && continue
         out="$out         missing in the container: $p"$'\n'
       done <<< "$spec"
       while IFS= read -r p; do
         [ -n "$p" ] || continue
-        printf '%s\n' "$spec" | grep -qxF "$p" && continue
+        list_has "$spec" "$p" && continue
         out="$out         extra in the container: $p"$'\n'
       done <<< "$live"
       printf '%s' "$out"
@@ -1052,11 +1052,11 @@ verb_check() {
       bad "the running nginx serves NO domains at all — ./dc up -d --force-recreate nginx"
     else
       for dom in $declared; do
-        printf '%s\n' "$served" | grep -qxF "$dom" \
+        list_has "$served" "$dom" \
           || bad "nginx does not serve $dom — the process's config differs from the one on disk: ./dc up -d --force-recreate nginx"
       done
       for dom in $served; do
-        printf '%s\n' "$declared" | grep -qxF "$dom" \
+        list_has "$declared" "$dom" \
           || warn "nginx serves $dom, which no enabled stack declares — ./stack sync"
       done
       ok "domains served: $(printf '%s\n' "$served" | grep -c .)"

@@ -1099,7 +1099,18 @@ check "a two-word privilege is accepted" "$(decl_check 'SELECT,LOCK TABLES')" ""
 check "ALL PRIVILEGES is reported once" "$(decl_check 'ALL PRIVILEGES' | grep -c .)" "1"
 check "a correct list stays silent" "$(decl_check 'SELECT,INSERT,UPDATE,DELETE')" ""
 
-# 22. memory.sh answers "where did the memory go", so it must fail loudly when
+# 22. list_has decides whether a check reports a finding, so its two failure
+#     modes are both silent: a substring counted as a whole line hides a real
+#     difference, and a glob character taken as a wildcard invents one.
+LH="$(printf '%s\n' '/a -> /x' '/c*d -> /z')"
+say() { "$@" && echo yes || echo no; }
+check "list_has: an exact line is found"        "$(say list_has "$LH" '/a -> /x')" "yes"
+check "list_has: a substring is not a line"     "$(say list_has "$LH" '/a')" "no"
+check "list_has: a glob character is literal"   "$(say list_has "$LH" '/c*d -> /z')" "yes"
+check "list_has: a glob does not match wildly"  "$(say list_has "$LH" '/cXd -> /z')" "no"
+check "list_has: a trailing space is a difference" "$(say list_has "$LH" '/a -> /x ')" "no"
+
+# 23. memory.sh answers "where did the memory go", so it must fail loudly when
 #     it cannot measure. A report that silently prints zeros is read as "the
 #     machine is idle" — the opposite of the truth it exists to tell.
 printf 'SwapTotal: 0 kB\n' > "$WORK/meminfo-no-total"

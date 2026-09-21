@@ -997,6 +997,24 @@ project_containers() {
     --format '{{.Names}}	{{.Label "com.docker.compose.service"}}' 2>/dev/null || true
 }
 
+# Does a newline-separated list contain this line, exactly?
+#
+# Without a subprocess, deliberately. The obvious `printf ... | grep -qxF`
+# costs two forks per line — twenty-two per run of a check that compares eleven
+# strings — and on one machine it intermittently reported a line as absent from
+# a list that demonstrably contained it, with both lists printed byte-identical
+# and no error anywhere. That cause was never established; what is certain is
+# that set membership over a handful of strings has no business forking.
+#
+# `case` matches a pattern, and a quoted expansion inside a pattern is literal:
+# a value containing * or [ compares as itself rather than as a wildcard. The
+# newlines around both sides are what makes it a whole-line match instead of a
+# substring one.
+list_has() {
+  case $'\n'"$1"$'\n' in *$'\n'"$2"$'\n'*) return 0 ;; esac
+  return 1
+}
+
 # ------------------------------------------------------- table output
 
 # String width in CHARACTERS. `printf %-12s` counts bytes, so a table
