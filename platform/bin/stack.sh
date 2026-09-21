@@ -903,10 +903,24 @@ verb_check() {
     local live_mounts spec_mounts pair served declared dom mismatch=0
     live_mounts="$(docker inspect nginx \
       --format '{{range .Mounts}}{{.Source}}	{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true)"
-    spec_mounts="$(cd "$ROOT_DIR" && docker compose \
+    # The spec is captured in TWO steps, and the exit code of the first one is
+    # kept. Piping compose straight into the parser and ending with `|| true`
+    # hides the one failure that matters: a compose killed halfway (this
+    # machine has under a gigabyte of RAM) still prints valid YAML up to the
+    # point it died. The parser then returns a SHORTER list of mounts, and the
+    # comparison below blames the container for whatever the spec is missing —
+    # a different accusation on every run, none of them true. A check whose own
+    # failure looks like a finding is worse than no check.
+    local spec_yaml spec_rc=0
+    spec_yaml="$(cd "$ROOT_DIR" && docker compose \
       --project-directory "$ROOT_DIR" --env-file "$ROOT_DIR/.env" \
       -f "$ROOT_DIR/platform/compose/nginx.yaml" -f "$(stacks_static_file)" \
-      config 2>/dev/null | compose_mount_pairs || true)"
+      config 2>/dev/null)" || spec_rc=$?
+    if [ "$spec_rc" -ne 0 ]; then
+      spec_mounts=""
+    else
+      spec_mounts="$(printf '%s\n' "$spec_yaml" | compose_mount_pairs || true)"
+    fi
 
     # Both sides are normalised into the same readable "source -> target" form:
     # what follows compares strings, and the message shows exactly what was
@@ -915,7 +929,7 @@ verb_check() {
     spec_mounts="$(printf '%s\n' "$spec_mounts" | awk -F'\t' 'NF >= 2 { printf "%s -> %s\n", $1, $2 }' | sort)"
 
     if [ -z "$spec_mounts" ]; then
-      warn "the nginx spec did not build — mounts cannot be compared"
+      warn "the nginx spec did not build ($([ "$spec_rc" -ne 0 ] && echo "compose exited $spec_rc" || echo "no mounts parsed")) — mounts cannot be compared"
     else
       # A mismatch counts as ONE problem, with the details on the lines below:
       # the remedy is the same for all of them, and repeating it on each line
