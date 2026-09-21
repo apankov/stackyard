@@ -97,6 +97,7 @@ cd machines/client-acme
 ./stack sync           # bring nginx in line with the manifest
 ./dc up -d
 sudo ./host-setup      # packages, certificate placeholders, timers, stack host parts
+./memory               # where the memory went: by container, by stack, by role
 ```
 
 ## Machine state

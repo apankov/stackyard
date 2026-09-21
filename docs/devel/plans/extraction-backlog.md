@@ -129,8 +129,6 @@ dozen more warning-level messages (SC2155, SC2046, SC2010, SC1007, SC2209,
 SC2221/2222). They were not addressed — that is separate work, and it is worth
 doing in one pass rather than in passing.
 
-**Left from the port:** `memory.sh`.
-
 **For migrating machines:** the dump prefix in S3 is now derived from the
 provider stack's name (`pg`, `mysql`), whereas it used to be the constant
 `postgres`. A machine that already writes to a bucket needs

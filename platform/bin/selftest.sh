@@ -1099,6 +1099,14 @@ check "a two-word privilege is accepted" "$(decl_check 'SELECT,LOCK TABLES')" ""
 check "ALL PRIVILEGES is reported once" "$(decl_check 'ALL PRIVILEGES' | grep -c .)" "1"
 check "a correct list stays silent" "$(decl_check 'SELECT,INSERT,UPDATE,DELETE')" ""
 
+# 22. memory.sh answers "where did the memory go", so it must fail loudly when
+#     it cannot measure. A report that silently prints zeros is read as "the
+#     machine is idle" — the opposite of the truth it exists to tell.
+printf 'SwapTotal: 0 kB\n' > "$WORK/meminfo-no-total"
+mem_rc=0
+STACKYARD_MEMINFO="$WORK/meminfo-no-total" "$REPO_DIR/platform/bin/memory.sh" --check >/dev/null 2>&1 || mem_rc=$?
+check "memory.sh refuses a meminfo without MemTotal" "$mem_rc" "2"
+
 # A lock file must name everything without which the download is not
 # reproducible. An empty field here would mean "download whatever is served" —
 # precisely what a lock file exists to prevent.

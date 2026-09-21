@@ -12,3 +12,4 @@ host-setup:host-setup.sh
 certs:certs.sh
 registry:registry.sh
 htpasswd:htpasswd.sh
+memory:memory.sh
