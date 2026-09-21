@@ -38,12 +38,26 @@ user="$(env_get "${prefix}_User")"
 # Privileges are parsed here rather than in the container: otherwise a typo
 # surfaces as a MySQL syntax error in the log of a one-shot container that from
 # the outside looks simply like `exited`.
-for g in $(env_get "${prefix}_Grants" "SELECT,INSERT,UPDATE,DELETE" | tr ',' ' '); do
-  case "$(printf '%s' "$g" | tr 'a-z' 'A-Z')" in
-    SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|INDEX|ALTER|REFERENCES|TRIGGER| \
-    EXECUTE|LOCK|"CREATE VIEW"|"SHOW VIEW"|"CREATE ROUTINE"|"ALTER ROUTINE"|"CREATE TEMPORARY TABLES") ;;
+#
+# Split on COMMAS only, never on whitespace. Half the privileges MySQL has are
+# two words -- ALL PRIVILEGES, CREATE VIEW, LOCK TABLES, CREATE TEMPORARY
+# TABLES -- and splitting on spaces turns each of them into tokens that match
+# nothing. The check then reports a correct declaration as an unrecognized
+# privilege, which is worse than not checking: it teaches you to ignore it.
+# `|| [ -n "$g" ]` because the producer does not end with a newline: env_get
+# uses printf without one, so a single-element list is one unterminated line
+# and a bare `read` returns non-zero on it. The loop body would then never run
+# at all, and EVERY declaration with one privilege would pass unchecked.
+while IFS= read -r g || [ -n "$g" ]; do
+  g="$(printf '%s' "$g" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr 'a-z' 'A-Z')"
+  [ -n "$g" ] || continue
+  case "$g" in
+    SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|INDEX|ALTER|REFERENCES|TRIGGER|EVENT| \
+    EXECUTE|"LOCK TABLES"|"CREATE VIEW"|"SHOW VIEW"|"CREATE ROUTINE"|"ALTER ROUTINE"|"CREATE TEMPORARY TABLES") ;;
     ALL|"ALL PRIVILEGES")
-      printf 'stack %s: %s_Grants=ALL includes DROP and GRANT OPTION -- list what you need explicitly\n' "$s" "$prefix" ;;
+      # On one database ALL does not include GRANT OPTION, but it does include
+      # DROP and ALTER: a stolen application password then drops the schema.
+      printf 'stack %s: %s_Grants=ALL includes DROP and ALTER -- list what you need explicitly\n' "$s" "$prefix" ;;
     *) printf 'stack %s: unrecognized privilege in %s_Grants: %s\n' "$s" "$prefix" "$g" ;;
   esac
-done
+done < <(env_get "${prefix}_Grants" "SELECT,INSERT,UPDATE,DELETE" | tr ',' '\n')

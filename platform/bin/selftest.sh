@@ -1078,6 +1078,27 @@ check "scripts take the nginx image from nginx_image" "$badimg" ""
 badchmod=$(grep -n '^chmod .*"\$FILE"' "$REPO_DIR/platform/bin/htpasswd.sh" 2>/dev/null || true)
 check "the password file's permissions are set by the container, not the host" "$badchmod" ""
 
+# 21. A provider validates the declaration addressed to it, and the two ways
+#     that validation can go silently blind are both cheap to make: splitting
+#     the list on whitespace (half of MySQL's privileges are two words) and a
+#     `read` loop over input that does not end in a newline (a list of ONE
+#     privilege is exactly that, and the loop body then never runs). Either
+#     mistake turns the check into one that accepts everything, which is worse
+#     than no check: it is read as a pass.
+DM="$WORK/decl-machine"; rm -rf "$DM"; mkdir -p "$DM/stacks/t"
+ln -sfn "$REPO_DIR/platform" "$DM/platform"
+ln -sfn "$REPO_DIR/profiles" "$DM/profile"
+: > "$DM/.env"
+decl_check() {
+  printf 'Mysql_User="u"\nMysql_Grants="%s"\n' "$1" > "$DM/stacks/t/stack.conf"
+  ROOT_DIR="$DM" STACK_NAME=t DB_PREFIX=Mysql \
+    bash "$REPO_DIR/profiles/stacks/mysql/scripts/check-decl.sh" 2>&1
+}
+check "a single bogus privilege is caught" "$(decl_check NOSUCH | grep -c NOSUCH)" "1"
+check "a two-word privilege is accepted" "$(decl_check 'SELECT,LOCK TABLES')" ""
+check "ALL PRIVILEGES is reported once" "$(decl_check 'ALL PRIVILEGES' | grep -c .)" "1"
+check "a correct list stays silent" "$(decl_check 'SELECT,INSERT,UPDATE,DELETE')" ""
+
 # A lock file must name everything without which the download is not
 # reproducible. An empty field here would mean "download whatever is served" —
 # precisely what a lock file exists to prevent.
