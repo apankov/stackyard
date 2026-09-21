@@ -85,15 +85,43 @@ Half of it exists already: `host-setup` catches `CHANGE_ME` and unfilled
 secrets, and `stack list` reports `missing: stacks/x/.env`. What is missing is
 the step that creates them and says what to fill.
 
+## 4. A third remembered step, found while migrating a machine
+
+`./bootstrap` replaces `.stackyard/` wholesale, and nginx bind-mounts
+directories through the `platform/` symlink. The container is then left holding
+deleted inodes: it keeps serving from the configuration in its memory, and the
+next reload leaves it with no server blocks at all. The remedy is
+`./dc up -d --force-recreate nginx` — a plain `up -d` does nothing, because the
+paths in the spec have not changed and compose compares the spec.
+
+So every platform update ends with a command a person has to remember, and
+during one migration it was forgotten twice in an evening.
+
+That work belongs to `./stack sync`, whose stated job is to bring nginx in line
+with the manifest — a mount pointing at a deleted directory is a divergence
+from the manifest as much as a missing include is. The shape:
+
+- `sync` probes liveness the way `--check` already does, by asking the
+  container rather than `docker inspect`;
+- if the directories are dead AND the upstreams are up, it recreates nginx
+  itself and says why;
+- if they are dead while an upstream is down, it refuses and names the
+  upstream: recreating at that moment is exactly how every vhost on the machine
+  goes down;
+- `bootstrap` stays as it is. It must not restart anything on a running machine
+  without being asked; printing the warning is its job.
+
 ## Order of work
 
 1. **`./stack init`** — cheapest, removes the most manual work (roughly 40
-   lines in `stack.sh` plus a selftest guard). It pays for itself on the
-   devbox6 migration, where the profile stacks' `.env` files are currently
-   created by hand from a list in the runbook.
-2. **`install.sh` + the `stackyard` CLI** — gives "distributed like everything
+   lines in `stack.sh` plus a selftest guard). It pays for itself on a
+   migration, where the profile stacks' `.env` files are currently created by
+   hand from a list in the runbook.
+2. **Recreation inside `sync`** (section 4) — the same class, and it has now
+   cost real downtime risk twice.
+3. **`install.sh` + the `stackyard` CLI** — gives "distributed like everything
    else" without touching how machines receive the platform.
-3. **`bootstrap`** — do not touch.
+4. **`bootstrap`** — do not touch.
 
 ## Where things stood when this was written
 
