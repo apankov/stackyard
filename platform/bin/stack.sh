@@ -979,10 +979,23 @@ verb_check() {
         # drift gets hidden.
         warn "the two readings of the mounts disagree — not reported as drift (STACKYARD_DEBUG=1 for both)"
         if [ -n "${STACKYARD_DEBUG:-}" ]; then
-          printf '         --- reading 1, live (%s lines)\n%s\n' "$(printf '%s\n' "$live_mounts" | grep -c .)" "$live_mounts" >&2
-          printf '         --- reading 1, spec (%s lines)\n%s\n' "$(printf '%s\n' "$spec_mounts" | grep -c .)" "$spec_mounts" >&2
-          printf '         --- reading 2, live (%s lines)\n%s\n' "$(printf '%s\n' "$live2" | grep -c .)" "$live2" >&2
-          printf '         --- reading 2, spec (%s lines)\n%s\n' "$(printf '%s\n' "$spec2" | grep -c .)" "$spec2" >&2
+          # The DIFFERENCES first: the lists themselves have already been shown
+          # to look identical while the comparison found something, which means
+          # what matters is invisible on an ordinary print.
+          printf '         --- what reading 1 found:\n%s' "${detail:-(nothing)}" >&2
+          printf '         --- what reading 2 found:\n%s' "${detail2:-(nothing)}" >&2
+          # `sed -n l` escapes what a plain print hides: a stray carriage
+          # return, a trailing space, a non-ASCII byte. A line that differs
+          # only by one of those looks the same in the report and compares
+          # unequal — which is exactly the shape of this failure.
+          printf '         --- reading 1, live (%s lines)\n' "$(printf '%s\n' "$live_mounts" | grep -c .)" >&2
+          printf '%s\n' "$live_mounts" | sed -n l >&2
+          printf '         --- reading 1, spec (%s lines)\n' "$(printf '%s\n' "$spec_mounts" | grep -c .)" >&2
+          printf '%s\n' "$spec_mounts" | sed -n l >&2
+          printf '         --- reading 2, live (%s lines)\n' "$(printf '%s\n' "$live2" | grep -c .)" >&2
+          printf '%s\n' "$live2" | sed -n l >&2
+          printf '         --- reading 2, spec (%s lines)\n' "$(printf '%s\n' "$spec2" | grep -c .)" >&2
+          printf '%s\n' "$spec2" | sed -n l >&2
         fi
       fi
 
