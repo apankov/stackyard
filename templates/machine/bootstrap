@@ -166,8 +166,11 @@ fi
 if command -v docker >/dev/null 2>&1 && [ -n "$(docker ps -q 2>/dev/null)" ]; then
   echo
   echo "NOTE: containers are running and have mounted the PREVIOUS platform/."
-  echo "  Until they are recreated they see empty platform directories:"
-  echo "    ./dc up -d"
+  echo "  Until they are recreated they see empty platform directories."
+  echo "  --force-recreate is required: the paths in the spec have not changed,"
+  echo "  only the inode behind them, and compose compares the spec — a plain"
+  echo "  'up -d' reports everything as up to date and does nothing."
+  echo "    ./dc up -d --force-recreate nginx     # upstreams must be up first"
   echo "  To see what the running nginx sees: ./stack --check"
 fi
 

@@ -958,7 +958,12 @@ verb_check() {
         host_n=$(ls -A "$src" 2>/dev/null | wc -l | tr -d ' ')
         cont_n=$(docker exec nginx sh -c "ls -A '$dst' 2>/dev/null | wc -l" 2>/dev/null | tr -d ' \r')
         if mount_looks_stale "$host_n" "$cont_n"; then
-          bad "the container cannot see $dst — the host directory was replaced after it started: ./dc up -d nginx"
+          # --force-recreate, not a plain `up -d`. The path in the spec has not
+          # changed — only the inode behind it — and compose compares the spec,
+          # so it reports the container as up to date and does nothing. Advice
+          # that changes nothing is worse than none: it reads as "already
+          # tried, still broken".
+          bad "the container cannot see $dst — the host directory was replaced after it started: ./dc up -d --force-recreate nginx"
           empty=$((empty + 1))
         fi
       done <<< "$spec_mounts"
@@ -971,11 +976,11 @@ verb_check() {
     # certificates rather than vhosts.
     declared="$(stacks_domain_names)"
     if [ -z "$served" ]; then
-      bad "the running nginx serves NO domains at all — ./dc up -d nginx"
+      bad "the running nginx serves NO domains at all — ./dc up -d --force-recreate nginx"
     else
       for dom in $declared; do
         printf '%s\n' "$served" | grep -qxF "$dom" \
-          || bad "nginx does not serve $dom — the process's config differs from the one on disk: ./dc up -d nginx"
+          || bad "nginx does not serve $dom — the process's config differs from the one on disk: ./dc up -d --force-recreate nginx"
       done
       for dom in $served; do
         printf '%s\n' "$declared" | grep -qxF "$dom" \
