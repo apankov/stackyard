@@ -900,58 +900,90 @@ verb_check() {
   if ! nginx_running; then
     warn "the nginx container is not running — nothing to compare"
   else
-    local live_mounts spec_mounts pair served declared dom mismatch=0
-    live_mounts="$(docker inspect nginx \
-      --format '{{range .Mounts}}{{.Source}}	{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true)"
+    local live_mounts spec_mounts pair served declared dom
+    local detail="" detail2=""
+
+    # Both sides are read through functions because they are read TWICE. A
+    # mismatch here is a statement about a live system measured with several
+    # `docker` calls, and a single reading that disagrees with the next one is
+    # not evidence of drift — it is evidence that the measurement moved. The
+    # second reading costs two docker calls and buys the difference between "I
+    # saw it twice" and "I saw something once".
+    read_live_mounts() {
+      docker inspect nginx \
+        --format '{{range .Mounts}}{{.Source}}	{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null \
+        | awk -F'\t' 'NF >= 2 { printf "%s -> %s\n", $1, $2 }' | sort
+    }
     # The spec is captured in TWO steps, and the exit code of the first one is
     # kept. Piping compose straight into the parser and ending with `|| true`
-    # hides the one failure that matters: a compose killed halfway (this
-    # machine has under a gigabyte of RAM) still prints valid YAML up to the
-    # point it died. The parser then returns a SHORTER list of mounts, and the
-    # comparison below blames the container for whatever the spec is missing —
-    # a different accusation on every run, none of them true. A check whose own
-    # failure looks like a finding is worse than no check.
-    local spec_yaml spec_rc=0
-    spec_yaml="$(cd "$ROOT_DIR" && docker compose \
-      --project-directory "$ROOT_DIR" --env-file "$ROOT_DIR/.env" \
-      -f "$ROOT_DIR/platform/compose/nginx.yaml" -f "$(stacks_static_file)" \
-      config 2>/dev/null)" || spec_rc=$?
-    if [ "$spec_rc" -ne 0 ]; then
-      spec_mounts=""
-    else
-      spec_mounts="$(printf '%s\n' "$spec_yaml" | compose_mount_pairs || true)"
-    fi
+    # hides the one failure that matters: a compose killed halfway still prints
+    # valid YAML up to the point it died. The parser then returns a SHORTER
+    # list, and the comparison blames the container for whatever the spec is
+    # missing. A check whose own failure looks like a finding is worse than no
+    # check.
+    SPEC_RC=0
+    read_spec_mounts() {
+      local yaml
+      SPEC_RC=0
+      yaml="$(cd "$ROOT_DIR" && docker compose \
+        --project-directory "$ROOT_DIR" --env-file "$ROOT_DIR/.env" \
+        -f "$ROOT_DIR/platform/compose/nginx.yaml" -f "$(stacks_static_file)" \
+        config 2>/dev/null)" || { SPEC_RC=$?; return 0; }
+      printf '%s\n' "$yaml" | compose_mount_pairs \
+        | awk -F'\t' 'NF >= 2 { printf "%s -> %s\n", $1, $2 }' | sort
+    }
+    # One difference per line, in both directions, as text: comparing the
+    # printed form is what makes the message show exactly what was compared.
+    mount_diff() {
+      local live="$1" spec="$2" p out=""
+      while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        printf '%s\n' "$live" | grep -qxF "$p" && continue
+        out="$out         missing in the container: $p"$'\n'
+      done <<< "$spec"
+      while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        printf '%s\n' "$spec" | grep -qxF "$p" && continue
+        out="$out         extra in the container: $p"$'\n'
+      done <<< "$live"
+      printf '%s' "$out"
+    }
 
-    # Both sides are normalised into the same readable "source -> target" form:
-    # what follows compares strings, and the message shows exactly what was
-    # compared.
-    live_mounts="$(printf '%s\n' "$live_mounts" | awk -F'\t' 'NF >= 2 { printf "%s -> %s\n", $1, $2 }' | sort)"
-    spec_mounts="$(printf '%s\n' "$spec_mounts" | awk -F'\t' 'NF >= 2 { printf "%s -> %s\n", $1, $2 }' | sort)"
+    live_mounts="$(read_live_mounts)"
+    spec_mounts="$(read_spec_mounts)"
 
-    if [ -z "$spec_mounts" ]; then
-      warn "the nginx spec did not build ($([ "$spec_rc" -ne 0 ] && echo "compose exited $spec_rc" || echo "no mounts parsed")) — mounts cannot be compared"
+    if [ "$SPEC_RC" -ne 0 ]; then
+      warn "the nginx spec did not build (compose exited $SPEC_RC) — mounts cannot be compared"
+    elif [ -z "$spec_mounts" ]; then
+      warn "the nginx spec built but declares no mounts — mounts cannot be compared"
     else
-      # A mismatch counts as ONE problem, with the details on the lines below:
-      # the remedy is the same for all of them, and repeating it on each line
-      # would drown the rest of the report.
-      local detail=""
-      while IFS= read -r pair; do
-        [ -n "$pair" ] || continue
-        printf '%s\n' "$live_mounts" | grep -qxF "$pair" && continue
-        mismatch=$((mismatch + 1))
-        detail="$detail         missing in the container: $pair"$'\n'
-      done <<< "$spec_mounts"
-      while IFS= read -r pair; do
-        [ -n "$pair" ] || continue
-        printf '%s\n' "$spec_mounts" | grep -qxF "$pair" && continue
-        mismatch=$((mismatch + 1))
-        detail="$detail         extra in the container: $pair"$'\n'
-      done <<< "$live_mounts"
-      if [ "$mismatch" -eq 0 ]; then
+      detail="$(mount_diff "$live_mounts" "$spec_mounts")"
+      if [ -n "$detail" ]; then
+        # Second reading. Only what both agree on is reported: a real drift
+        # does not heal between two calls, while a measurement that moved does.
+        local live2 spec2
+        live2="$(read_live_mounts)"
+        spec2="$(read_spec_mounts)"
+        detail2="$(mount_diff "$live2" "$spec2")"
+      fi
+
+      if [ -z "$detail" ]; then
         ok "mounts match the spec"
-      else
-        bad "mounts have drifted from the spec ($mismatch) — ./dc up -d nginx"
+      elif [ "$detail" = "$detail2" ]; then
+        bad "mounts have drifted from the spec — ./dc up -d --force-recreate nginx"
         printf '%s' "$detail"
+      else
+        # The two readings disagree. That is a fact about the measurement, not
+        # about the machine, and it is said out loud rather than swallowed: a
+        # check that quietly retries until it likes the answer is how a real
+        # drift gets hidden.
+        warn "the two readings of the mounts disagree — not reported as drift (STACKYARD_DEBUG=1 for both)"
+        if [ -n "${STACKYARD_DEBUG:-}" ]; then
+          printf '         --- reading 1, live (%s lines)\n%s\n' "$(printf '%s\n' "$live_mounts" | grep -c .)" "$live_mounts" >&2
+          printf '         --- reading 1, spec (%s lines)\n%s\n' "$(printf '%s\n' "$spec_mounts" | grep -c .)" "$spec_mounts" >&2
+          printf '         --- reading 2, live (%s lines)\n%s\n' "$(printf '%s\n' "$live2" | grep -c .)" "$live2" >&2
+          printf '         --- reading 2, spec (%s lines)\n%s\n' "$(printf '%s\n' "$spec2" | grep -c .)" "$spec2" >&2
+        fi
       fi
 
       # A mount's path and what is visible through it are different things, so
