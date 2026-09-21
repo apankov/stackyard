@@ -22,3 +22,7 @@ deploy a machine and how to update the platform. The rest as needed.
 - [devel/plans/extraction-backlog.md](devel/plans/extraction-backlog.md) — what
   is left after extracting the platform: the unported backup and notifications,
   assumptions that get in the way of distributing it, secret-handling debts.
+- [devel/plans/distribution-and-cli.md](devel/plans/distribution-and-cli.md) —
+  whether to install stackyard the way nvm is installed: which part that fits
+  (the operator's tools), which part it must not touch (the platform onto a
+  machine), and the `./stack init` command that removes the remembered steps.
