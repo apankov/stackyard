@@ -38,6 +38,33 @@ a subdirectory is a declaration too: `nginx/` means an include will be made,
 will ask the stack whether it is alive, `scripts/host-setup.sh` means the stack
 has a host-side part.
 
+## Whose certificate it is
+
+By default this machine issues and renews the certificate for every domain a
+stack declares. A stack whose TLS is terminated **in front of** the
+machine — behind a load balancer or a CDN — says so:
+
+```
+# stacks/ledger/stack.conf
+Domains="ledger.staging.example.com"
+Certs="external"
+```
+
+Then no getssl config is written for those names, `check-certs.sh` reports
+them as external instead of counting a placeholder as a problem, and if no
+enabled stack is left wanting getssl, `host-setup` removes the renewal timers
+rather than installing them.
+
+The placeholder certificate stays either way: `listen 443 ssl` with no
+certificate file is a refusal to start, not a warning.
+
+Explicit, rather than inferred from a failing challenge, for the same reason
+`Containers="no"` is explicit. A domain nobody issues a certificate for looks
+exactly like a domain whose renewal has broken, and the first machine to need
+this had spent two weeks failing a renewal every night for a domain an ALB had
+been terminating all along — with a green timer, because getssl exits zero
+when there is nothing it can do.
+
 ## Copy or link
 
 Stacks are looked up in two roots, the machine one first:

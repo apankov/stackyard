@@ -37,14 +37,34 @@ UNIT_DST="/etc/systemd/system"
 BACKUP_ENV_FILE="$ROOT_DIR/.env-backup"
 NOTIFY_ENV_FILE="$ROOT_DIR/.env-notify"
 
+# Sourced here rather than at block 4, where it used to be: which units exist
+# at all now depends on the stacks, and that decision has to be made before
+# block 3 writes them out.
+# shellcheck source=platform/lib/lib-stacks.sh
+. "$LIB_DIR/lib-stacks.sh"
+
 # The backup and notification units are appended below when the machine has
-# those parts configured. Certificate renewal is always installed.
+# those parts configured.
+#
+# Certificate renewal is installed only when some enabled stack still wants
+# this machine to issue a certificate. With every domain behind Certs=
+# "external" the timers would run nightly and could never succeed: getssl
+# would answer a challenge that a load balancer in front never forwards. That
+# is not a quiet no-op — it is a red journal every night, and a journal that
+# is always red is one nobody opens on the night a real renewal breaks.
 #
 # STACK units are not listed here at all: they are picked up by the pass over
 # stacks/<stack>/systemd/ (block 4). Otherwise a stack that needed a timer
 # would have to edit this script.
-UNITS=(getssl-renew.service getssl-renew.timer getssl-check.service getssl-check.timer)
-TIMERS=(getssl-renew.timer getssl-check.timer)
+GETSSL_UNITS=(getssl-renew.service getssl-renew.timer getssl-check.service getssl-check.timer)
+UNITS=()
+TIMERS=()
+INSTALL_GETSSL=0
+if stacks_getssl_any; then
+  INSTALL_GETSSL=1
+  UNITS+=("${GETSSL_UNITS[@]}")
+  TIMERS+=(getssl-renew.timer getssl-check.timer)
+fi
 
 # 1. The .env file must exist
 if [ ! -f "$ENV_FILE" ]; then
@@ -75,22 +95,28 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-# Platform_Deploy_Dir is a path ON the machine, and this runs on that machine.
-if [ ! -d "$Platform_Deploy_Dir/state/getssl-config" ]; then
-  echo "Error: no $Platform_Deploy_Dir/state/getssl-config" >&2
-  echo "  Platform_Deploy_Dir in .env does not point at the repository." >&2
-  exit 1
-fi
+# Both of these are about getssl, so neither is a reason to refuse on a
+# machine that is not going to run it. Demanding a getssl binary from a
+# machine whose every domain is terminated upstream would make Certs=
+# "external" impossible to actually adopt.
+if [ "$INSTALL_GETSSL" -eq 1 ]; then
+  # Platform_Deploy_Dir is a path ON the machine, and this runs on that machine.
+  if [ ! -d "$Platform_Deploy_Dir/state/getssl-config" ]; then
+    echo "Error: no $Platform_Deploy_Dir/state/getssl-config" >&2
+    echo "  Platform_Deploy_Dir in .env does not point at the repository." >&2
+    exit 1
+  fi
 
-# getssl is a machine artifact under state/, not a platform file: it is
-# downloaded by getssl-fetch.sh according to platform/getssl.lock. Installing
-# the units before it exists is pointless: there would be a timer and no
-# renewals, which looks exactly like "getssl is quiet because there is nothing
-# to renew".
-if [ ! -x "$Platform_Deploy_Dir/state/bin/getssl" ]; then
-  echo "Error: no $Platform_Deploy_Dir/state/bin/getssl" >&2
-  echo "  Download it with: ./platform/bin/getssl-fetch.sh" >&2
-  exit 1
+  # getssl is a machine artifact under state/, not a platform file: it is
+  # downloaded by getssl-fetch.sh according to platform/getssl.lock. Installing
+  # the units before it exists is pointless: there would be a timer and no
+  # renewals, which looks exactly like "getssl is quiet because there is nothing
+  # to renew".
+  if [ ! -x "$Platform_Deploy_Dir/state/bin/getssl" ]; then
+    echo "Error: no $Platform_Deploy_Dir/state/bin/getssl" >&2
+    echo "  Download it with: ./platform/bin/getssl-fetch.sh" >&2
+    exit 1
+  fi
 fi
 
 # Which user the timers run as: the owner of the repository directory. That
@@ -261,6 +287,11 @@ fi
 echo "** Installing timers into $UNIT_DST"
 echo "   repository: $Platform_Deploy_Dir"
 echo "   user:       $SERVICE_USER"
+if [ "$INSTALL_GETSSL" -eq 1 ]; then
+  echo "   certs:      getssl, for $(stacks_domains_getssl | tr '\n' ' ')"
+else
+  echo "   certs:      external for every domain — no getssl timers"
+fi
 if [ "$INSTALL_BACKUP" -eq 1 ]; then
   echo "   backups:    s3://$BACKUP_BUCKET"
 fi
@@ -270,7 +301,7 @@ fi
 
 # 3. Path substitution. systemd units support no variables and require absolute
 #    paths, so in the repository they are templates carrying @DEPLOY_DIR@.
-for unit in "${UNITS[@]}"; do
+for unit in ${UNITS[@]+"${UNITS[@]}"}; do
   if [ ! -f "$UNIT_SRC/$unit" ]; then
     echo "Error: template $UNIT_SRC/$unit is missing" >&2
     exit 1
@@ -287,8 +318,6 @@ done
 # 4. Units of the enabled stacks. A stack that needs a timer puts the unit in
 # stacks/<stack>/systemd/ and leaves this script alone.
 
-# shellcheck source=platform/lib/lib-stacks.sh
-. "$LIB_DIR/lib-stacks.sh"
 export DEPLOY_DIR="$Platform_Deploy_Dir"
 export SERVICE_USER
 export ONFAILURE="$ONFAILURE_LINE"
@@ -338,7 +367,12 @@ while IFS= read -r stack; do
   done <<< "$units"
 done < <(stacks_enabled)
 
-TIMERS+=("${STACK_TIMERS[@]}")
+# ${arr[@]+"${arr[@]}"} and not plain "${arr[@]}": the platform requires bash
+# >= 4.2, and before 4.4 expanding an EMPTY array under `set -u` is an unbound
+# variable, not an empty list. Every one of these arrays can now legitimately
+# be empty — a machine whose every domain is Certs="external", with no backup
+# and no notifications, installs no units of its own at all.
+TIMERS+=(${STACK_TIMERS[@]+"${STACK_TIMERS[@]}"})
 
 # 4b. Removing the units of disabled stacks.
 #
@@ -359,10 +393,25 @@ while IFS= read -r stack; do
   done < <(stack_units "$stack")
 done < <(stacks_available)
 
+# 4c. Removing the getssl units when no enabled stack wants them.
+#
+# The same reason as 4b: this is the only step that runs as root, so nothing
+# else can take a timer away. Without it, switching the last stack to Certs=
+# "external" would change what the platform generates and change nothing at
+# all about what the machine does at five in the morning.
+if [ "$INSTALL_GETSSL" -eq 0 ]; then
+  for name in "${GETSSL_UNITS[@]}"; do
+    [ -f "$UNIT_DST/$name" ] || continue
+    systemctl disable --now "$name" >/dev/null 2>&1 || true
+    rm -f "$UNIT_DST/$name"
+    echo "    removed $name (no enabled stack has Certs=getssl)"
+  done
+fi
+
 # 5. Reload and enable
 systemctl daemon-reload
 
-for timer in "${TIMERS[@]}"; do
+for timer in ${TIMERS[@]+"${TIMERS[@]}"}; do
   systemctl enable --now "$timer"
 done
 
@@ -371,8 +420,10 @@ echo "Done. Schedule:"
 systemctl list-timers --all 'getssl-*' 'devbox-*'
 echo
 echo "To check right now, without waiting for the schedule:"
-echo "  sudo systemctl start getssl-check.service && systemctl status getssl-check.service"
-echo "  sudo systemctl start getssl-renew.service && journalctl -u getssl-renew -n 50"
+if [ "$INSTALL_GETSSL" -eq 1 ]; then
+  echo "  sudo systemctl start getssl-check.service && systemctl status getssl-check.service"
+  echo "  sudo systemctl start getssl-renew.service && journalctl -u getssl-renew -n 50"
+fi
 if [ "$INSTALL_NOTIFY" -eq 1 ]; then
   echo "  sudo $Platform_Deploy_Dir/platform/bin/notify.sh --test      # exercise the channel now"
   echo "  sudo $Platform_Deploy_Dir/platform/bin/watch-host.sh --dry-run"

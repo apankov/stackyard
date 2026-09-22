@@ -251,6 +251,53 @@ check "domains are collected from enabled stacks, deduplicated and sorted" \
 printf 'Enabled_Stacks="bravo"\n' > "$WORK/.env-stacks"
 check "a disabled stack contributes no domains" "$(stacks_domains | tr '\n' ' ')" "bravo.test "
 
+echo "== whose certificate it is"
+
+# Separate stack names rather than reusing the ones above: a test that has to
+# put a fixture back the way it found it is a test that will one day forget.
+fixture own stack.conf 'Domains="own.test"'
+fixture alb stack.conf 'Domains="alb.test+www.alb.test"
+Certs="external"'
+printf 'Enabled_Stacks="own alb"\n' > "$WORK/.env-stacks"
+
+# The split that matters: what nginx must SERVE does not change with who
+# signed the certificate, while what getssl is pointed at does.
+check "an external stack still contributes every name nginx serves" \
+  "$(stacks_domain_names | tr '\n' ' ')" "alb.test own.test www.alb.test "
+check "an external stack feeds no getssl config" \
+  "$(stacks_domain_specs | tr '\n' ' ')" "own.test "
+check "the getssl-managed domains leave it out" \
+  "$(stacks_domains_getssl | tr '\n' ' ')" "own.test "
+check "the external list carries the aliases too" \
+  "$(stacks_domains_external | tr '\n' ' ')" "alb.test www.alb.test "
+
+printf 'Enabled_Stacks="alb"\n' > "$WORK/.env-stacks"
+check "a machine with nothing but external domains needs no getssl" \
+  "$(stacks_getssl_any && echo yes || echo no)" "no"
+check "...and asks for no getssl configs at all" "$(stacks_domain_specs)" ""
+
+# The direction that matters: a manifest that did not arrive must not read as
+# a decision to stop renewing anything.
+printf 'Enabled_Stacks=""\n' > "$WORK/.env-stacks"
+check "an empty manifest is not a declaration that nothing needs getssl" \
+  "$(stacks_getssl_any && echo yes || echo no)" "yes"
+rm -f "$WORK/.env-stacks"
+check "a missing manifest is not one either" \
+  "$(stacks_getssl_any && echo yes || echo no)" "yes"
+
+# An unknown value must not quietly mean "external", and must not quietly mean
+# the default either: it has to be said out loud while the machine keeps
+# issuing the certificate, which is the safe half of the two.
+fixture oops stack.conf 'Domains="oops.test"
+Certs="exernal"'
+printf 'Enabled_Stacks="alb oops"\n' > "$WORK/.env-stacks"
+check "a typo in Certs is reported" \
+  "$(check_certs_mode | grep -c 'stack oops: Certs="exernal" is not a known value')" "1"
+check "a misdeclared stack is still treated as one this machine issues for" \
+  "$(stacks_getssl_any && echo yes || echo no)" "yes"
+
+printf 'Enabled_Stacks="bravo"\n' > "$WORK/.env-stacks"
+
 echo "== stack units"
 
 fixture echo1 stack.conf 'Requires=""'

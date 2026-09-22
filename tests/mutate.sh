@@ -91,6 +91,17 @@ MUTATIONS=(
   'nginx: the platform does not read the state directory@@platform/nginx-vhosts/05-enabled.conf@@include /etc/nginx/enabled/*.conf;@@# include removed'
   'generator: the name is matched by a pattern@@platform/bin/docker-compose.sh@@  if [ "$gen" = "$(stacks_static_file)" ]; then@@  case "$gen" in *00-enabled.conf) :;; esac\n  if [ "$gen" = "$(stacks_static_file)" ]; then'
   'compose: the generated file name is written a second time@@platform/bin/docker-compose.sh@@  -f "$STATIC_REL"@@  -f state/nginx-static.generated.yaml'
+
+  # --- Certs="external": the whole mechanism fails SILENTLY when it breaks.
+  # A stack that should be left alone quietly gets a getssl config again, or a
+  # machine that needs no renewal quietly keeps its timers -- in both cases
+  # everything still runs and nothing says anything, which is why each of
+  # these is worth a mutation of its own.
+  'certs: an external stack is fed to getssl again@@platform/lib/lib-stacks.sh@@stacks_domain_specs() {\n  local s d\n  while IFS= read -r s; do\n    stack_certs_external "$s" \&\& continue@@stacks_domain_specs() {\n  local s d\n  while IFS= read -r s; do\n    true'
+  'certs: any declared value counts as external@@platform/lib/lib-stacks.sh@@stack_certs_external() { [ "$(stack_conf_get "$1" Certs getssl)" = external ]; }@@stack_certs_external() { [ -n "$(stack_conf_get "$1" Certs getssl)" ]; }'
+  'certs: an unknown value is read as the default@@platform/lib/lib-stacks.sh@@    case "$m" in getssl|external) continue ;; esac@@    case "$m" in *) continue ;; esac'
+  'certs: the machine always wants getssl timers@@platform/lib/lib-stacks.sh@@  [ -z "$(stacks_enabled 2>/dev/null)" ] || [ -n "$(stacks_domains_getssl)" ]@@  true'
+  'certs: an empty manifest reads as nothing needing getssl@@platform/lib/lib-stacks.sh@@  [ -z "$(stacks_enabled 2>/dev/null)" ] || [ -n "$(stacks_domains_getssl)" ]@@  [ -n "$(stacks_domains_getssl)" ]'
 )
 
 pass=0; miss=0

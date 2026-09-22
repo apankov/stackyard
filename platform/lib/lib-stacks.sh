@@ -755,6 +755,36 @@ unit_render() {
 domain_primary() { printf '%s' "${1%%+*}"; }
 domain_sans()    { [ "$1" = "${1#*+}" ] || printf '%s' "${1#*+}" | tr '+' ' '; }
 
+# Whose certificate it is. The default is getssl: this machine issues it and
+# renews it on a timer.
+#
+# Certs="external" says the certificate for that stack's domains is issued and
+# terminated by something IN FRONT of the machine — a load balancer, a CDN —
+# so a client's TLS handshake for those names never reaches this nginx. The
+# placeholder certificate stays, because `listen 443 ssl` without a
+# certificate FILE is a refusal to start; what goes away is issuing, renewing,
+# and reporting an expiry nobody here can act on.
+#
+# Explicit, like Containers="no", and for the same reason. A domain whose
+# certificate nobody issues looks exactly like a domain whose renewal broke —
+# and telling those two apart is what this whole area exists for. The machine
+# this was written on failed a renewal nightly for two weeks for a domain
+# whose TLS an ALB had been terminating the entire time; the timer was green,
+# because getssl exits zero when it has nothing it can do.
+stack_certs_external() { [ "$(stack_conf_get "$1" Certs getssl)" = external ]; }
+
+# An unknown value is NOT treated as the default. A typo in Certs= would
+# otherwise silently mean "this machine issues the certificate" — the opposite
+# of what someone writing that line was reaching for.
+check_certs_mode() {
+  local s m
+  while IFS= read -r s; do
+    m="$(stack_conf_get "$s" Certs getssl)"
+    case "$m" in getssl|external) continue ;; esac
+    printf 'stack %s: Certs="%s" is not a known value (getssl or external)\n' "$s" "$m"
+  done < <(stacks_available)
+}
+
 # The primary domains of enabled stacks — one per certificate.
 stacks_domains() {
   local s d
@@ -765,11 +795,54 @@ stacks_domains() {
 
 # The raw Domains= entries of enabled stacks — one per certificate, aliases
 # included. This is what certs.sh builds the per-host getssl configs from.
+#
+# Stacks with Certs="external" are left out HERE, at the one place the getssl
+# configs come from, rather than filtered again at each consumer: a config
+# that exists is a nightly `getssl -a` attempt, because getssl walks the
+# directories it finds and not the domains anyone declared.
 stacks_domain_specs() {
   local s d
   while IFS= read -r s; do
+    stack_certs_external "$s" && continue
     for d in $(stack_conf_get "$s" Domains); do printf '%s\n' "$d"; done
   done < <(stacks_enabled 2>/dev/null) | sort -u
+}
+
+# The primary domains split by who issues the certificate. stacks_domains
+# above stays whole on purpose: it measures what nginx must serve, and that
+# does not change with who signed the certificate.
+stacks_domains_getssl() {
+  local s d
+  while IFS= read -r s; do
+    stack_certs_external "$s" && continue
+    for d in $(stack_conf_get "$s" Domains); do printf '%s\n' "$(domain_primary "$d")"; done
+  done < <(stacks_enabled 2>/dev/null) | sort -u
+}
+
+stacks_domains_external() {
+  local s d a
+  while IFS= read -r s; do
+    stack_certs_external "$s" || continue
+    for d in $(stack_conf_get "$s" Domains); do
+      printf '%s\n' "$(domain_primary "$d")"
+      for a in $(domain_sans "$d"); do printf '%s\n' "$a"; done
+    done
+  done < <(stacks_enabled 2>/dev/null) | sort -u
+}
+
+# Whether anything on this machine still needs getssl at all. The renewal
+# timers are installed from this, not unconditionally: a timer that runs
+# nightly and can never succeed teaches people to ignore the one journal they
+# would need on the day a renewal really does break.
+#
+# NO enabled stacks is deliberately answered YES, not no. "Every enabled stack
+# is external" and "the manifest is missing or empty" are different
+# statements, and only the first one is a decision anybody made. Reading the
+# second as "nothing here needs a certificate" would let an .env-stacks that
+# failed to arrive uninstall the renewal timers of a machine that was working
+# — quietly, and in the direction that breaks TLS a month later.
+stacks_getssl_any() {
+  [ -z "$(stacks_enabled 2>/dev/null)" ] || [ -n "$(stacks_domains_getssl)" ]
 }
 
 # EVERY name of the enabled stacks, aliases included. This is what a running

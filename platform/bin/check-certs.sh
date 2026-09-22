@@ -75,8 +75,21 @@ fi
 now=$(date +%s)
 problems=0
 
+# Domains whose TLS is terminated in front of the machine. Their file on disk
+# is the placeholder and always will be: nothing here issues it, and nothing
+# outside is going to write it back. Reporting that as a problem every night
+# is how a check stops being read — and this check has one job, which is to be
+# read on the night a real renewal breaks.
+external=" $(stacks_domains_external | tr '\n' ' ') "
+
 for cert in "${certs[@]}"; do
   host=$(basename "$cert" -fullchain.crt)
+
+  case "$external" in
+    *" $host "*)
+      printf '%-40s external: TLS is terminated in front of this machine\n' "$host"
+      continue ;;
+  esac
 
   if ! end_date=$(openssl x509 -noout -enddate -in "$cert" 2>/dev/null | cut -d= -f2); then
     printf '%-40s ERROR: the file is not readable as a certificate\n' "$host"

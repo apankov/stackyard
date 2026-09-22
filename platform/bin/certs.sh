@@ -109,6 +109,15 @@ fi
 # --------------------------------------------------- 1. per-host configs
 
 echo "== getssl configs"
+
+# Named, not silently absent. A domain that simply never appears in this
+# section is indistinguishable from one the platform forgot, and the whole
+# point of Certs="external" is that someone decided it on purpose.
+while IFS= read -r d; do
+  [ -n "$d" ] || continue
+  note "$d — external: the certificate is issued in front of this machine"
+done < <(stacks_domains_external)
+
 while IFS= read -r spec; do
   [ -n "$spec" ] || continue
   domain="$(domain_primary "$spec")"
@@ -145,17 +154,28 @@ done < <(stacks_domain_specs)
 # merely unused costs nothing; one deleted by mistake means nginx does not
 # start, because a vhost with `listen 443 ssl` and no certificate file is a
 # refusal to start, not a warning.
-domains_now=" $(stacks_domains | tr '\n' ' ') "
+# The getssl-managed domains, not every declared one: with Certs="external"
+# the config left over from before the switch is exactly what has to go, and
+# it is the reason --prune is reached for here at all.
+domains_now=" $(stacks_domains_getssl | tr '\n' ' ') "
+external_now=" $(stacks_domains_external | tr '\n' ' ') "
 for d in "$GETSSL_DIR"/*/; do
   [ -d "$d" ] || continue
   name=$(basename "$d")
   case "$domains_now" in
     *" $name "*) continue ;;
   esac
+  # Two different findings, and saying the wrong one sends the reader looking
+  # for a stack that is right there. A domain moved to Certs="external" is
+  # still declared; what it no longer has is a certificate this machine issues.
+  case "$external_now" in
+    *" $name "*) why="the stack declares it Certs=external" ;;
+    *)           why="no stack declares that domain" ;;
+  esac
   if [ "$PRUNE" -eq 1 ]; then
-    rm -rf "$d" && printf '  [ok] %s — config removed (the certificate in state/certs is untouched)\n' "$name"
+    rm -rf "$d" && printf '  [ok] %s — config removed, %s (the certificate in state/certs is untouched)\n' "$name" "$why"
   else
-    printf '  [!] %s — a config exists, but no stack declares that domain' "$name"
+    printf '  [!] %s — a config exists, but %s' "$name" "$why"
     [ "$CHECK_ONLY" -eq 1 ] && printf ' (certs.sh --prune)'
     printf '\n'
   fi

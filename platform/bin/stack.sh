@@ -773,6 +773,7 @@ verb_check() {
   decl_problems_before="$PROBLEMS"
   while IFS= read -r line; do [ -n "$line" ] && bad "$line"; done < <(check_domains_unique)
   while IFS= read -r line; do [ -n "$line" ] && bad "$line"; done < <(check_databases_unique)
+  while IFS= read -r line; do [ -n "$line" ] && bad "$line"; done < <(check_certs_mode)
 
   while IFS= read -r s; do
     for fn in check_domains_match check_paths_absolute check_unit_names \
@@ -788,6 +789,15 @@ verb_check() {
   if [ "$PROBLEMS" -eq "$decl_problems_before" ]; then
     ok "domains, paths, unit names and dependencies are all consistent"
   fi
+
+  # Said out loud, because it is the difference between "this machine renews
+  # that certificate" and "somebody else does". Nothing downstream — no getssl
+  # config, no renewal timer, no expiry report — will mention those domains
+  # again, and silence is what this line exists to prevent.
+  while IFS= read -r s; do
+    stack_certs_external "$s" || continue
+    ok "$s: Certs=external — TLS is terminated in front of this machine, no getssl"
+  done < <(stacks_enabled 2>/dev/null)
 
   step "The nginx image"
   # Before anything else about nginx: with an incompatible image it does not

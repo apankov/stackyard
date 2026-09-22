@@ -486,7 +486,12 @@ fi
 # renewing. Until then every run exits cleanly with nothing to do, which is
 # indistinguishable from a healthy machine.
 ACME_DIR="$ROOT_DIR/state/acme/.well-known/acme-challenge"
-if [ ! -d "$ACME_DIR" ]; then
+if ! stacks_getssl_any; then
+  # Nothing on this machine answers an HTTP-01 challenge, so there is no
+  # webroot to get wrong. Said rather than skipped: an absent line reads as a
+  # check that was forgotten.
+  ok "no ACME webroot needed — every domain is Certs=external"
+elif [ ! -d "$ACME_DIR" ]; then
   if [ "$CHECK_ONLY" -eq 1 ]; then
     bad "no $ACME_DIR — getssl will have nowhere to put the challenge (./stack sync creates it)"
   else
@@ -512,7 +517,9 @@ step "Placeholder certificates and timers"
 # platform/getssl.lock. Before the timer checks: without it there is nowhere to
 # install the units, and a failure of the form "there is a timer but no
 # renewals" would look exactly like a healthy machine with nothing to renew.
-if [ "$CHECK_ONLY" -eq 1 ]; then
+if ! stacks_getssl_any; then
+  ok "getssl is not needed — every domain is Certs=external"
+elif [ "$CHECK_ONLY" -eq 1 ]; then
   "$DIR0/getssl-fetch.sh" --check || PROBLEMS=$((PROBLEMS + 1))
 else
   "$DIR0/getssl-fetch.sh" | sed 's/^/  /' || PROBLEMS=$((PROBLEMS + 1))
@@ -526,7 +533,11 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   # Platform timers always; stack timers according to what is enabled. A list
   # by name would mean that on a machine without such a stack the check demands
   # a timer that has no business being there.
-  EXPECTED_TIMERS=(getssl-renew.timer getssl-check.timer)
+  # The renewal timers belong in the list only where getssl runs at all: with
+  # every domain external, systemd.sh removes them, and demanding them back
+  # here would be this check contradicting its own installer.
+  EXPECTED_TIMERS=()
+  stacks_getssl_any && EXPECTED_TIMERS+=(getssl-renew.timer getssl-check.timer)
   while IFS= read -r stack; do
     [ -n "$stack" ] || continue
     while IFS= read -r unit; do
@@ -536,7 +547,8 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   [ -f "$ROOT_DIR/.env-backup" ] && EXPECTED_TIMERS+=(devbox-backup.timer devbox-backup-check.timer)
   [ -f "$ROOT_DIR/.env-notify" ] && EXPECTED_TIMERS+=(devbox-watch.timer devbox-heartbeat.timer)
 
-  for t in "${EXPECTED_TIMERS[@]}"; do
+  # See the note on empty arrays in systemd.sh: bash 4.2 has no other way.
+  for t in ${EXPECTED_TIMERS[@]+"${EXPECTED_TIMERS[@]}"}; do
     systemctl is-enabled "$t" >/dev/null 2>&1 \
       && ok "$t is enabled" \
       || bad "$t is not installed — sudo ./platform/bin/systemd.sh"
