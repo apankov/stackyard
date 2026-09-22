@@ -160,7 +160,60 @@ else
   fi
 fi
 
+# How often to back up, and the promise the freshness check makes about it.
+#
+# These two values must agree, and they are the kind of pair that drifts: set
+# the schedule to weekly and forget the threshold, and the check screams six
+# days out of seven; move the threshold and forget the schedule, and a missed
+# run goes unnoticed. So the period is MEASURED here, from the schedule itself,
+# with systemd's own calendar parser — and a threshold shorter than the period
+# is reported rather than left to be discovered at three in the morning.
+BACKUP_SCHEDULE=""
+if [ -f "$BACKUP_ENV_FILE" ]; then
+  BACKUP_SCHEDULE=$(grep -E '^Backup_Schedule=' "$BACKUP_ENV_FILE" | head -n 1 | cut -d= -f2- | tr -d '"'\' || true)
+fi
+[ -n "$BACKUP_SCHEDULE" ] || BACKUP_SCHEDULE='*-*-* 03:40:00'
+
+# The distance between two consecutive firings IS the period, and systemd is
+# what parses the expression — we do not reimplement calendar syntax here.
+#
+# The labels differ between systemd versions — "Next elapse:", "Iter. #2:",
+# "Iteration: #2" — so nothing is matched on a label at all: the TIMESTAMP is
+# what is extracted, from any line that is not one of the echoes systemd prints
+# beside it ("(in UTC):", "From now:"). Guessing a label would silently find
+# nothing on the next version, and a warning that never fires is
+# indistinguishable from one that has nothing to say.
+backup_period_hours() {
+  local first second
+  read -r first second < <(
+    systemd-analyze calendar --iterations=2 "$BACKUP_SCHEDULE" 2>/dev/null \
+      | grep -vE '\(in UTC\)|From now' \
+      | grep -oE '[A-Z][a-z]{2} [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}( [A-Z]{2,5})?' \
+      | while IFS= read -r line; do date -d "$line" +%s 2>/dev/null; done \
+      | tr '\n' ' '
+  )
+  [ -n "${first:-}" ] && [ -n "${second:-}" ] || return 1
+  [ "$second" -gt "$first" ] || return 1
+  echo $(( (second - first) / 3600 ))
+}
+
 if [ "$INSTALL_BACKUP" -eq 1 ]; then
+  MAX_AGE=$(grep -E '^Backup_Max_Age_Hours=' "$BACKUP_ENV_FILE" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '"'\' || true)
+  [ -n "$MAX_AGE" ] || MAX_AGE=26
+  if PERIOD=$(backup_period_hours); then
+    echo "  backups: every ${PERIOD}h ($BACKUP_SCHEDULE), stale after ${MAX_AGE}h"
+    if [ "$MAX_AGE" -le "$PERIOD" ]; then
+      echo "WARNING: Backup_Schedule fires every ${PERIOD}h while Backup_Max_Age_Hours is ${MAX_AGE}h." >&2
+      echo "  check-backups.sh will call every source stale between runs. Raise it above" >&2
+      echo "  the period, with room for RandomizedDelaySec — e.g. $(( PERIOD + PERIOD / 10 + 2 ))." >&2
+    fi
+  else
+    # Said out loud rather than skipped: the whole point of measuring is to
+    # catch a schedule and a threshold that disagree, and an unmeasured
+    # schedule is exactly where they would.
+    echo "NOTE: could not measure the period of Backup_Schedule='$BACKUP_SCHEDULE'." >&2
+    echo "  Check by hand that Backup_Max_Age_Hours (${MAX_AGE}) exceeds it." >&2
+  fi
   UNITS+=(devbox-backup.service devbox-backup.timer devbox-backup-check.service devbox-backup-check.timer)
   TIMERS+=(devbox-backup.timer devbox-backup-check.timer)
 else
@@ -225,6 +278,7 @@ for unit in "${UNITS[@]}"; do
   sed -e "s#@DEPLOY_DIR@#${Platform_Deploy_Dir}#g" \
       -e "s#@SERVICE_USER@#${SERVICE_USER}#g" \
       -e "s#@ONFAILURE@#${ONFAILURE_LINE}#g" \
+      -e "s#@BACKUP_SCHEDULE@#${BACKUP_SCHEDULE}#g" \
       "$UNIT_SRC/$unit" > "$UNIT_DST/$unit"
   chmod 644 "$UNIT_DST/$unit"
   echo "    -> $unit"

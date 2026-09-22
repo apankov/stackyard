@@ -1,12 +1,14 @@
 [Unit]
-Description=Daily database backup
+Description=Scheduled database backup
 Documentation=file:@DEPLOY_DIR@/platform/bin/backup.sh
 
 [Timer]
 # 03:40 and NOT 05:23: that is the getssl-renew window. Two heavy processes at
 # once on a machine with ~200 MB free meet the OOM killer, and the one that
 # asked for more usually loses -- that is, the dump.
-OnCalendar=*-*-* 03:40:00
+# Substituted by systemd.sh from Backup_Schedule in .env-backup. The default
+# keeps the line above: a machine that says nothing keeps backing up nightly.
+OnCalendar=@BACKUP_SCHEDULE@
 RandomizedDelaySec=20m
 # If the machine was off at the scheduled time, the run happens after boot
 # instead of being skipped silently.
