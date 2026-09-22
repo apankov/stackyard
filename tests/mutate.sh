@@ -54,7 +54,7 @@ MUTATIONS=(
   'shellcheck: the source= directive does not resolve (C5)@@platform/bin/certs.sh@@# shellcheck source=platform/lib/lib-stacks.sh@@# shellcheck source=../lib/lib-stacks.sh'
   # The selftest does not exercise bootstrap over the network: a run must not
   # depend on the internet. That one is checked by hand, see README.
-  'sudo -u loses ROOT_DIR@@platform/bin/host-setup.sh@@sudo -u "$SERVICE_USER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh"@@sudo -u "$SERVICE_USER" "$DIR0/certs.sh"'
+  'sudo -u loses ROOT_DIR@@platform/bin/host-setup.sh@@sudo -u "$DEPLOY_OWNER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh"@@sudo -u "$DEPLOY_OWNER" "$DIR0/certs.sh"'
   'the package manager is hardcoded again@@platform/bin/host-setup.sh@@    apt-get) apt-get update -qq \&\& apt-get install -y "$@" ;;  # pkg-mgr-ok@@    apt-get) dnf install -y "$@" ;;'
   'static: built from the enabled stacks only@@platform/lib/lib-stacks.sh@@  done < <(stacks_available)\n\n  cat <<@@  done < <(stacks_enabled)\n\n  cat <<'
 

@@ -39,6 +39,12 @@ if [ -z "${ROOT_DIR:-}" ]; then
   [ "${ROOT_DIR##*/}" = .stackyard ] && ROOT_DIR="${ROOT_DIR%/*}"
 fi
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
+
+# Who the deployment belongs to. Derived from the directory rather than named,
+# and derived ONCE: the same answer is needed by the ACME webroot check, by
+# certs.sh and by systemd.sh, and three derivations of one fact are three
+# chances for them to disagree about who the machine runs as.
+DEPLOY_OWNER=$(stat -c '%U' "$ROOT_DIR" 2>/dev/null || stat -f '%Su' "$ROOT_DIR" 2>/dev/null || echo "")
 ENV_FILE="$ROOT_DIR/.env"
 
 CHECK_ONLY=0
@@ -474,6 +480,32 @@ fi
 
 # ------------------------------------------------- 8. certificates and timers
 
+# The ACME webroot: getssl writes the challenge into it as the repository's
+# owner, and nginx serves it. A directory docker created on its own is owned by
+# root, and then renewal fails — but only the day a certificate actually needs
+# renewing. Until then every run exits cleanly with nothing to do, which is
+# indistinguishable from a healthy machine.
+ACME_DIR="$ROOT_DIR/state/acme/.well-known/acme-challenge"
+if [ ! -d "$ACME_DIR" ]; then
+  if [ "$CHECK_ONLY" -eq 1 ]; then
+    bad "no $ACME_DIR — getssl will have nowhere to put the challenge (./stack sync creates it)"
+  else
+    install -d -o "$DEPLOY_OWNER" -m 755 "$ROOT_DIR/state/acme" "$ROOT_DIR/state/acme/.well-known" "$ACME_DIR" \
+      && ok "the ACME webroot is in place" \
+      || bad "could not create $ACME_DIR"
+  fi
+elif [ "$(stat -c %U "$ACME_DIR" 2>/dev/null || stat -f %Su "$ACME_DIR")" != "$DEPLOY_OWNER" ]; then
+  if [ "$CHECK_ONLY" -eq 1 ]; then
+    bad "$ACME_DIR is not owned by $DEPLOY_OWNER — getssl cannot write the challenge there (sudo chown -R $DEPLOY_OWNER $ROOT_DIR/state/acme)"
+  else
+    chown -R "$DEPLOY_OWNER" "$ROOT_DIR/state/acme" \
+      && ok "the ACME webroot now belongs to $DEPLOY_OWNER" \
+      || bad "could not chown $ROOT_DIR/state/acme"
+  fi
+else
+  ok "the ACME webroot belongs to $DEPLOY_OWNER"
+fi
+
 step "Placeholder certificates and timers"
 
 # getssl is not kept in the repository — it is downloaded according to
@@ -529,14 +561,13 @@ else
   # certs.sh runs as the repository's owner, NOT as root: the getssl timer runs
   # as that same user and will later overwrite the placeholders with real
   # certificates. Root-owned files it cannot silently replace.
-  SERVICE_USER=$(stat -c '%U' "$ROOT_DIR" 2>/dev/null || stat -f '%Su' "$ROOT_DIR")
-  echo "  ... placeholder certificates (as $SERVICE_USER)"
+  echo "  ... placeholder certificates (as $DEPLOY_OWNER)"
   # ROOT_DIR is passed EXPLICITLY through env: sudo resets the environment, so a
   # variable exported by the wrapper never reaches the child process. Without
   # it certs.sh derives the root from its own path — which is inside
   # .stackyard/platform/bin, making .stackyard the root, and the script looks
   # for .env there. The failure reads as "no .env" on a machine that has one.
-  sudo -u "$SERVICE_USER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh" | sed 's/^/      /'
+  sudo -u "$DEPLOY_OWNER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh" | sed 's/^/      /'
 
   echo "  ... systemd timers"
   "$DIR0/systemd.sh" | sed 's/^/      /'

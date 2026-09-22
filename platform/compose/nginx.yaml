@@ -44,7 +44,11 @@ services:
       # auth_basic_user_file points at an unmounted path means a 500 on every
       # request, and that is visible only from outside.
       - ${Platform_Deploy_Dir:?}/state/htpasswd:/etc/nginx/htpasswd:ro
-      - ${Platform_Deploy_Dir:?}/platform/acme:/var/www/acme
+      # The ACME webroot is the machine's state, not the platform's: getssl
+      # WRITES here, and platform/ is a symlink into the layer ./bootstrap
+      # replaces wholesale. Writable on purpose — this is the one mount nginx
+      # serves from that something else fills in.
+      - ${Platform_Deploy_Dir:?}/state/acme:/var/www/acme
       - ${Platform_Deploy_Dir:?}/state/certs:/etc/nginx/certs
       - ${Platform_Vhosts_Dir:?}:${Platform_Vhosts_Mount:?}
       - /var/log/nginx:/var/log/nginx

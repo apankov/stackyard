@@ -132,8 +132,15 @@ stacks_static_file()  { printf '%s/state/nginx-static.generated.yaml' "$(stacks_
 ensure_state_dirs() {
   local root p
   root="$(stacks_root)"
+  # state/acme is created HERE, and that is the whole point of it being here:
+  # it is a bind-mount source for nginx, and docker creates a missing source
+  # itself — as ROOT. getssl runs as the repository's owner and then cannot
+  # write the challenge into it, so certificate renewal fails. Not at once,
+  # though: a run with nothing to renew exits cleanly, so the machine looks
+  # healthy until the first certificate actually comes up for renewal.
   mkdir -p "$root/state/nginx-vhosts" "$root/state/certs" \
-           "$root/state/htpasswd" "$root/state/getssl-config" 2>/dev/null || true
+           "$root/state/htpasswd" "$root/state/getssl-config" \
+           "$root/state/acme/.well-known/acme-challenge" 2>/dev/null || true
   # The provider's directory only when a provider is enabled: an empty state/pg
   # on a MySQL machine would be as misleading as a missing one where it is
   # needed.
