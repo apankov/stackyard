@@ -81,6 +81,7 @@ problems=0
 # is how a check stops being read — and this check has one job, which is to be
 # read on the night a real renewal breaks.
 external=" $(stacks_domains_external | tr '\n' ' ') "
+skipped=0
 
 for cert in "${certs[@]}"; do
   host=$(basename "$cert" -fullchain.crt)
@@ -88,6 +89,7 @@ for cert in "${certs[@]}"; do
   case "$external" in
     *" $host "*)
       printf '%-40s external: TLS is terminated in front of this machine\n' "$host"
+      skipped=$((skipped + 1))
       continue ;;
   esac
 
@@ -149,5 +151,20 @@ if [ "$problems" -gt 0 ]; then
   exit 1
 fi
 
+# The two numbers are reported apart. "3 checked, all valid" while two of them
+# were never looked at is a sentence that is true about nothing, and this is
+# the line someone reads instead of the ones above it.
 echo
-echo "Certificates checked: ${#certs[@]}. All valid for more than $THRESHOLD_DAYS days."
+checked=$(( ${#certs[@]} - skipped ))
+if [ "$checked" -gt 0 ]; then
+  echo "Certificates checked: $checked. All valid for more than $THRESHOLD_DAYS days."
+else
+  echo "No certificate here is this machine's to renew."
+fi
+# An `if`, not `[ ... ] && echo`: this is the last statement in the file, so a
+# false test becomes the script's exit status — and that status is the whole
+# point of this script, the thing monitoring reads. Every machine without an
+# external domain would have started reporting a failure.
+if [ "$skipped" -gt 0 ]; then
+  echo "External, not checked: $skipped."
+fi

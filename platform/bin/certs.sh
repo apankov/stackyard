@@ -241,7 +241,12 @@ done < <(stacks_cert_paths | awk '{print $2}' | tr -d ';' | sort -u)
 # which is why it is named out loud.
 echo
 echo "== ACME account"
-if [ -f "$GETSSL_DIR/account.key" ]; then
+if ! stacks_getssl_any; then
+  # No account is needed where no challenge is ever answered, and advice about
+  # an account key nobody will use is the same noise this script exists to
+  # remove from the other sections.
+  note "not needed — every domain is Certs=external"
+elif [ -f "$GETSSL_DIR/account.key" ]; then
   # The mode matters as much as the presence: this key can revoke the machine's
   # certificates.
   perm=$(stat -c '%a' "$GETSSL_DIR/account.key" 2>/dev/null || stat -f '%OLp' "$GETSSL_DIR/account.key")
