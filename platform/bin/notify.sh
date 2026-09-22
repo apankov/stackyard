@@ -110,7 +110,24 @@ COOLDOWN_H=$(env_get Notify_Cooldown_Hours 6)
 [ -n "$CHAT_ID" ] || die "Notify_Telegram_Chat_Id is not set"
 case "$COOLDOWN_H" in ''|*[!0-9]*) die "Notify_Cooldown_Hours must be an integer" ;; esac
 
+# What to call this machine in an alert.
+#
+# The default is the name of the machine's directory — the same name fleet.sh
+# and audit-isolation.sh print, so one machine is called one thing everywhere.
+# The EC2-style hostname alone ("ip-172-30-2-248") answers "which instance",
+# never "which machine", and an alert whose subject has to be looked up is an
+# alert that gets postponed.
+#
+# The hostname is kept in parentheses, because after a machine is rebuilt the
+# label stays the same while the instance changes, and that difference is
+# occasionally the whole story.
+MACHINE=$(env_get Notify_Machine "$(basename "$ROOT_DIR")")
 HOSTNAME_S=$(hostname -s 2>/dev/null || hostname)
+if [ "$MACHINE" = "$HOSTNAME_S" ]; then
+  MACHINE_LABEL="$MACHINE"
+else
+  MACHINE_LABEL="$MACHINE ($HOSTNAME_S)"
+fi
 NOW=$(date -u +%s)
 
 # ------------------------------------------------------------------ sending
@@ -120,6 +137,11 @@ NOW=$(date -u +%s)
 # alert silently never arrives. That is exactly the class of failure this
 # script exists to prevent.
 tg_send() {
+  if [ "$ENABLED" != "true" ]; then
+    log "Notify_Enabled=$ENABLED — not sent (muted deliberately). The message:"
+    printf '%s\n' "${1-}" | sed 's/^/  | /'
+    return 0
+  fi
   local text="$1" attempt code resp
 
   # Telegram's limit is 4096 CHARACTERS. Truncation is by characters, not
@@ -160,7 +182,7 @@ emoji_for() {
 
 compose() {
   local level="$1" title="$2" body="$3" key="$4"
-  printf '%s devbox/%s — %s\n' "$(emoji_for "$level")" "$HOSTNAME_S" "$title"
+  printf '%s %s — %s\n' "$(emoji_for "$level")" "$MACHINE_LABEL" "$title"
   if [ -n "$body" ]; then printf '\n%s\n' "$body"; fi
   printf '\n--\n'
   [ -n "$key" ] && printf 'key:  %s\n' "$key"
@@ -172,13 +194,17 @@ state_file() {
   printf '%s/%s.state' "$STATE_DIR" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
 }
 
-if [ "$ENABLED" != "true" ]; then
-  log "Notify_Enabled=$ENABLED — message not sent (muted deliberately):"
-  log "  [$LEVEL] $TITLE"
-  exit 0
+# Muting is handled inside tg_send, not here. Checking it at this point meant
+# leaving before any mode had composed its message, so the one command whose
+# job is to show what WOULD be sent printed an empty title. A dry run that
+# shows nothing is worse than no dry run: it looks like the message is empty.
+if [ "$ENABLED" = "true" ]; then
+  install -d -m 700 "$STATE_DIR" 2>/dev/null || die "cannot create $STATE_DIR (root required)"
+else
+  # Muted runs are how a person inspects the text, and they must not demand
+  # root for a directory nothing will be written to.
+  install -d -m 700 "$STATE_DIR" 2>/dev/null || true
 fi
-
-install -d -m 700 "$STATE_DIR" 2>/dev/null || die "cannot create $STATE_DIR (root required)"
 
 # ------------------------------------------------------------------- modes
 
