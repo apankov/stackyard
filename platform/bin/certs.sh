@@ -17,6 +17,9 @@
 #
 #   ./platform/bin/certs.sh            prepare
 #   ./platform/bin/certs.sh --check    only report what is missing (exit 1)
+#   ./platform/bin/certs.sh --prune    prepare, and also remove the getssl
+#                                      configs of domains no enabled stack
+#                                      declares (certificates are never removed)
 
 set -euo pipefail
 
@@ -43,10 +46,12 @@ ENV_FILE="$ROOT_DIR/.env"
 . "$LIB_DIR/lib-stacks.sh"
 
 CHECK_ONLY=0
+PRUNE=0
 case "${1:-}" in
   --check) CHECK_ONLY=1 ;;
+  --prune) PRUNE=1 ;;
   "")      ;;
-  *)       echo "Unknown argument: $1 (expected --check)" >&2; exit 2 ;;
+  *)       echo "Unknown argument: $1 (expected --check or --prune)" >&2; exit 2 ;;
 esac
 
 [ -f "$ENV_FILE" ] || { echo "Error: no $ENV_FILE" >&2; exit 2; }
@@ -129,14 +134,31 @@ done < <(stacks_domain_specs)
 # Configs with no stack. Not a refusal, but not normal either: renewing a
 # certificate for a domain that no stack.conf declares any more wastes Let's
 # Encrypt rate limits and produces expiry mail about ghost domains.
+#
+# Why it matters beyond tidiness: `getssl -a` walks EVERY directory here, not
+# the declared domains. A config left behind by a disabled stack becomes a
+# nightly attempt to answer a challenge for a domain this machine no longer
+# serves — silent until the certificate enters its renewal window, then an
+# error every night and Let's Encrypt requests spent on nothing.
+#
+# --prune removes the config and NEVER the certificate. A certificate that is
+# merely unused costs nothing; one deleted by mistake means nginx does not
+# start, because a vhost with `listen 443 ssl` and no certificate file is a
+# refusal to start, not a warning.
 domains_now=" $(stacks_domains | tr '\n' ' ') "
 for d in "$GETSSL_DIR"/*/; do
   [ -d "$d" ] || continue
   name=$(basename "$d")
   case "$domains_now" in
-    *" $name "*) ;;
-    *) printf '  [!] %s — a config exists, but no stack declares that domain\n' "$name" ;;
+    *" $name "*) continue ;;
   esac
+  if [ "$PRUNE" -eq 1 ]; then
+    rm -rf "$d" && printf '  [ok] %s — config removed (the certificate in state/certs is untouched)\n' "$name"
+  else
+    printf '  [!] %s — a config exists, but no stack declares that domain' "$name"
+    [ "$CHECK_ONLY" -eq 1 ] && printf ' (certs.sh --prune)'
+    printf '\n'
+  fi
 done
 
 # ------------------------------------------------------- 2. placeholders
