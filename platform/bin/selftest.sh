@@ -1099,7 +1099,17 @@ check "a two-word privilege is accepted" "$(decl_check 'SELECT,LOCK TABLES')" ""
 check "ALL PRIVILEGES is reported once" "$(decl_check 'ALL PRIVILEGES' | grep -c .)" "1"
 check "a correct list stays silent" "$(decl_check 'SELECT,INSERT,UPDATE,DELETE')" ""
 
-# 22. `| grep -q` under `set -o pipefail`. grep exits on the first match while
+# 22. The S3 prefix is joined with "/" by every caller, so a value written with
+#     a slash on either end produces keys with an empty path segment. The
+#     writer and the checker would agree with each other and disagree with
+#     every human reading the bucket — until someone tidies the config, after
+#     which the checker looks in a place the writer never wrote to.
+for pair in 'm/:m' '/m/:m' 'm:m' '//a/b//:a/b'; do
+  ENV_VARS=(); ENV_VARS["Backup_S3_Prefix"]="${pair%%:*}"
+  check "S3 prefix '${pair%%:*}' normalises to '${pair#*:}'" "$(backup_s3_prefix)" "${pair#*:}"
+done
+
+# 23. `| grep -q` under `set -o pipefail`. grep exits on the first match while
 #     the writer is still writing; the writer dies of SIGPIPE and the pipeline
 #     returns 141, so a line that IS in the list counts as absent. Measured on
 #     a live machine at ~1.3% of calls — invisible in a test, and in a check
@@ -1113,7 +1123,7 @@ pipeq=$(grep -rnE '[^|]\|[[:space:]]*grep[[:space:]]+-q' \
         | grep -vE '(selftest|mutate)\.sh:' | grep -vE ':[0-9]+:[[:space:]]*#' || true)
 check "no membership test forks a grep into a pipe" "$pipeq" ""
 
-# 23. list_has decides whether a check reports a finding, so its two failure
+# 24. list_has decides whether a check reports a finding, so its two failure
 #     modes are both silent: a substring counted as a whole line hides a real
 #     difference, and a glob character taken as a wildcard invents one.
 LH="$(printf '%s\n' '/a -> /x' '/c*d -> /z')"
@@ -1124,7 +1134,7 @@ check "list_has: a glob character is literal"   "$(say list_has "$LH" '/c*d -> /
 check "list_has: a glob does not match wildly"  "$(say list_has "$LH" '/cXd -> /z')" "no"
 check "list_has: a trailing space is a difference" "$(say list_has "$LH" '/a -> /x ')" "no"
 
-# 24. memory.sh answers "where did the memory go", so it must fail loudly when
+# 25. memory.sh answers "where did the memory go", so it must fail loudly when
 #     it cannot measure. A report that silently prints zeros is read as "the
 #     machine is idle" — the opposite of the truth it exists to tell.
 printf 'SwapTotal: 0 kB\n' > "$WORK/meminfo-no-total"

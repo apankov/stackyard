@@ -55,6 +55,7 @@ AWS_SECRET=$(env_get Backup_AWS_Secret_Access_Key)
 DB_PREFIX=$(backup_db_prefix)
 MAX_AGE_HOURS=$(env_get Backup_Max_Age_Hours 26)
 MIN_OBJ_BYTES=$(env_get Backup_Min_Object_Bytes 1024)
+MIN_GLOBALS_BYTES=$(backup_min_globals_bytes)
 
 aws_cli() {
   if [ -n "$AWS_KEY" ]; then
@@ -152,10 +153,15 @@ for src in "${EXPECTED[@]}"; do
 
   age_h=$(( (now - ts) / 3600 ))
 
-  if [ "$size" -lt "$MIN_OBJ_BYTES" ]; then
+  # The same two floors as in backup.sh, for the same reason: one threshold
+  # for a database dump and for a list of grants makes the second one red
+  # forever.
+  floor="$MIN_OBJ_BYTES"
+  case "$src" in *_globals) floor="$MIN_GLOBALS_BYTES" ;; esac
+  if [ "$size" -lt "$floor" ]; then
     # A truncated dump is almost always tiny. Without this check "a file
     # exists" is indistinguishable from "a backup exists".
-    printf '%-34s EMPTY: %s B against a %s B threshold\n' "$src" "$size" "$MIN_OBJ_BYTES"
+    printf '%-34s EMPTY: %s B against a %s B threshold\n' "$src" "$size" "$floor"
     problems=$((problems + 1))
   elif [ "$age_h" -ge "$MAX_AGE_HOURS" ]; then
     printf '%-34s STALE: %sh old (threshold %sh)\n' "$src" "$age_h" "$MAX_AGE_HOURS"

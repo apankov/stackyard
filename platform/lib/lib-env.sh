@@ -363,7 +363,26 @@ backup_file_kind() {
 # A default here is more dangerous than an absence: the bucket may be shared by
 # several machines, and a forgotten value would mean dumps land in another
 # machine's directory, on top of its dumps.
-backup_s3_prefix() { env_require Backup_S3_Prefix "this machine's prefix in the bucket, unique per machine"; }
+# Slashes are stripped from both ends. The value is joined with a "/" by every
+# caller, so a prefix written as "machine/" produces keys with an empty path
+# segment ("machine//mysql/db/..."). S3 accepts that and stores it literally —
+# which means the day someone tidies the config, the checker starts looking at
+# "machine/mysql/..." and reports "no backups" for backups that exist.
+backup_s3_prefix() {
+  local p
+  p="$(env_require Backup_S3_Prefix "this machine's prefix in the bucket, unique per machine")" || return 1
+  p="${p#"${p%%[!/]*}"}"
+  while [ "${p%/}" != "$p" ]; do p="${p%/}"; done
+  printf '%s' "$p"
+}
+
+# The floor for a GLOBALS dump, separate from the one for data dumps.
+#
+# A globals dump is a handful of GRANT lines by nature — under a kilobyte on a
+# machine with three accounts. Judging it by a threshold meant for a database
+# dump produces a red line on every single run, and a check that is always red
+# stops being read at all, taking the real findings with it.
+backup_min_globals_bytes() { env_get Backup_Min_Globals_Bytes 128; }
 
 # The prefix for shared-DBMS dumps inside the machine's prefix.
 #

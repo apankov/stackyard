@@ -114,6 +114,7 @@ LOCAL_DIR=$(env_get Backup_Local_Dir /mnt/data/backups)
 LOCAL_KEEP=$(env_get Backup_Local_Keep 1)
 MIN_FREE_MB=$(env_get Backup_Min_Free_MB 1024)
 MIN_OBJ_BYTES=$(env_get Backup_Min_Object_Bytes 1024)
+MIN_GLOBALS_BYTES=$(backup_min_globals_bytes)
 
 # Numeric settings are validated up front. A non-numeric value would otherwise
 # blow up mid-run, inside `[ "$x" -gt 0 ]` — that is, after some dumps have
@@ -288,9 +289,12 @@ run_job() {
   fi
 
   bytes=$(file_size "$part")
-  if [ "$bytes" -lt "$MIN_OBJ_BYTES" ]; then
+  # A globals dump is judged by its own floor: see backup_min_globals_bytes.
+  floor="$MIN_OBJ_BYTES"
+  case "$label" in *_globals) floor="$MIN_GLOBALS_BYTES" ;; esac
+  if [ "$bytes" -lt "$floor" ]; then
     rm -f "$part"
-    fail_source "$label" "the dump is suspiciously small ($bytes B < $MIN_OBJ_BYTES B)"
+    fail_source "$label" "the dump is suspiciously small ($bytes B < $floor B)"
     return 1
   fi
 
