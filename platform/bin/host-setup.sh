@@ -394,9 +394,43 @@ if [ -n "${REGISTRIES// /}" ]; then
     && ok "aws — images from registries: $REGISTRIES" \
     || bad "no aws, while stacks pull images from a registry ($REGISTRIES) — pulls will fail"
 elif [ -f "$ROOT_DIR/.env-backup" ]; then
-  command -v aws >/dev/null 2>&1 \
-    && ok "aws — uploading backups to S3" \
-    || bad "no aws, while .env-backup is configured — backup.sh will not upload dumps"
+  if ! command -v aws >/dev/null 2>&1; then
+    bad "no aws, while .env-backup is configured — backup.sh will not upload dumps"
+  else
+    ok "aws — uploading backups to S3"
+    # Having the command and being able to use it are different questions, and
+    # only the second one decides whether a backup exists. Credentials come
+    # from .env-backup or from the instance's IAM role; with neither, backup.sh
+    # dies at its own head-bucket — at three in the morning, into a journal
+    # nobody reads. Asked here, while a person is looking.
+    #
+    # The same three lines of credential handling live in backup.sh and
+    # check-backups.sh; a third copy is a fair price for not importing the rest
+    # of their config parsing into a preflight check.
+    s3probe="$(
+      ENV_VARS=(); env_load_files "$ROOT_DIR/.env-backup" >/dev/null 2>&1
+      b="$(env_get Backup_S3_Bucket)"
+      k="$(env_get Backup_AWS_Access_Key_Id)"
+      sec="$(env_get Backup_AWS_Secret_Access_Key)"
+      r="$(env_get Backup_AWS_Region us-east-1)"
+      [ -n "$b" ] || { printf 'nobucket'; exit 0; }
+      printf '%s\t' "$b"
+      if [ -n "$k" ]; then
+        AWS_ACCESS_KEY_ID="$k" AWS_SECRET_ACCESS_KEY="$sec" \
+          run_with_timeout 20 aws --region "$r" s3api head-bucket --bucket "$b" >/dev/null 2>&1 \
+          && printf 'ok' || printf 'fail'
+      else
+        run_with_timeout 20 aws --region "$r" s3api head-bucket --bucket "$b" >/dev/null 2>&1 \
+          && printf 'role' || printf 'fail'
+      fi
+    )"
+    case "$s3probe" in
+      nobucket) bad "Backup_S3_Bucket is empty in .env-backup — there is nowhere to upload to" ;;
+      *$'\t'ok)   ok "s3://${s3probe%%$'\t'*} answers with the keys from .env-backup" ;;
+      *$'\t'role) ok "s3://${s3probe%%$'\t'*} answers through the instance's IAM role" ;;
+      *)        bad "s3://${s3probe%%$'\t'*} does not answer — neither .env-backup keys nor an instance role work; backup.sh will fail at upload" ;;
+    esac
+  fi
 else
   ok "aws is not needed: no image registries, no .env-backup"
 fi
