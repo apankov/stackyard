@@ -146,6 +146,17 @@ TS=$(date -u +%Y%m%dT%H%M%SZ)
 # ------------------------------------------------------------------ helpers
 
 free_mb() { df -Pk "$1" | awk 'NR == 2 { print int($4 / 1024) }'; }
+
+# Bytes below a kilobyte are printed AS bytes. Rounding them to "0 KiB" makes a
+# perfectly good globals dump — a few hundred bytes of GRANT lines — read as
+# "we uploaded nothing", which is the exact conclusion the size floor above
+# exists to prevent anyone from drawing by accident.
+human_size() {
+  awk -v b="${1:-0}" 'BEGIN {
+    if (b < 1024)       { printf "%d B", b }
+    else if (b < 1048576) { printf "%.1f KiB", b / 1024 }
+    else                { printf "%.1f MiB", b / 1048576 } }'
+}
 file_size() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1"; }
 
 aws_cli() {
@@ -315,7 +326,7 @@ run_job() {
   fi
 
   echo "$label $bytes" >> "$SIZES_FILE.new"
-  log "  [ok]   $label — $((bytes / 1024)) KiB -> s3://$S3_BUCKET/$key"
+  log "  [ok]   $label — $(human_size "$bytes") -> s3://$S3_BUCKET/$key"
 
   # The local copy is a convenience, not part of the contract. If it does not
   # fit, it is skipped: the backup is already in S3, and filling the disk to
