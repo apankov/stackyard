@@ -118,75 +118,124 @@ case "$COOLDOWN_H" in ''|*[!0-9]*) die "Notify_Cooldown_Hours must be an integer
 # never "which machine", and an alert whose subject has to be looked up is an
 # alert that gets postponed.
 #
-# The hostname is kept in parentheses, because after a machine is rebuilt the
-# label stays the same while the instance changes, and that difference is
-# occasionally the whole story.
+# The hostname goes into the footer rather than the title: in the title it
+# reads as the subject and pushes the machine's name out of the notification
+# preview. It is kept at all because after a rebuild the label stays the same
+# while the instance changes, and that difference is occasionally the whole
+# story.
 MACHINE=$(env_get Notify_Machine "$(basename "$ROOT_DIR")")
 HOSTNAME_S=$(hostname -s 2>/dev/null || hostname)
-if [ "$MACHINE" = "$HOSTNAME_S" ]; then
-  MACHINE_LABEL="$MACHINE"
-else
-  MACHINE_LABEL="$MACHINE ($HOSTNAME_S)"
-fi
+[ "$MACHINE" = "$HOSTNAME_S" ] && HOSTNAME_S=""
 NOW=$(date -u +%s)
 
 # ------------------------------------------------------------------ sending
 
-# Plain text, with NO parse_mode. journalctl output regularly contains
-# characters on which Telegram's Markdown parser fails with a 400 — and the
-# alert silently never arrives. That is exactly the class of failure this
-# script exists to prevent.
-tg_send() {
-  if [ "$ENABLED" != "true" ]; then
-    log "Notify_Enabled=$ENABLED — not sent (muted deliberately). The message:"
-    printf '%s\n' "${1-}" | sed 's/^/  | /'
-    return 0
-  fi
-  local text="$1" attempt code resp
-
-  # Telegram's limit is 4096 CHARACTERS. Truncation is by characters, not
-  # bytes: any multi-byte text would otherwise be cut mid-character.
-  if [ "${#text}" -gt "$TG_LIMIT" ]; then
-    text="${text:0:$((TG_LIMIT - 40))}"$'\n'"... (truncated)"
-  fi
-
-  resp=$(mktemp) || return 1
-  for attempt in 1 2 3; do
-    # --max-time is mandatory: a hung curl inside an OnFailure handler would
-    # hold the unit, and Type=oneshot has no start timeout by default.
-    code=$(curl -sS --max-time 15 -o "$resp" -w '%{http_code}' \
-             -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-             --data-urlencode "chat_id=${CHAT_ID}" \
-             --data-urlencode "text=${text}" \
-             --data-urlencode "disable_web_page_preview=true" 2>/dev/null)
-
-    if [ "$code" = "200" ] && grep -q '"ok":true' "$resp"; then
-      rm -f "$resp"
-      return 0
-    fi
-    echo "  attempt $attempt: HTTP $code, response: $(head -c 300 "$resp" 2>/dev/null)" >&2
-    [ "$attempt" -lt 3 ] && sleep 5
-  done
-  rm -f "$resp"
-  return 1
+# HTML rather than Markdown. MarkdownV2 reserves eighteen characters, and
+# journalctl or docker logs contain some of them in almost every line: one
+# unescaped dot and Telegram answers 400, and the alert never arrives. HTML
+# reserves three — & < > — and escaping those is a single sed.
+html_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
 emoji_for() {
   case "$1" in
-    crit) printf '[!!]' ;;
-    warn) printf '[!]'  ;;
-    ok)   printf '[ok]' ;;
-    *)    printf '[i]'  ;;
+    crit) printf '🔴' ;;
+    warn) printf '🟠' ;;
+    ok)   printf '✅' ;;
+    *)    printf 'ℹ️'  ;;
   esac
 }
 
+# compose <html|plain> <level> <title> <body> <key>
+#
+# The body is truncated HERE, on the raw text, and not after composing:
+# cutting finished HTML can split a tag or an entity, and Telegram rejects the
+# whole message. The limit is 4096 characters of VISIBLE text, so the markup
+# itself does not count against it.
 compose() {
-  local level="$1" title="$2" body="$3" key="$4"
-  printf '%s %s — %s\n' "$(emoji_for "$level")" "$MACHINE_LABEL" "$title"
-  if [ -n "$body" ]; then printf '\n%s\n' "$body"; fi
-  printf '\n--\n'
-  [ -n "$key" ] && printf 'key:  %s\n' "$key"
-  printf 'time: %s UTC\n' "$(date -u '+%Y-%m-%d %H:%M')"
+  local fmt="$1" level="$2" title="$3" body="$4" key="$5" time footer budget
+  time="$(date -u '+%Y-%m-%d %H:%M') UTC"
+
+  budget=$(( TG_LIMIT - ${#MACHINE} - ${#title} - ${#HOSTNAME_S} - ${#key} - ${#time} - 80 ))
+  if [ "${#body}" -gt "$budget" ]; then
+    body="${body:0:$budget}"$'\n'"... (truncated)"
+  fi
+
+  if [ "$fmt" = plain ]; then
+    printf '%s %s — %s\n' "$(emoji_for "$level")" "$MACHINE" "$title"
+    if [ -n "$body" ]; then printf '\n%s\n' "$body"; fi
+    printf '\n--\n'
+    [ -n "$HOSTNAME_S" ] && printf 'host: %s\n' "$HOSTNAME_S"
+    [ -n "$key" ] && printf 'key:  %s\n' "$key"
+    printf 'time: %s\n' "$time"
+    return 0
+  fi
+
+  printf '%s <b>%s</b> — %s\n' "$(emoji_for "$level")" \
+    "$(html_escape "$MACHINE")" "$(html_escape "$title")"
+  # Collapsed: 25 lines of logs are the evidence, not the message. Telegram
+  # shows the first few and folds the rest behind a tap.
+  if [ -n "$body" ]; then
+    printf '\n<blockquote expandable>%s</blockquote>\n' "$(html_escape "$body")"
+  fi
+  footer=""
+  [ -n "$HOSTNAME_S" ] && footer+="$(html_escape "$HOSTNAME_S") · "
+  [ -n "$key" ] && footer+="<code>$(html_escape "$key")</code> · "
+  footer+="$time"
+  printf '\n<i>%s</i>\n' "$footer"
+}
+
+# tg_post <text> [parse_mode] — one message, with retries. The response is left
+# in $TG_RESP for the caller to inspect.
+tg_post() {
+  local text="$1" mode="${2-}" attempt code
+  local args=(--data-urlencode "chat_id=${CHAT_ID}"
+              --data-urlencode "text=${text}"
+              --data-urlencode "disable_web_page_preview=true")
+  [ -n "$mode" ] && args+=(--data-urlencode "parse_mode=${mode}")
+
+  for attempt in 1 2 3; do
+    # --max-time is mandatory: a hung curl inside an OnFailure handler would
+    # hold the unit, and Type=oneshot has no start timeout by default.
+    code=$(curl -sS --max-time 15 -o "$TG_RESP" -w '%{http_code}' \
+             -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+             "${args[@]}" 2>/dev/null)
+
+    if [ "$code" = "200" ] && grep -q '"ok":true' "$TG_RESP"; then
+      return 0
+    fi
+    echo "  attempt $attempt: HTTP $code, response: $(head -c 300 "$TG_RESP" 2>/dev/null)" >&2
+    # A 400 is the message itself, not the network: repeating it verbatim
+    # gets the same answer three times.
+    [ "$code" = "400" ] && return 1
+    [ "$attempt" -lt 3 ] && sleep 5
+  done
+  return 1
+}
+
+# tg_send <level> <title> <body> <key>
+#
+# If Telegram still refuses the markup ("can't parse entities"), the same
+# message goes out once more as plain text. An ugly alert is a nuisance; a
+# lost one is the failure this script exists to prevent.
+tg_send() {
+  local level="$1" title="$2" body="$3" key="$4" rc=1
+  if [ "$ENABLED" != "true" ]; then
+    log "Notify_Enabled=$ENABLED — not sent (muted deliberately). The message:"
+    compose plain "$level" "$title" "$body" "$key" | sed 's/^/  | /'
+    return 0
+  fi
+
+  TG_RESP=$(mktemp) || return 1
+  if tg_post "$(compose html "$level" "$title" "$body" "$key")" HTML; then
+    rc=0
+  elif grep -q "can't parse entities" "$TG_RESP"; then
+    echo "  the markup was rejected — resending as plain text" >&2
+    tg_post "$(compose plain "$level" "$title" "$body" "$key")" && rc=0
+  fi
+  rm -f "$TG_RESP"
+  return "$rc"
 }
 
 # The key becomes a file name — everything that could escape it is stripped.
@@ -211,7 +260,7 @@ fi
 case "$MODE" in
 
   test)
-    if tg_send "$(compose info 'channel test' 'If you are reading this, notifications are configured and working.' '')"; then
+    if tg_send info 'channel test' 'If you are reading this, notifications are configured and working.' ''; then
       log "Sent. Check the chat."
     else
       die "sending failed — see the output above"
@@ -241,7 +290,7 @@ case "$MODE" in
       body+="$("$DIR0/check-backups.sh" 2>&1 | grep -vE '^\s*$' | tail -8)"
     fi
 
-    tg_send "$(compose info 'weekly digest' "$body" '')" || die "could not send the digest"
+    tg_send info 'weekly digest' "$body" '' || die "could not send the digest"
     log "Digest sent."
     exit 0
     ;;
@@ -265,7 +314,7 @@ case "$MODE" in
       exit 0
     fi
     rm -f "$sf"
-    tg_send "$(compose ok "${TITLE:-$KEY recovered}" '' "$KEY")" \
+    tg_send ok "${TITLE:-$KEY recovered}" '' "$KEY" \
       || die "could not send the recovery message"
     log "Recovery for key '$KEY' sent."
     exit 0
@@ -305,7 +354,7 @@ if [ "$FORCE" -ne 1 ] && [ -f "$sf" ]; then
   fi
 fi
 
-if tg_send "$(compose "$LEVEL" "$TITLE" "$BODY" "$KEY")"; then
+if tg_send "$LEVEL" "$TITLE" "$BODY" "$KEY"; then
   echo "$NOW $LEVEL" > "$sf"
   log "Sent: [$LEVEL] $TITLE"
   exit 0
