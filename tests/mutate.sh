@@ -74,7 +74,8 @@ MUTATIONS=(
   'getssl: the checksum in the lock is truncated@@platform/getssl.lock@@sha256=c26d1a714fb96feeed2ac808cf16aae8e453d0005475e47e5732213ab1a7485e@@sha256=c26d1a714fb96feeed2ac808'
 
   # --- the machine root seen through the platform/ symlink, and htpasswd flags.
-  'root: ROOT_DIR stays inside .stackyard@@platform/bin/htpasswd.sh@@  [ "${ROOT_DIR##*/}" = .stackyard ] \&\& ROOT_DIR="${ROOT_DIR%/*}"@@  true'
+  'root: ROOT_DIR stays inside .stackyard@@platform/bin/htpasswd.sh@@  ROOT_DIR="${ROOT_DIR%%/.stackyard/*}"; ROOT_DIR="${ROOT_DIR%/.stackyard}"@@  true'
+  'root: only the flat layout is cut back to the machine@@platform/bin/htpasswd.sh@@  ROOT_DIR="${ROOT_DIR%%/.stackyard/*}"; ROOT_DIR="${ROOT_DIR%/.stackyard}"@@  ROOT_DIR="${ROOT_DIR%/.stackyard}"'
   'htpasswd: -b together with -i (usage instead of a password)@@platform/bin/htpasswd.sh@@FLAGS="-iB"@@FLAGS="-ibB"'
   'htpasswd: the host sets ownership, not the container@@platform/bin/htpasswd.sh@@  sh -c "$IN_CONTAINER"@@  sh -c "$IN_CONTAINER"\n\nchmod 640 "$FILE"'
   'nginx: the image is hardcoded past nginx_image@@platform/bin/htpasswd.sh@@"$(nginx_image)"@@nginx:1.30-alpine'

@@ -19,14 +19,17 @@ DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -z "${ROOT_DIR:-}" ]; then
   ROOT_DIR="$( cd "$DIR0/../.." && pwd )"
   # On a machine, platform/ is a symlink into .stackyard/, and the `cd -P`
-  # above has already resolved it: two levels up lands in .stackyard rather
-  # than in the machine. state/ would then be created INSIDE the downloaded
+  # above has already resolved it: two levels up lands inside .stackyard
+  # rather than in the machine. state/ would then be created INSIDE the downloaded
   # layer and vanish on the next ./bootstrap, and until then the password
   # files, certificates and databases.yaml would sit where no container looks
   # for them. The wrappers in the machine root set ROOT_DIR themselves, but
   # every script documents being called as ./platform/bin/<name>.sh — that is
   # the path this fixes.
-  [ "${ROOT_DIR##*/}" = .stackyard ] && ROOT_DIR="${ROOT_DIR%/*}"
+  # Everything from .stackyard on is cut: the platform sits two levels deeper
+  # there (versions/<commit>/), and a machine still on the flat layout lands
+  # on .stackyard itself.
+  ROOT_DIR="${ROOT_DIR%%/.stackyard/*}"; ROOT_DIR="${ROOT_DIR%/.stackyard}"
 fi
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 ENV_FILE="$ROOT_DIR/.env"

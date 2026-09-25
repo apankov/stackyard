@@ -34,7 +34,10 @@ if [ -z "${ROOT_DIR:-}" ]; then
   # On a machine platform/ is a symlink into .stackyard/, and the `cd -P` above
   # has already resolved it: two levels up would land inside the downloaded
   # layer instead of the machine.
-  [ "${ROOT_DIR##*/}" = .stackyard ] && ROOT_DIR="${ROOT_DIR%/*}"
+  # Everything from .stackyard on is cut: the platform sits two levels deeper
+  # there (versions/<commit>/), and a machine still on the flat layout lands
+  # on .stackyard itself.
+  ROOT_DIR="${ROOT_DIR%%/.stackyard/*}"; ROOT_DIR="${ROOT_DIR%/.stackyard}"
 fi
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 

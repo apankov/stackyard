@@ -1444,19 +1444,31 @@ echo "== the machine root seen through a symlink"
 # The guard above looks at a script's text; this block looks at WHERE the
 # script actually goes. A textual check alone will not do: it passes for a
 # script that contains the right line in the wrong branch.
+#
+# Both layouts: the versioned one ./bootstrap installs now, and the flat one a
+# machine still has until its first ./bootstrap on the new version.
 MROOT="$WORK/machine"
-rm -rf "$MROOT"
-mkdir -p "$MROOT/.stackyard"
-cp -R "$REPO_DIR/platform" "$MROOT/.stackyard/platform"
-ln -s .stackyard/platform "$MROOT/platform"
-# The expectation goes through pwd -P because the script resolves symlinks
-# itself (cd -P), and on macOS $TMPDIR is /var -> /private/var. Otherwise the
-# test would be measuring the layout of the temp directory instead of the thing
-# it was written for.
-MREAL="$(cd "$MROOT" && pwd -P)"
-check "through the symlink a script sees the machine as its root, not .stackyard" \
-  "$(cd "$MROOT" && env -u ROOT_DIR ./platform/bin/htpasswd.sh proba --list 2>&1)" \
-  "empty: $MREAL/state/htpasswd/proba"
+for layout in versioned flat; do
+  rm -rf "$MROOT"
+  if [ "$layout" = versioned ]; then
+    mkdir -p "$MROOT/.stackyard/versions/abc"
+    cp -R "$REPO_DIR/platform" "$MROOT/.stackyard/versions/abc/platform"
+    ln -s versions/abc "$MROOT/.stackyard/current"
+    ln -s .stackyard/current/platform "$MROOT/platform"
+  else
+    mkdir -p "$MROOT/.stackyard"
+    cp -R "$REPO_DIR/platform" "$MROOT/.stackyard/platform"
+    ln -s .stackyard/platform "$MROOT/platform"
+  fi
+  # The expectation goes through pwd -P because the script resolves symlinks
+  # itself (cd -P), and on macOS $TMPDIR is /var -> /private/var. Otherwise the
+  # test would be measuring the layout of the temp directory instead of the
+  # thing it was written for.
+  MREAL="$(cd "$MROOT" && pwd -P)"
+  check "$layout layout: through the symlink a script sees the machine as its root, not .stackyard" \
+    "$(cd "$MROOT" && env -u ROOT_DIR ./platform/bin/htpasswd.sh proba --list 2>&1)" \
+    "empty: $MREAL/state/htpasswd/proba"
+done
 rm -rf "$MROOT"
 
 echo "== portability: time, checksums, the watchdog"
