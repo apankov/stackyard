@@ -1417,9 +1417,10 @@ check "the generated file's name is never matched by pattern" "$badpat" ""
 
 echo "== a stale bind mount"
 
-# ./bootstrap replaces .stackyard wholesale (rm -rf), and platform/ is a
-# symlink into it. A container started before that is left mounted onto a
-# DELETED directory: the path in docker inspect is unchanged, and there are
+# A directory replaced on the host after a container started — what every
+# ./bootstrap used to do to the platform, and still does to an nginx started
+# before the layer mounts — leaves the container mounted onto a DELETED
+# directory: the path in docker inspect is unchanged, and there are
 # zero files behind it. Comparing paths misses this — it compares strings,
 # while what changed is the inode.
 #
@@ -1470,6 +1471,144 @@ for layout in versioned flat; do
     "empty: $MREAL/state/htpasswd/proba"
 done
 rm -rf "$MROOT"
+
+echo "== the platform as nginx mounts it"
+
+# nginx must mount a directory ./bootstrap never replaces. A bind mount pins
+# the directory it started on: mounted onto .stackyard/versions/<commit>/, it
+# keeps reading that version after an update, and nothing once the version is
+# cleaned up — every domain gone until nginx is recreated.
+MROOT="$WORK/machine"
+rm -rf "$MROOT"
+mkdir -p "$MROOT/.stackyard/versions/abc/platform" "$MROOT/.stackyard/versions/abc/profiles"
+ln -s versions/abc "$MROOT/.stackyard/current"
+ln -s .stackyard/current/platform "$MROOT/platform"
+ln -s .stackyard/current/profiles "$MROOT/profile"
+check "versioned layout: the platform is mounted from .stackyard itself" \
+  "$(ROOT_DIR="$MROOT" layer_host_root platform)" "$MROOT/.stackyard"
+check "versioned layout: the profile is mounted from .stackyard itself" \
+  "$(ROOT_DIR="$MROOT" layer_host_root profile)" "$MROOT/.stackyard"
+check "versioned layout: nginx reaches the platform through current" \
+  "$(ROOT_DIR="$MROOT" layer_in_container platform)" "/stackyard/platform/current/platform"
+check "versioned layout: nginx reaches the profile through current" \
+  "$(ROOT_DIR="$MROOT" layer_in_container profile)" "/stackyard/profile/current/profiles"
+
+# Layers that stay put — the fixtures' links into the working tree, a vendored
+# copy — are mounted directly, resolved, since docker is given the real path.
+rm -rf "$MROOT"; mkdir -p "$MROOT"
+ln -s "$REPO_DIR/platform" "$MROOT/platform"
+ln -s "$REPO_DIR/profiles" "$MROOT/profile"
+check "linked layout: the platform is mounted from its own directory" \
+  "$(ROOT_DIR="$MROOT" layer_host_root platform)" "$(cd -P "$REPO_DIR/platform" && pwd)"
+check "linked layout: nginx reaches the platform at the mount itself" \
+  "$(ROOT_DIR="$MROOT" layer_in_container platform)" "/stackyard/platform"
+check "linked layout: nginx reaches the profile at the mount itself" \
+  "$(ROOT_DIR="$MROOT" layer_in_container profile)" "/stackyard/profile"
+
+# A stale .stackyard next to a vendored copy does not decide it: the link in
+# the machine root does.
+rm -rf "$MROOT"; mkdir -p "$MROOT/platform" "$MROOT/.stackyard/versions/abc"
+ln -s versions/abc "$MROOT/.stackyard/current"
+check "vendored layout with a stale .stackyard: the copy is mounted" \
+  "$(ROOT_DIR="$MROOT" layer_host_root platform)" "$(cd -P "$MROOT/platform" && pwd)"
+rm -rf "$MROOT"
+
+# The paths --check asks the container about and the links the entrypoint
+# makes are two lists of the same thing: a link --check does not know about is
+# a link whose loss nobody reports.
+ENTRY="$REPO_DIR/platform/compose/nginx-entrypoint.sh"
+unlinked=""
+while read -r link rel; do
+  [ -n "$link" ] || continue
+  grep -qE "^link \"[^\"]+\" +$link\$" "$ENTRY" || unlinked="$unlinked $link"
+done < <(nginx_layer_links)
+check "the entrypoint links every path --check looks through" "$unlinked" ""
+check "the entrypoint makes no link --check does not look through" \
+  "$(grep -c '^link ' "$ENTRY")" "$(nginx_layer_links | grep -c .)"
+check "nginx.yaml starts nginx through the entrypoint" \
+  "$(grep -c 'compose/nginx-entrypoint.sh' "$REPO_DIR/platform/compose/nginx.yaml")" "1"
+
+echo "== bootstrap: versions, current, previous"
+
+# Run against a synthetic source repository rather than this one: the subject
+# is bootstrap's layout, and mutate.sh runs this file in a copy with no .git.
+BS="$WORK/bootstrap"
+rm -rf "$BS"; mkdir -p "$BS/src/platform/bin" "$BS/src/platform/nginx-snippets" "$BS/src/profiles/stacks/x"
+printf '#!/bin/sh\n' > "$BS/src/platform/bin/stack.sh"
+printf '#!/bin/sh\n' > "$BS/src/platform/bin/host-setup.sh"
+chmod +x "$BS/src/platform/bin/stack.sh" "$BS/src/platform/bin/host-setup.sh"
+printf 'Requires=""\n' > "$BS/src/profiles/stacks/x/stack.conf"
+bs_commit() {
+  printf '%s\n' "$1" > "$BS/src/platform/nginx-snippets/v.conf"
+  ( cd "$BS/src" && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm "$1" \
+      && git rev-parse HEAD )
+}
+# An inode, portably: stat's flags differ between GNU and BSD, `ls -di` does not.
+inode() { ls -di "$1" 2>/dev/null | awk '{print $1}'; }
+# docker is kept out of reach: the step that looks at a running nginx is not
+# the subject here, and the developer's own containers must not change the
+# output.
+bs_run() {
+  ( cd "$1" && PATH="$BS/nodocker:$PATH" STACKYARD_SOURCE="${2-}" ./bootstrap 2>&1 )
+}
+mkdir -p "$BS/nodocker"; printf '#!/bin/sh\nexit 1\n' > "$BS/nodocker/docker"; chmod +x "$BS/nodocker/docker"
+
+( cd "$BS/src" && git init -q ) >/dev/null 2>&1
+c1="$(bs_commit one)"
+M="$BS/machine"; mkdir -p "$M"
+cp "$REPO_DIR/templates/machine/bootstrap" "$M/bootstrap"
+printf 'repo=%s\nversion=v0\ncommit=%s\n' "$BS/src" "$c1" > "$M/stackyard.lock"
+
+bs_run "$M" "$BS/src" >/dev/null
+check "first install: current is the installed version" \
+  "$(readlink "$M/.stackyard/current")" "versions/$c1"
+check "first install: the machine's platform link goes through current" \
+  "$(readlink "$M/platform")" ".stackyard/current/platform"
+check "first install: the platform is reachable" "$(cat "$M/platform/nginx-snippets/v.conf")" "one"
+
+stable="$(inode "$M/.stackyard")"
+pinned="$(inode "$M/.stackyard/versions/$c1/platform/nginx-snippets")"
+c2="$(bs_commit two)"
+bs_run "$M" "$BS/src" >/dev/null
+check "update: .stackyard itself is not replaced" "$(inode "$M/.stackyard")" "$stable"
+check "update: current moves to the new version" "$(readlink "$M/.stackyard/current")" "versions/$c2"
+check "update: previous is the old version" "$(readlink "$M/.stackyard/previous")" "versions/$c1"
+check "update: a container mounted onto the old version still has its directory" \
+  "$(inode "$M/.stackyard/versions/$c1/platform/nginx-snippets")" "$pinned"
+check "update: the machine sees the new platform" "$(cat "$M/platform/nginx-snippets/v.conf")" "two"
+
+c3="$(bs_commit three)"
+bs_run "$M" "$BS/src" >/dev/null
+check "a third version: only current and previous are kept" \
+  "$(ls "$M/.stackyard/versions" | sort | tr '\n' ' ')" "$(printf '%s\n' "$c2" "$c3" | sort | tr '\n' ' ')"
+
+# A rollback to the kept version needs neither the network nor a fetch.
+printf 'repo=%s/nowhere\nversion=v0\ncommit=%s\n' "$BS" "$c2" > "$M/stackyard.lock"
+out="$(bs_run "$M")"
+check "rollback: the kept version is switched to without a fetch" \
+  "$(printf '%s\n' "$out" | grep -c 'already downloaded')" "1"
+check "rollback: current is the kept version" "$(readlink "$M/.stackyard/current")" "versions/$c2"
+check "rollback: previous is the version rolled back from" "$(readlink "$M/.stackyard/previous")" "versions/$c3"
+out="$(bs_run "$M")"
+check "a second run changes nothing" "$(printf '%s\n' "$out" | grep -c 'is already in place')" "1"
+
+# The flat layout a machine has before this version: moved, never deleted — a
+# running nginx is mounted onto it, and a rename keeps the inodes it holds.
+M2="$BS/flat"; mkdir -p "$M2/.stackyard"
+cp "$REPO_DIR/templates/machine/bootstrap" "$M2/bootstrap"
+printf 'repo=%s\nversion=v0\ncommit=%s\n' "$BS/src" "$c3" > "$M2/stackyard.lock"
+( cd "$BS/src" && git archive "$c1" ) | tar -x -C "$M2/.stackyard"
+printf '%s\n' "$c1" > "$M2/.stackyard/.commit"
+ln -s .stackyard/platform "$M2/platform"; ln -s .stackyard/profiles "$M2/profile"
+pinned="$(inode "$M2/.stackyard/platform/nginx-snippets")"
+bs_run "$M2" "$BS/src" >/dev/null
+check "flat layout: the running nginx's directory survives the move" \
+  "$(inode "$M2/.stackyard/versions/$c1/platform/nginx-snippets")" "$pinned"
+check "flat layout: the old version becomes previous" "$(readlink "$M2/.stackyard/previous")" "versions/$c1"
+check "flat layout: current is the new version" "$(readlink "$M2/.stackyard/current")" "versions/$c3"
+check "flat layout: the machine's platform link is moved onto current" \
+  "$(readlink "$M2/platform")" ".stackyard/current/platform"
+rm -rf "$BS"
 
 echo "== portability: time, checksums, the watchdog"
 

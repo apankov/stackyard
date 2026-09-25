@@ -80,6 +80,20 @@ MUTATIONS=(
   'htpasswd: the host sets ownership, not the container@@platform/bin/htpasswd.sh@@  sh -c "$IN_CONTAINER"@@  sh -c "$IN_CONTAINER"\n\nchmod 640 "$FILE"'
   'nginx: the image is hardcoded past nginx_image@@platform/bin/htpasswd.sh@@"$(nginx_image)"@@nginx:1.30-alpine'
 
+  # --- the platform version nginx mounts, and how bootstrap switches it.
+  # Each of these brings back an nginx that is blind after ./bootstrap, and
+  # nothing says so until a visitor finds every domain gone.
+  'layer: nginx mounts the version, not .stackyard@@platform/lib/lib-stacks.sh@@  if [ -n "$(layer_link_target "$1")" ]; then\n    printf@@  if false; then\n    printf'
+  'layer: nginx reads the platform past current@@platform/lib/lib-stacks.sh@@  printf '"'"'/stackyard/%s%s'"'"' "$1" "${t:+/$t}"@@  printf '"'"'/stackyard/%s'"'"' "$1"'
+  'layer: the decision ignores the link in the machine root@@platform/lib/lib-stacks.sh@@  case "$l" in .stackyard/current/*) printf@@  [ -L "$(stacks_root)/.stackyard/current" ] \&\& l=.stackyard/current/platform\n  case "$l" in .stackyard/current/*) printf'
+  'entrypoint: conf.d is not linked@@platform/compose/nginx-entrypoint.sh@@link "$STACKYARD_PLATFORM_DIR/nginx-vhosts"   /etc/nginx/conf.d@@: conf.d'
+  'bootstrap: an update replaces .stackyard again@@templates/machine/bootstrap@@  rm -rf "$DEST.tmp" "$NEW"@@  rm -rf "$DEST.tmp" "$NEW" "$DEST"'
+  'bootstrap: the flat layout is deleted, not moved@@templates/machine/bootstrap@@  mv "$DEST" "$DEST.flat"@@  rm -rf "$DEST"; mkdir -p "$DEST.flat"'
+  'bootstrap: previous is cleaned up with the rest@@templates/machine/bootstrap@@  case "versions/${d##*/}" in "$keep_cur"|"$keep_prev") continue ;; esac@@  case "versions/${d##*/}" in "$keep_cur") continue ;; esac'
+  'bootstrap: previous is not recorded@@templates/machine/bootstrap@@  [ -n "$prev" ] \&\& swap_link "$prev" "$DEST/previous"@@  true'
+  'bootstrap: the kept version is fetched again@@templates/machine/bootstrap@@elif [ "$(cat "$NEW/.commit" 2>/dev/null)" = "$want" ]; then@@elif false; then'
+  'bootstrap: the machine links bypass current@@templates/machine/bootstrap@@ln -sfn .stackyard/current/platform "$ROOT/platform"@@ln -sfn .stackyard/versions/$want/platform "$ROOT/platform"'
+
   # --- a stale bind-mount left over after ./bootstrap.
   'mount: an empty host side also counts as evidence@@platform/lib/lib-stacks.sh@@  [ "${1:-0}" -gt 0 ] \&\& [ "${2:-0}" -eq 0 ]@@  [ "${2:-0}" -eq 0 ]'
   'mount: the evidence is not recognized at all@@platform/lib/lib-stacks.sh@@  [ "${1:-0}" -gt 0 ] \&\& [ "${2:-0}" -eq 0 ]@@  false'

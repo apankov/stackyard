@@ -41,8 +41,11 @@ would plausibly write adds nothing.
 **Three layers.** `platform/` is the engine and knows no machine, no DBMS and no
 secret. `profiles/stacks/` is a library of reusable stacks (`mysql`, `pg`,
 `redis`, `php-fpm`). The machine is a separate private repo. On a machine,
-`platform/` and `profile/` are symlinks into `.stackyard/`, which `bootstrap`
-downloads. In `tests/machines/{alpha,beta}` they are symlinks straight into this
+`platform/` and `profile/` are symlinks into `.stackyard/current/`, which
+points to `.stackyard/versions/<commit>/`. `bootstrap` downloads each version
+there, then swaps `current` and keeps `previous`. nginx mounts `.stackyard`
+itself rather than a version directory (`layer_host_root` in `lib-stacks.sh`,
+`platform/compose/nginx-entrypoint.sh`), so an update needs only a reload. In `tests/machines/{alpha,beta}` they are symlinks straight into this
 working tree, so engine edits show up in the fixtures immediately.
 
 **A stack is a directory with `stack.conf`.** Its subdirectories are
@@ -74,7 +77,7 @@ grants) lives in that profile's `scripts/check-decl.sh`, not in the platform.
 `templates/machine/wrapper` using the list in `templates/machine/wrappers`, and
 each one sets `ROOT_DIR` before it `exec`s `platform/bin/<script>.sh`. Scripts
 run directly also have to handle `ROOT_DIR` resolving inside `.stackyard/` (the
-`${ROOT_DIR##*/} = .stackyard` fallback). `docker-compose.sh` is the only path
+`${ROOT_DIR%%/.stackyard/*}` fallback). `docker-compose.sh` is the only path
 to `docker compose`.
 
 **Machine state.** Generated files (certs, `getssl-config`, `databases.yaml`,

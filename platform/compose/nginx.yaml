@@ -3,14 +3,32 @@ services:
     image: ${Platform_Nginx_Image:-nginx:1.30-alpine}
     container_name: nginx
     restart: always
+    # The platform's directories are LINKED into /etc/nginx at start rather
+    # than mounted there — see nginx-entrypoint.sh and the layer mounts below.
+    # Overriding the entrypoint drops the image's CMD, so it is repeated.
+    entrypoint: ["/bin/sh", "${Stackyard_Platform_Dir:?}/compose/nginx-entrypoint.sh"]
+    command: ["nginx", "-g", "daemon off;"]
+    environment:
+      STACKYARD_PLATFORM_DIR: ${Stackyard_Platform_Dir:?}
+      STACKYARD_PROFILE_DIR: ${Stackyard_Profile_Dir:?}
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ${Platform_Deploy_Dir:?}/platform/nginx-snippets:/etc/nginx/snippets:ro
-      # Static platform vhosts: default.conf (the default server) and
-      # 00-limits.conf (limit zones, which must live in the http context).
-      - ${Platform_Deploy_Dir:?}/platform/nginx-vhosts:/etc/nginx/conf.d:ro
+      # The platform and the profile, mounted from a directory that ./bootstrap
+      # never replaces. A bind mount pins the directory it was started on, not
+      # its path: when these were mounted as platform/nginx-snippets and
+      # friends, every ./bootstrap left nginx mounted onto a deleted version,
+      # serving no domains until it was recreated. On a machine both roots are
+      # .stackyard, and the container follows .stackyard/current on every read;
+      # see layer_host_root in lib-stacks.sh for the other layouts.
+      #
+      # Reached through links the entrypoint makes: /etc/nginx/snippets,
+      # /etc/nginx/conf.d (the static platform vhosts: default.conf and
+      # 00-limits.conf, whose limit zones must live in the http context) and
+      # /etc/nginx/profile-stacks.
+      - ${Stackyard_Platform_Root:?}:/stackyard/platform:ro
+      - ${Stackyard_Profile_Root:?}:/stackyard/profile:ro
       # The machine's generated vhosts go in a DIRECTORY NEXT TO conf.d, and
       # platform/nginx-vhosts/05-enabled.conf reads them from there with a
       # single include line.
@@ -26,16 +44,15 @@ services:
       # a machine), and writing there either breaks a neighbouring machine or
       # disappears at the next platform update.
       - ${Platform_Deploy_Dir:?}/state/nginx-vhosts:/etc/nginx/enabled:ro
-      # Both stack roots in full, read-only: vhosts are read exclusively
-      # through the includes in 10-enabled.conf -- that is what disabling a
-      # stack consists of. The mounts are constant and do not depend on which
+      # Both stack roots in full, read-only (the profile's through the layer
+      # mount above): vhosts are read exclusively through the includes in
+      # 10-enabled.conf -- that is what disabling a stack consists of. The mounts are constant and do not depend on which
       # stacks are enabled.
       # The machine's own http config: its limit zones and maps. Included from
       # the generated 10-enabled.conf as its first line, before any server
       # block.
       - ${Platform_Deploy_Dir:?}/nginx:/etc/nginx/machine:ro
       - ${Platform_Deploy_Dir:?}/stacks:/etc/nginx/stacks:ro
-      - ${Platform_Deploy_Dir:?}/profile/stacks:/etc/nginx/profile-stacks:ro
       # basic-auth files. In state/, not in platform/: the platform is shared
       # and bootstrap overwrites it wholesale, while these are the machine's
       # secrets.

@@ -94,6 +94,8 @@ fi
 # Exported into the environment so compose reliably sees it while parsing the
 # YAML files.
 export Platform_Network="${TARGET_NETWORK}"
+# Where nginx mounts the platform and the profile from; see layer_env_export.
+layer_env_export
 
 # ------------------------------------------------------- building the command
 

@@ -188,7 +188,33 @@ commit=019829962cd0be920ebfd59fa675da820652c51a
 ```
 
 `./bootstrap` fetches it into `.stackyard/` (not in git) and links it in as
-`platform/` and `profile/`. This is the same mechanic as `terraform init`,
+`platform/` and `profile/`.
+
+Every version gets a directory of its own, and the machine runs whichever one
+`current` points at:
+
+```
+.stackyard/versions/<commit>/
+.stackyard/current  -> versions/<commit>    what the machine runs
+.stackyard/previous -> versions/<commit>    the one before, kept for a rollback
+platform -> .stackyard/current/platform
+profile  -> .stackyard/current/profiles
+```
+
+An update downloads the new version next to the old one and swaps `current`
+with a rename; `.stackyard` itself is never replaced. That matters for nginx: a
+bind mount pins the directory it was started on, not its path, so an nginx
+that mounted `platform/nginx-snippets` was left looking at a deleted directory
+after every `./bootstrap` and served no domains until it was recreated. nginx
+now mounts `.stackyard` and reaches `/etc/nginx/snippets`, `/etc/nginx/conf.d`
+and `/etc/nginx/profile-stacks` through links that follow `current`
+(`platform/compose/nginx-entrypoint.sh`), so after an update it needs a
+reload — `./stack sync`, which runs `nginx -t` first — and not a restart.
+
+A machine on the older flat `.stackyard/` is moved into `versions/` on its
+first `./bootstrap` of this version, by rename, so the running nginx keeps its
+files. It still needs one `./dc up -d --force-recreate nginx` to get the new
+mounts; `./bootstrap` says so, and no update after that needs one. This is the same mechanic as `terraform init`,
 `helm dependency update`, `ansible-galaxy install -r` and `npm ci`: the
 repository declares a version rather than carrying a copy of the code.
 
@@ -229,11 +255,12 @@ sudo ./host-setup
 cd ~/dev/stackyard && git pull
 ./bin/pin.sh ~/dev/machines/client-acme   # shows the platform diff, rewrites the lock
 cd ~/dev/machines/client-acme && git commit -am "platform 0.3.0" && git push
-# on the server: git pull && ./bootstrap && ./stack --check
+# on the server: git pull && ./bootstrap && ./stack sync && ./stack --check
 ```
 
 **Two lines** change in the machine's repository, not sixty files. Rolling back
-is `./bin/pin.sh <machine> --version v0.2.0`.
+is `./bin/pin.sh <machine> --version v0.2.0`; to the version the machine ran
+just before, `./bootstrap` switches back to the kept copy without a download.
 
 There is deliberately no "update everyone" command: a client nobody touched
 keeps running its own version for as long as it likes.

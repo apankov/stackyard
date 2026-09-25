@@ -93,6 +93,67 @@ stack_env_file()     { printf '%s/stacks/%s/.env' "$(stacks_root)" "$1"; }
 STACKS_DIR_IN_CONTAINER="/etc/nginx/stacks"
 STACKS_PROFILE_DIR_IN_CONTAINER="/etc/nginx/profile-stacks"
 
+# How nginx sees the platform and the profile: layer_host_root <layer> is the
+# host directory mounted for it, layer_in_container <layer> is where that
+# layer's files are inside the container. <layer> is `platform` or `profile`.
+#
+# The mount is NOT the layer's own directory. A bind mount pins the directory
+# it was started on, not its path, and on a machine ./bootstrap installs every
+# version into a directory of its own and swaps .stackyard/current: nginx
+# mounted onto the version it started with keeps reading that version, and
+# once the version is cleaned up, reads nothing — serving no domains until it
+# is recreated. So on that layout the mount is .stackyard itself, which is
+# never replaced, and the container reaches the files through `current`, which
+# is resolved on every read.
+#
+# Anywhere else — the fixtures, whose layers are symlinks into the working
+# tree, and a vendored machine, whose copies are edited in place by git — the
+# layer's directory does stay put, and it is mounted directly.
+#
+# Decided per layer by where its link in the machine root points, not by
+# whether .stackyard exists: a vendored machine with a stale .stackyard left
+# beside it would otherwise mount a platform it does not run.
+layer_link_target() {
+  local l; l="$(readlink "$(stacks_root)/$1" 2>/dev/null || true)"
+  case "$l" in .stackyard/current/*) printf '%s' "${l#.stackyard/}" ;; esac
+}
+
+layer_host_root() {
+  if [ -n "$(layer_link_target "$1")" ]; then
+    printf '%s/.stackyard' "$(stacks_root)"
+  else
+    ( cd -P "$(stacks_root)/$1" 2>/dev/null && pwd )
+  fi
+}
+
+layer_in_container() {
+  local t; t="$(layer_link_target "$1")"
+  printf '/stackyard/%s%s' "$1" "${t:+/$t}"
+}
+
+# The variables platform/compose/nginx.yaml is rendered with. Exported by every
+# script that runs `docker compose` on the nginx file; the file refuses to
+# render without them (${…:?}), because a default would bring back exactly the
+# pinned mount this exists to avoid, silently.
+layer_env_export() {
+  Stackyard_Platform_Root="$(layer_host_root platform)"
+  Stackyard_Profile_Root="$(layer_host_root profile)"
+  Stackyard_Platform_Dir="$(layer_in_container platform)"
+  Stackyard_Profile_Dir="$(layer_in_container profile)"
+  export Stackyard_Platform_Root Stackyard_Profile_Root Stackyard_Platform_Dir Stackyard_Profile_Dir
+}
+
+# The paths nginx reaches through the layer mounts rather than mounts of their
+# own: "<path in the container> <path on the host, relative to the machine>".
+# platform/compose/nginx-entrypoint.sh links them at start; stack --check
+# asks the container whether it sees through them.
+nginx_layer_links() {
+  printf '%s\n' \
+    "/etc/nginx/snippets platform/nginx-snippets" \
+    "/etc/nginx/conf.d platform/nginx-vhosts" \
+    "$STACKS_PROFILE_DIR_IN_CONTAINER profile/stacks"
+}
+
 # A stack's directory INSIDE the nginx container. There are two roots, and the
 # include must point at the one the stack actually lives in: otherwise, after a
 # stack is copied from the profile into the machine's stacks/, nginx would keep

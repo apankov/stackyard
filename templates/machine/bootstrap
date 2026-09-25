@@ -38,10 +38,58 @@ REPO="$(val repo)"; VERSION="$(val version)"; COMMIT="$(val commit)"
 want="$COMMIT"
 [ -n "${STACKYARD_SOURCE:-}" ] && want="$( cd "$STACKYARD_SOURCE" && git rev-parse HEAD )"
 
-if [ -f "$DEST/.commit" ] && [ "$(cat "$DEST/.commit")" = "$want" ]; then
+# The layout of .stackyard/:
+#
+#   versions/<commit>/     one directory per installed version
+#   current -> versions/…  the version the machine runs
+#   previous -> versions/… the one before it, kept for a rollback
+#
+# .stackyard itself is NEVER replaced, only the `current` link inside it. This
+# is what the whole layout is for. A bind mount pins the directory it was
+# started on, not its path: when this script used to `rm -rf .stackyard` and
+# put a fresh copy in its place, a running nginx was left mounted onto deleted
+# directories and served no domains at all until it was recreated. nginx now
+# mounts .stackyard (see platform/compose/nginx.yaml) and follows `current` on
+# every reload, so an update reaches it without a restart.
+VERSIONS="$DEST/versions"
+NEW="$VERSIONS/$want"
+
+# Swapping a link must be a rename: `ln -sfn` is an unlink followed by a
+# symlink, and an nginx reload landing between the two finds no platform at
+# all. `mv` onto a link that points at a directory moves INTO that directory
+# unless told not to follow it, and the flag is spelled differently in GNU
+# (-T) and BSD (-h) mv.
+swap_link() {
+  local target="$1" link="$2"
+  rm -f "$link.tmp"
+  ln -s "$target" "$link.tmp"
+  mv -T "$link.tmp" "$link" 2>/dev/null || mv -h "$link.tmp" "$link"
+}
+
+# The flat layout this replaced: the whole repository straight in .stackyard/.
+# It is MOVED into versions/ rather than deleted. A rename keeps every inode,
+# so a container still mounted onto the old platform/ keeps seeing its files —
+# deleting it here would blind nginx exactly the way this layout exists to
+# stop.
+if [ -d "$DEST/platform" ] && [ ! -L "$DEST/current" ]; then
+  old="$(cat "$DEST/.commit" 2>/dev/null || echo unknown)"
+  echo "moving the platform already installed ($old) into .stackyard/versions/"
+  mv "$DEST" "$DEST.flat"
+  mkdir -p "$VERSIONS"
+  mv "$DEST.flat" "$VERSIONS/$old"
+  swap_link "versions/$old" "$DEST/current"
+fi
+
+if [ "$(readlink "$DEST/current" 2>/dev/null)" = "versions/$want" ] \
+   && [ "$(cat "$NEW/.commit" 2>/dev/null)" = "$want" ]; then
   echo "stackyard $VERSION ($want) is already in place"
+elif [ "$(cat "$NEW/.commit" 2>/dev/null)" = "$want" ]; then
+  # Installed earlier and still kept — typically the previous version, which
+  # is what a rollback asks for. It is not fetched a second time.
+  echo "stackyard $VERSION ($want) is already downloaded, switching to it"
 else
-  rm -rf "$DEST.tmp" "$DEST"
+  rm -rf "$DEST.tmp" "$NEW"
+  mkdir -p "$VERSIONS"
   if [ -n "${STACKYARD_SOURCE:-}" ]; then
     echo "stackyard from a local directory: $STACKYARD_SOURCE"
     [ -d "$STACKYARD_SOURCE" ] || { echo "Error: no $STACKYARD_SOURCE" >&2; exit 2; }
@@ -84,9 +132,31 @@ else
     printf '%s\n' "$got" > "$DEST.tmp/.commit"
     rm -rf "$DEST.tmp/.git"
   fi
-  mv "$DEST.tmp" "$DEST"
-  echo "stackyard $VERSION ($COMMIT) installed into .stackyard/"
+  mv "$DEST.tmp" "$NEW"
+  echo "stackyard $VERSION ($want) downloaded into .stackyard/versions/"
 fi
+
+prev="$(readlink "$DEST/current" 2>/dev/null || true)"
+if [ "$prev" != "versions/$want" ]; then
+  swap_link "versions/$want" "$DEST/current"
+  [ -n "$prev" ] && swap_link "$prev" "$DEST/previous"
+  echo "stackyard $VERSION ($want) is now current"
+fi
+
+# Everything except current and previous goes. previous stays for a rollback,
+# and because a container started before this update may still be mounted
+# onto it: mysql's conf directory, for instance, is resolved when mysql
+# starts, not when it reads it. A container that has outlived TWO updates is
+# left mounted onto a deleted version; it gets the current one on its next
+# start.
+keep_cur="$(readlink "$DEST/current" 2>/dev/null || true)"
+keep_prev="$(readlink "$DEST/previous" 2>/dev/null || true)"
+for d in "$VERSIONS"/* "$VERSIONS"/.[!.]*; do
+  [ -e "$d" ] || continue
+  case "versions/${d##*/}" in "$keep_cur"|"$keep_prev") continue ;; esac
+  rm -rf "$d"
+done
+rm -rf "$DEST.tmp"
 
 # The layers are attached as symlinks inside the machine: compose and the
 # wrappers refer to ./platform and ./profile and must not care where those came
@@ -110,8 +180,10 @@ for layer in platform profile; do
     exit 1
   fi
 done
-ln -sfn .stackyard/platform "$ROOT/platform"
-ln -sfn .stackyard/profiles "$ROOT/profile"
+# Through `current`, so the links in the machine root never change again: an
+# update is the swap of one link inside .stackyard.
+ln -sfn .stackyard/current/platform "$ROOT/platform"
+ln -sfn .stackyard/current/profiles "$ROOT/profile"
 
 # Reporting success without checking the result is not allowed: that is exactly
 # how bootstrap came to say "done" while the wrappers said the platform was
@@ -152,26 +224,26 @@ elif [ -f "$ROOT/bootstrap.local" ]; then
   echo "WARNING: $ROOT/bootstrap.local is not executable — skipped (chmod +x)" >&2
 fi
 
-# The .stackyard directory was replaced WHOLESALE (rm -rf above), and
-# platform/ is a symlink into it. A container started before that is left
-# bind-mounted onto a deleted directory: the path in docker inspect is
-# unchanged while there are zero files behind it. This surfaces not as "the
-# platform was updated" but as an error in a vhost — "open() ... failed (2: No
-# such file or directory)" — and the vhost, which is not at fault, is what gets
-# investigated.
+# nginx reads the platform through the stable .stackyard mount, so what it
+# needs after an update is a reload — `./stack sync` does one after nginx -t.
+# Except for an nginx started before that mount existed: it is still pinned to
+# the directories of its own version, and only a recreate gives it the new
+# mount. Once; after that no bootstrap needs one again.
 #
 # The containers themselves are NOT touched here: bootstrap must not restart
-# anything on a running machine without being asked. But staying silent is not
-# an option either.
-if command -v docker >/dev/null 2>&1 && [ -n "$(docker ps -q 2>/dev/null)" ]; then
+# anything on a running machine without being asked.
+if command -v docker >/dev/null 2>&1 && [ -n "$(docker ps -q --filter name='^nginx$' 2>/dev/null)" ]; then
   echo
-  echo "NOTE: containers are running and have mounted the PREVIOUS platform/."
-  echo "  Until they are recreated they see empty platform directories."
-  echo "  --force-recreate is required: the paths in the spec have not changed,"
-  echo "  only the inode behind them, and compose compares the spec — a plain"
-  echo "  'up -d' reports everything as up to date and does nothing."
-  echo "    ./dc up -d --force-recreate nginx     # upstreams must be up first"
-  echo "  To see what the running nginx sees: ./stack --check"
+  if docker inspect nginx --format '{{range .Mounts}}{{.Destination}} {{end}}' 2>/dev/null \
+       | grep -qw /stackyard/platform; then
+    echo "nginx follows .stackyard/current; it picks up this platform on its next"
+    echo "reload. To reload now, after nginx -t: ./stack sync"
+  else
+    echo "NOTE: nginx was started before the platform got a stable mount and is"
+    echo "  still pinned to the directories of the version it started on. Recreate"
+    echo "  it once — after that no ./bootstrap needs a restart:"
+    echo "    ./dc up -d --force-recreate nginx     # upstreams must be up first"
+  fi
 fi
 
 echo "Done. Next: sudo ./host-setup --check"

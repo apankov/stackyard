@@ -55,6 +55,10 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 # shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
 
+# --check renders the nginx file with `docker compose` directly, not through
+# ./dc, and the file refuses to render without these.
+layer_env_export
+
 MANIFEST="$ROOT_DIR/.env-stacks"
 
 # State directories, before any command that writes into them. On a fresh
@@ -1013,10 +1017,12 @@ verb_check() {
       fi
 
       # A mount's path and what is visible through it are different things, so
-      # comparing paths above is not enough. ./bootstrap replaces .stackyard
-      # wholesale (rm -rf), and platform/ is a symlink into it: a running
-      # container is left bind-mounted onto a DELETED directory. In docker
-      # inspect the path is unchanged, while there are zero files behind it.
+      # comparing paths above is not enough. A directory replaced on the host
+      # after the container started leaves the container bind-mounted onto a
+      # DELETED directory: in docker inspect the path is unchanged, while there
+      # are zero files behind it. That is what every ./bootstrap used to do to
+      # the platform's directories, and what it still does to an nginx started
+      # before the layer mounts existed.
       #
       # From the outside this looks like an error in a vhost — "open() ...
       # failed (2: No such file or directory)" — and the vhost, which is not at
@@ -1039,6 +1045,20 @@ verb_check() {
           empty=$((empty + 1))
         fi
       done <<< "$spec_mounts"
+      # The platform's directories are not mounts of their own: the entrypoint
+      # links them to the layer mounts, and a link can point at nothing while
+      # every mount above is fine — a `current` that went missing, or a layer
+      # that was never there. Asked of the container, like the mounts.
+      local link rel
+      while read -r link rel; do
+        [ -n "$link" ] || continue
+        host_n=$(ls -A "$ROOT_DIR/$rel/" 2>/dev/null | wc -l | tr -d ' ')
+        cont_n=$(docker exec nginx sh -c "ls -A '$link/' 2>/dev/null | wc -l" 2>/dev/null | tr -d ' \r')
+        if mount_looks_stale "$host_n" "$cont_n"; then
+          bad "the container cannot see $link (the platform's $rel) — ./dc up -d --force-recreate nginx"
+          empty=$((empty + 1))
+        fi
+      done < <(nginx_layer_links)
       [ "$empty" -eq 0 ] && ok "the container can see the contents of its mounted directories"
     fi
 
