@@ -598,27 +598,58 @@ check_requires_cycle() {
 # The upstreams referenced by the vhosts of enabled stacks.
 #
 # A stack may legitimately have no nginx/ directory (a database, a cache), and
-# a directory may legitimately contain no matches — but grep exits non-zero in
-# both cases, and stack.sh runs under `set -e`. Without guarding both, the loop
-# subshell dies on the FIRST such stack and the function returns nothing: the
-# upstream check would then verify nothing at all, silently, showing an empty
-# block instead of lines. Hence both `[ -d ]` and `|| true`: each covers a
-# different half (no directory / no matches).
+# the enabled vhosts may legitimately reference nothing — but find exits
+# non-zero on the first, grep -v on the second, and stack.sh runs under
+# `set -e`. Without guarding both, the loop subshell dies on the FIRST such
+# stack and the function returns nothing: the upstream check would then verify
+# nothing at all, silently, showing an empty block instead of lines. Hence
+# `[ -d ]` and both `|| true`: each covers a different half.
 stacks_upstreams() {
   local s dir
   while IFS= read -r s; do
     dir="$(stack_vhost_dir "$s")"
     [ -d "$dir" ] || continue
+    find "$dir" -type f -exec cat {} + 2>/dev/null || true
+  done < <(stacks_enabled 2>/dev/null) | awk '
     # fastcgi_pass alongside proxy_pass, and that is not a detail: nginx
     # resolves `fastcgi_pass php-fpm:9000` while reading the config in exactly
     # the same way. A stopped php-fpm therefore takes down EVERY site when
     # nginx is recreated, including static ones that need no PHP at all.
-    grep -rhE '^[[:space:]]*(proxy_pass|fastcgi_pass)[[:space:]]' "$dir" 2>/dev/null || true
-  done < <(stacks_enabled 2>/dev/null) \
-    | sed -E 's|^[[:space:]]*fastcgi_pass[[:space:]]+|//|' \
-    | sed -E 's|.*//([^/:;]+).*|\1|' | sed '/^$/d' \
-    | grep -vxF 'host.docker.internal' \
-    | sort -u
+    #
+    # `proxy_pass http://alf_backend` names an upstream BLOCK, not a host: the
+    # hosts are its `server` lines. Taking the proxy_pass target at face value
+    # reports a container called alf_backend as down forever and never looks
+    # at the one that actually is. A block may be declared in another file
+    # than the one using it, hence the filtering in END.
+    { line = $0; sub(/#.*/, "", line) }
+    line ~ /^[[:space:]]*upstream[[:space:]]/ {
+      n = line
+      sub(/^[[:space:]]*upstream[[:space:]]+/, "", n); sub(/[[:space:]{].*/, "", n)
+      blocks[n] = 1; in_up = 1
+      if (line ~ /}/) in_up = 0
+      next
+    }
+    in_up {
+      if (line ~ /^[[:space:]]*server[[:space:]]/) {
+        split(line, f, /[[:space:]]+/); h = (f[1] == "" ? f[3] : f[2])
+        sub(/;.*/, "", h)
+        if (h !~ /^unix:/) { sub(/:[0-9]+$/, "", h); hosts[h] = 1 }
+      }
+      if (line ~ /}/) in_up = 0
+      next
+    }
+    line ~ /^[[:space:]]*(proxy_pass|fastcgi_pass)[[:space:]]/ {
+      split(line, f, /[[:space:]]+/); t = (f[1] == "" ? f[3] : f[2])
+      sub(/;.*/, "", t); sub(/^[a-z]+:\/\//, "", t); sub(/\/.*/, "", t); sub(/:[0-9]+$/, "", t)
+      # A variable is resolved per request, not while reading the config:
+      # there is no name here to look for.
+      if (t != "" && t !~ /\$/) targets[t] = 1
+    }
+    END {
+      for (t in targets) if (!(t in blocks)) print t
+      for (h in hosts) print h
+    }
+  ' | { grep -vxF 'host.docker.internal' || true; } | sort -u
   return 0
 }
 
