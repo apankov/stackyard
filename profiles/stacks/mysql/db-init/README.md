@@ -1,7 +1,7 @@
 # Databases, users and privileges of the shared MySQL
 
 `databases.yaml` in this directory is **generated** — edits survive exactly
-until the next `./scripts/stack.sh sync`. It is not in git: it contains the
+until the next `./stack sync`. It is not in git: it contains the
 passwords of every database on the machine, so the file is server-side and
 carries `chmod 600`.
 
@@ -75,7 +75,7 @@ over live data.
 ```sh
 cp stacks/newapp/.env.example stacks/newapp/.env && chmod 600 stacks/newapp/.env
 $EDITOR stacks/newapp/.env          # database name, user, password
-./scripts/stack.sh enable newapp    # sync + up -d + mysql-initializer + vhost
+./stack enable newapp    # sync + up -d + mysql-initializer + vhost
 docker logs mysql-initializer
 ```
 
@@ -87,7 +87,7 @@ during a restore from backup, when a stack is moved. A declaration in
 ## Verify
 
 ```bash
-./scripts/stack.sh --check          # the "Shared databases" block
+./stack --check          # the "Shared databases" block
 docker logs mysql-initializer
 ```
 

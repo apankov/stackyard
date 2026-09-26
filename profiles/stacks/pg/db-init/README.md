@@ -1,7 +1,7 @@
 # Databases and users of the shared postgres
 
 `databases.yaml` in this directory is **generated** — edits survive exactly
-until the next `./scripts/stack.sh sync`. It is not in git: it contains the
+until the next `./stack sync`. It is not in git: it contains the
 passwords of every database on the machine, so the file is server-side and
 carries `chmod 600`.
 
@@ -49,7 +49,7 @@ the seed over live data.
 ## Verify
 
 ```bash
-./scripts/stack.sh --check          # the "Shared databases" block
+./stack --check          # the "Shared databases" block
 docker logs db-initializer
 ```
 
