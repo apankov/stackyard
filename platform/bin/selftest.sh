@@ -534,21 +534,21 @@ check "fastcgi_pass counts as an upstream too" \
 # block may be declared in another file than the location that uses it. Taken
 # at face value, `alf_backend` is reported as a stopped container forever and
 # `alf-backend`, the one that really is stopped, is never looked at.
-fixture papa stack.conf 'Requires=""
+fixture romeo stack.conf 'Requires=""
 Containers="no"'
-fixture papa nginx/81-papa-upstream.conf 'upstream papa_backend {
+fixture romeo nginx/81-romeo-upstream.conf 'upstream romeo_backend {
     ip_hash;
-    server papa-backend:4001 max_fails=3;
+    server romeo-backend:4001 max_fails=3;
     server unix:/run/papa.sock;
     keepalive 32;
 }'
-fixture papa nginx/82-papa.conf 'server {
-    location / { proxy_pass http://papa_backend; }
-    location /x/ { proxy_pass http://$papa_dynamic; }
+fixture romeo nginx/82-romeo.conf 'server {
+    location / { proxy_pass http://romeo_backend; }
+    location /x/ { proxy_pass http://$romeo_dynamic; }
 }'
-printf 'Enabled_Stacks="mike november papa"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="mike november romeo"\n' > "$WORK/.env-stacks"
 check "an upstream block resolves to its server hosts, not to its own name" \
-  "$(errexit_run stacks_upstreams | tr '\n' ' ')" "november-app papa-backend "
+  "$(errexit_run stacks_upstreams | tr '\n' ' ')" "november-app romeo-backend "
 printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
 check "a domain without a vhost is found under set -e" \
   "$(errexit_run check_domains_match mike | wc -l | tr -d ' ')" "1"
