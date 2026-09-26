@@ -610,7 +610,13 @@ stacks_upstreams() {
     dir="$(stack_vhost_dir "$s")"
     [ -d "$dir" ] || continue
     find "$dir" -type f -exec cat {} + 2>/dev/null || true
-  done < <(stacks_enabled 2>/dev/null) | awk '
+  done < <(stacks_enabled 2>/dev/null) \
+    | awk '{ sub(/#.*/, ""); gsub(/[{;]/, "&\n"); gsub(/}/, "\n}\n"); print }' \
+    | awk '
+    # One statement per line by now: `upstream x { server a:1; }` on a single
+    # line is valid nginx, and a pattern anchored at the start of a line would
+    # see neither the server nor the block closing.
+    #
     # fastcgi_pass alongside proxy_pass, and that is not a detail: nginx
     # resolves `fastcgi_pass php-fpm:9000` while reading the config in exactly
     # the same way. A stopped php-fpm therefore takes down EVERY site when
@@ -621,7 +627,7 @@ stacks_upstreams() {
     # reports a container called alf_backend as down forever and never looks
     # at the one that actually is. A block may be declared in another file
     # than the one using it, hence the filtering in END.
-    { line = $0; sub(/#.*/, "", line) }
+    { line = $0 }
     line ~ /^[[:space:]]*upstream[[:space:]]/ {
       n = line
       sub(/^[[:space:]]*upstream[[:space:]]+/, "", n); sub(/[[:space:]{].*/, "", n)

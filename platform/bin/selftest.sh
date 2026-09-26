@@ -546,9 +546,12 @@ fixture romeo nginx/82-romeo.conf 'server {
     location / { proxy_pass http://romeo_backend; }
     location /x/ { proxy_pass http://$romeo_dynamic; }
 }'
+# The same written on one line, which is valid nginx and invisible to a
+# pattern anchored at the start of a line.
+fixture romeo nginx/83-romeo-ws.conf 'upstream romeo_ws { server romeo-ws:5000; } server { location /ws/ { proxy_pass http://romeo_ws; } }'
 printf 'Enabled_Stacks="mike november romeo"\n' > "$WORK/.env-stacks"
 check "an upstream block resolves to its server hosts, not to its own name" \
-  "$(errexit_run stacks_upstreams | tr '\n' ' ')" "november-app romeo-backend "
+  "$(errexit_run stacks_upstreams | tr '\n' ' ')" "november-app romeo-backend romeo-ws "
 printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
 check "a domain without a vhost is found under set -e" \
   "$(errexit_run check_domains_match mike | wc -l | tr -d ' ')" "1"
