@@ -5,7 +5,7 @@ services:
     container_name: mysqld
     restart: always
     ports:
-      - "3306:3306"
+      - "3306:3306"  # public-port-debt: bound to every interface, see selftest
     networks:
       - shared_network
     volumes:

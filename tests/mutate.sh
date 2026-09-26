@@ -80,6 +80,9 @@ MUTATIONS=(
   'htpasswd: the host sets ownership, not the container@@platform/bin/htpasswd.sh@@  sh -c "$IN_CONTAINER"@@  sh -c "$IN_CONTAINER"\n\nchmod 640 "$FILE"'
   'nginx: the image is hardcoded past nginx_image@@platform/bin/htpasswd.sh@@"$(nginx_image)"@@nginx:1.30-alpine'
 
+  # --- a profile port published past the host firewall.
+  'ports: pg is published on every interface again@@profiles/stacks/pg/compose.yaml@@      - "127.0.0.1:5432:5432"@@      - "5432:5432"'
+
   # --- the platform version nginx mounts, and how bootstrap switches it.
   # Each of these brings back an nginx that is blind after ./bootstrap, and
   # nothing says so until a visitor finds every domain gone.

@@ -4,7 +4,7 @@ services:
     container_name: redisd
     restart: always
     ports:
-      - "6379:6379"
+      - "6379:6379"  # public-port-debt: bound to every interface, see selftest
     volumes:
       - ${Redis_Data_Dir:?set Redis_Data_Dir in stacks/redis/.env}:/data
     networks:

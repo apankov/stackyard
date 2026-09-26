@@ -8,7 +8,7 @@ services:
     container_name: php-fpm
     restart: always
     ports:
-      - "9000:9000"
+      - "9000:9000"  # public-port-debt: bound to every interface, see selftest
     volumes:
       # The only volume is the shared docroot directory, the same one nginx
       # gets. Nothing per-stack is mixed in here, so the spec is constant and

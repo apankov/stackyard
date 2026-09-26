@@ -5,7 +5,13 @@ services:
     container_name: postgres
     restart: always
     ports:
-      - "5432:5432"
+      # Loopback, not 0.0.0.0. Docker inserts its rules into the DOCKER chain,
+      # AHEAD of INPUT, so neither firewalld nor iptables on the host closes a
+      # published port: the instance's security group would be the only
+      # barrier left, in front of a superuser with a password. The port stays
+      # for psql from the host; applications reach the database by service
+      # name over the shared network.
+      - "127.0.0.1:5432:5432"
     networks:
       - shared_network
     volumes:
