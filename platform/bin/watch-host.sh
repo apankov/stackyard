@@ -38,6 +38,8 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 
 # shellcheck source=platform/lib/lib-env.sh
 . "$LIB_DIR/lib-env.sh"
+# shellcheck source=platform/lib/lib-stacks.sh
+. "$LIB_DIR/lib-stacks.sh"
 
 # Overridable only for tests: the production path is /var/lib/devbox-notify and
 # the units do not override it. Without this, deduplication and recovery could
@@ -151,6 +153,31 @@ notify --key "docker:daemon" --resolve --title "the docker daemon is responding 
 NEW_RESTARTS=$(mktemp)
 trap 'rm -f "$NEW_RESTARTS"' EXIT
 
+# Which containers are this machine's business.
+#
+# The project's own containers always are: a stopped one is either an incident
+# or a leftover of a disabled stack, and stack.sh --check reports the latter as
+# a finding too. A FOREIGN container — started by someone else, merely sitting
+# in the same docker network — matters only while an enabled stack's vhost
+# points at it: then its death is a dead site. Otherwise it is nobody's alert
+# here. Watching every container on the host meant that disabling the stack
+# that proxied to one did not stop the alerts about it, and a channel that
+# keeps reporting what nobody here can act on stops being read.
+PROJECT=$(compose_project)
+UPSTREAMS=$(stacks_upstreams)
+
+# is_referenced <container> — is it reachable under a name some enabled vhost
+# uses? nginx resolves the container name and its network aliases alike, and a
+# container from another compose project is often addressed by its service
+# name rather than its own.
+is_referenced() {
+  local n
+  for n in $1 $(docker inspect -f '{{range .NetworkSettings.Networks}}{{range .Aliases}}{{.}} {{end}}{{end}}' "$1" 2>/dev/null); do
+    list_has "$UPSTREAMS" "$n" && return 0
+  done
+  return 1
+}
+
 while IFS= read -r name; do
   [ -n "$name" ] || continue
 
@@ -158,11 +185,24 @@ while IFS= read -r name; do
     [ "$name" = "$skip" ] && continue 2
   done
 
-  read -r state health restarts policy < <(
-    docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}} {{.RestartCount}} {{.HostConfig.RestartPolicy.Name}}' \
+  # The project label goes last and is never empty: `read` splits on runs of
+  # spaces, so an empty field would shift everything after it.
+  read -r state health restarts policy project < <(
+    docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}} {{.RestartCount}} {{.HostConfig.RestartPolicy.Name}} {{with index .Config.Labels "com.docker.compose.project"}}{{.}}{{else}}-{{end}}' \
       "$name" 2>/dev/null
   ) || continue
   [ -n "${state:-}" ] || continue
+
+  if [ "$project" != "$PROJECT" ] && ! is_referenced "$name"; then
+    printf '  [--]   %-22s %s (foreign, no enabled vhost uses it)\n' "$name" "$state"
+    # An alert raised while it still mattered is closed rather than left
+    # hanging: otherwise the last word in the channel is "not running", about
+    # something that is no longer watched at all.
+    for k in container container-loop container-health; do
+      notify --key "$k:$name" --resolve --title "container $name is no longer watched: no enabled stack uses it"
+    done
+    continue
+  fi
 
   echo "$name $restarts" >> "$NEW_RESTARTS"
 
