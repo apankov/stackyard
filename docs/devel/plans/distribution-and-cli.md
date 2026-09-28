@@ -1,7 +1,8 @@
 # Distribution: an installer, an operator CLI, and fewer remembered steps
 
-Written 2026-09-21, from a discussion that ended without code. Nothing here is
-implemented. The question was: could stackyard be installed the way nvm is —
+Written 2026-09-21, from a discussion that ended without code; status updated
+2026-09-28. Section 3 is implemented (v0.27.0), section 4 was solved another
+way (v0.24.0), section 2 is still open. The question was: could stackyard be installed the way nvm is —
 `curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.18.0/install.sh | bash` —
 and if so, for which part.
 
@@ -66,6 +67,10 @@ machine's repository plus `./bootstrap`.
 
 ## 3. "Fewer steps to remember" — not a delivery problem
 
+**Done in v0.27.0** as `./stack init [<stack>...]`. It follows `Requires`, so
+`./stack init site` before `./stack enable site` also sets up the database it
+needs, and it never overwrites an existing file.
+
 The steps that actually irritate during a deployment are on the server:
 
 ```sh
@@ -86,6 +91,16 @@ secrets, and `stack list` reports `missing: stacks/x/.env`. What is missing is
 the step that creates them and says what to fill.
 
 ## 4. A third remembered step, found while migrating a machine
+
+**Solved in v0.24.0 (`265ea4c`), and not the way sketched below.** Rather than
+teaching `sync` to repair a stale mount, the mount no longer goes stale: every
+version lives in `.stackyard/versions/<commit>/`, `bootstrap` switches
+`.stackyard/current` with a rename and keeps `previous`, and nginx mounts
+`.stackyard` itself and links its directories through `current` at start
+(`layer_host_root` in `lib-stacks.sh`, `platform/compose/nginx-entrypoint.sh`).
+An update now needs a reload, not a recreate. The one recreate left is a
+machine's first move from the flat layout to `versions/`. The sketch is kept
+for the record of why:
 
 `./bootstrap` replaces `.stackyard/` wholesale, and nginx bind-mounts
 directories through the `platform/` symlink. The container is then left holding
@@ -113,24 +128,17 @@ from the manifest as much as a missing include is. The shape:
 
 ## Order of work
 
-1. **`./stack init`** — cheapest, removes the most manual work (roughly 40
-   lines in `stack.sh` plus a selftest guard). It pays for itself on a
-   migration, where the profile stacks' `.env` files are currently created by
-   hand from a list in the runbook.
-2. **Recreation inside `sync`** (section 4) — the same class, and it has now
-   cost real downtime risk twice.
+1. ~~**`./stack init`**~~ — done, v0.27.0.
+2. ~~**Recreation inside `sync`**~~ — made unnecessary by the versioned layout,
+   v0.24.0 (section 4).
 3. **`install.sh` + the `stackyard` CLI** — gives "distributed like everything
-   else" without touching how machines receive the platform.
-4. **`bootstrap`** — do not touch.
+   else" without touching how machines receive the platform. Next.
+4. **`bootstrap`** — do not touch its contract. (Its layout did change in
+   v0.24.0; what it records and how a machine pins it did not.)
 
-## Where things stood when this was written
+## Where things stand (2026-09-28)
 
-- stackyard `master` at v0.18.0 (`48b94df`), **not pushed**. Contains the full
-  Russian-to-English translation of the repository and the `bootstrap.local`
-  hook.
-- The machine repository being migrated is on branch `stackyard-migration`
-  (a worktree under `.worktrees/`), pinned to v0.18.0, **not pushed**. Its
-  server-side steps are in that repository's
-  `docs/devel/plans/stackyard-migration.md`.
-- Because the machine's lock already points at `48b94df`, stackyard has to be
-  pushed (and tagged) before that machine can `./bootstrap`.
+- stackyard `master` at v0.27.0. The first machine was migrated on 2026-09-27
+  and receives updates through `bin/pin.sh`; the blockers listed here on
+  2026-09-21 (stackyard not pushed, the machine's lock pointing at an
+  unpublished commit) are gone.

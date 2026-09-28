@@ -71,12 +71,13 @@ instances.
 
 ## Queued work, in the order I would take it
 
-1. **`./stack init`** — create the missing `.env` files from their examples,
-   chmod them, print what still needs filling. Removes the largest remaining
-   pile of manual steps, and it is the cheapest of these.
-2. **`sync` recreates nginx when a mount has gone stale** — class 8 above, with
-   the upstream gate: recreate only when the upstreams are up, otherwise refuse
-   and name the one that is down. Design sketch in `distribution-and-cli.md`.
+1. ~~**`./stack init`**~~ — done in v0.27.0: creates the missing `.env` files
+   from their examples with mode 600 and exits non-zero while anything is
+   still CHANGE_ME.
+2. ~~**`sync` recreates nginx when a mount has gone stale**~~ — class 8 above.
+   Made unnecessary in v0.24.0: the versioned `.stackyard/` layout keeps the
+   mount alive across an update, so there is nothing left to recreate. See
+   section 4 of `distribution-and-cli.md`.
 3. **`install.sh` + a `stackyard` CLI** for the operator's tools. Same file.
 4. **`apiVersion` in `stack.conf`** — idea 3 of `../architecture/k8s-assessment.md`.
    The platform's code is versioned; the declaration format is not, so an
