@@ -91,7 +91,10 @@ replaced on the next update.
 by line and expands `${VAR}` like compose does. Never `source` a `.env` file.
 
 **Workspace tools (`bin/`).** These run on the operator's laptop, not on a
-machine: `new-machine.sh`, `pin.sh` (rewrites one machine's `stackyard.lock`;
+machine, from a checkout or through the operator CLI (`bin/stackyard`, installed
+by `install.sh` into `~/.stackyard/versions/<commit>/`, a `git archive` with no
+`.git`; git questions go through `bin/lib-workspace.sh` to the mirror
+`~/.stackyard/repo.git`): `new-machine.sh`, `pin.sh` (rewrites one machine's `stackyard.lock`;
 there is deliberately no "update everyone"), `fleet.sh`, `audit-isolation.sh`
 (looks for cross-machine leaks of secrets, buckets, networks and ACME keys) and
 `vendor.sh` (emergency self-contained copy, checked by
@@ -112,7 +115,10 @@ there is deliberately no "update everyone"), `fleet.sh`, `audit-isolation.sh`
   Keep that density and voice when you edit.
 - Releases: each `feat`/`fix` commit that changes the platform bumps
   `platform/VERSION` (semver) in the same commit, and that commit is tagged
-  `vX.Y.Z`. Docs-only commits don't bump it. `profiles/VERSION` is versioned
+  `vX.Y.Z`. The same commit sets `STACKYARD_RELEASE` in `install.sh` (selftest
+  enforces it) and the tag in the install URLs in `install.sh`'s header and in
+  README. Docs-only commits don't
+  bump it. `profiles/VERSION` is versioned
   separately.
 - Open work is tracked in `docs/devel/plans/extraction-backlog.md` and
   `docs/devel/plans/after-first-migration.md`.

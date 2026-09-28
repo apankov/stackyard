@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+#
+# The operator CLI: the workspace tools behind one command, and the versions
+# of itself installed side by side. Installed by install.sh as
+# ~/.local/bin/stackyard -> ~/.stackyard/current/bin/stackyard; it also runs
+# from a checkout, as ./bin/stackyard.
+#
+#   stackyard new <path> [--repo <url>]      a new machine repository
+#   stackyard pin <machine> [--version <v>]  rewrite one machine's stackyard.lock
+#   stackyard fleet [<machine>...]           which version each machine runs
+#   stackyard audit [<machine>...]           cross-machine leaks
+#   stackyard vendor ...                     an emergency self-contained copy
+#   stackyard version                        which version this is, and from where
+#   stackyard versions                       the installed versions
+#   stackyard install [<v>|latest]           install a version and make it current
+#
+# The tools act across machines, so they run from the version the operator
+# chose, not from each machine's pin. What a machine receives is still decided
+# by its lock: `new` and `pin` write a commit into it, and ./bootstrap on the
+# machine fetches exactly that.
+
+set -euo pipefail
+
+# Installed, this file is reached through ~/.local/bin/stackyard, a link to the
+# FILE: `cd -P` resolves directories only, and would make ~/.local the root.
+# readlink one hop at a time, because -f is GNU-only.
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  t="$(readlink "$self")"
+  case "$t" in /*) self="$t" ;; *) self="$(dirname "$self")/$t" ;; esac
+done
+ROOT="$( cd -P "$( dirname "$self" )/.." && pwd )"
+# shellcheck source=bin/lib-workspace.sh
+. "$ROOT/bin/lib-workspace.sh"
+
+usage() { sed -n '8,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
+die() { echo "Error: $*" >&2; exit 1; }
+
+# The version store this copy lives in: two levels up from versions/<commit>/.
+store() {
+  ws_installed || die "this is a checkout ($ROOT), not an installed version — install with ./install.sh"
+  ( cd "$ROOT/../.." && pwd )
+}
+
+cmd="${1-}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  new)    exec "$ROOT/bin/new-machine.sh" "$@" ;;
+  pin)    exec "$ROOT/bin/pin.sh" "$@" ;;
+  fleet)  exec "$ROOT/bin/fleet.sh" "$@" ;;
+  audit)  exec "$ROOT/bin/audit-isolation.sh" "$@" ;;
+  vendor) exec "$ROOT/bin/vendor.sh" "$@" ;;
+  version)
+    if ws_installed; then
+      echo "stackyard $(cat "$ROOT/.version") ($(cat "$ROOT/.commit")), platform $(cat "$ROOT/platform/VERSION")"
+      echo "  installed at $ROOT"
+    else
+      echo "stackyard v$(cat "$ROOT/platform/VERSION") ($(ws_commit)) from the checkout $ROOT"
+    fi
+    ;;
+  versions)
+    s="$(store)"
+    cur="$(readlink "$s/current" 2>/dev/null || true)"
+    for d in "$s"/versions/*/; do
+      [ -f "$d/.commit" ] || continue
+      d="${d%/}"
+      mark=" "; [ "versions/${d##*/}" = "$cur" ] && mark="*"
+      printf '%s %-10s %s\n' "$mark" "$(cat "$d/.version")" "${d##*/}"
+    done
+    ;;
+  install)
+    [ $# -le 1 ] || usage
+    # This version's install.sh, into the store it lives in. The PATH was
+    # settled by the first install; a version switch has no business in a
+    # shell's rc file.
+    STACKYARD_DIR="$(store)" STACKYARD_VERSION="${1:-latest}" \
+      exec bash "$ROOT/install.sh" --no-modify-path
+    ;;
+  -h|--help|help) usage 0 ;;
+  '') usage ;;
+  *) die "unknown command: '$cmd' (new|pin|fleet|audit|vendor|version|versions|install)" ;;
+esac

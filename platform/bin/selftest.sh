@@ -1680,6 +1680,80 @@ check "flat layout: the machine's platform link is moved onto current" \
   "$(readlink "$M2/platform")" ".stackyard/current/platform"
 rm -rf "$BS"
 
+echo "== the operator CLI: install.sh and stackyard"
+
+# The release this install.sh installs by default is written into it, so a
+# URL at a tag installs that tag. A release that forgets to bump it hands out
+# the previous one from a URL that names the new one.
+check "install.sh installs the release it belongs to" \
+  "$(grep -E '^STACKYARD_RELEASE=' "$REPO_DIR/install.sh" | cut -d= -f2)" "v$(cat "$REPO_DIR/platform/VERSION")"
+
+# A repository of THIS working tree, uncommitted edits included — the subject
+# is the code as it stands, and a mutation run edits files it never commits.
+# Three releases: one from before the CLI existed, and two with it, the second
+# ahead of the first, so the mirror's HEAD is never the installed version.
+CL="$WORK/cli"; SRC="$CL/src"
+mkdir -p "$SRC"
+( cd "$REPO_DIR" && git ls-files -z --cached --others --exclude-standard | xargs -0 tar -cf - 2>/dev/null ) \
+  | tar -xf - -C "$SRC" 2>/dev/null
+cl_commit() {
+  ( cd "$SRC" && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm "$1" \
+      && git tag "$1" && git rev-parse HEAD )
+}
+( cd "$SRC" && git init -q ) >/dev/null 2>&1
+mv "$SRC/bin/stackyard" "$CL/stackyard.keep"
+cl_commit v0.0.1 >/dev/null
+mv "$CL/stackyard.keep" "$SRC/bin/stackyard"
+c1="$(cl_commit v9.9.9)"
+printf 'two\n' >> "$SRC/README.md"
+c2="$(cl_commit v9.9.10)"
+
+H="$CL/home"; mkdir -p "$H"
+# A PATH without the bin directory, and a zsh user: the case in which the rc
+# file is edited.
+cl_install() {
+  ( HOME="$H" SHELL=/bin/zsh PATH="/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v git)")" \
+    STACKYARD_REPO="$SRC" bash "$REPO_DIR/install.sh" "$@" 2>&1 )
+}
+sy() { ( HOME="$H" "$H/.local/bin/stackyard" "$@" 2>&1 ); }
+
+out="$(STACKYARD_VERSION=v9.9.9 cl_install)"
+check "install prints the commit the tag resolved to" \
+  "$(printf '%s\n' "$out" | grep -c "stackyard v9.9.9 -> $c1")" "1"
+check "install: current is the installed commit" "$(readlink "$H/.stackyard/current")" "versions/$c1"
+check "install: the command is linked into ~/.local/bin" \
+  "$(readlink "$H/.local/bin/stackyard")" "$H/.stackyard/current/bin/stackyard"
+check "install: the version reports itself" "$(sy version | head -n 1 | cut -d' ' -f1-3)" "stackyard v9.9.9 ($c1),"
+check "install: PATH is added to the rc file" "$(grep -c '# stackyard' "$H/.zshrc" 2>/dev/null)" "1"
+out="$(STACKYARD_VERSION=v9.9.9 cl_install)"; rc=$?
+check "install again: succeeds" "$rc" "0"
+check "install again: the version is not fetched twice" "$(printf '%s\n' "$out" | grep -c 'already installed')" "1"
+check "install again: PATH is not added a second time" "$(grep -c '# stackyard' "$H/.zshrc")" "1"
+
+# The contract the lock depends on: a machine created by the CLI is pinned to
+# the COMMIT of the installed version, not to a tag and not to wherever the
+# mirror's HEAD happens to be.
+sy new "$CL/m" >/dev/null
+check "new: the lock records the installed commit" "$(grep '^commit=' "$CL/m/stackyard.lock")" "commit=$c1"
+check "fleet: runs from an installed version, which has no .git" \
+  "$(sy fleet "$CL/m" | awk '$1 == "m" { print $3 }')" "no"
+sy pin "$CL/m" --version v9.9.10 >/dev/null
+check "pin --version: the lock records that release's commit" "$(grep '^commit=' "$CL/m/stackyard.lock")" "commit=$c2"
+
+out="$(sy install v0.0.1)"
+check "install refuses a release without the CLI" "$(printf '%s\n' "$out" | grep -c 'predates the operator CLI')" "1"
+check "and current stays where it was" "$(readlink "$H/.stackyard/current")" "versions/$c1"
+sy install latest >/dev/null
+check "install latest: the highest tag becomes current" "$(readlink "$H/.stackyard/current")" "versions/$c2"
+check "versions: both installed, the current one marked" \
+  "$(sy versions | awk '{ print ($1 == "*") ? "*" $2 : $1 }' | sort | tr '\n' ' ')" "*v9.9.10 v9.9.9 "
+check "a version switch leaves the rc file alone" "$(grep -c '# stackyard' "$H/.zshrc")" "1"
+
+rm -rf "$H"; mkdir -p "$H"
+STACKYARD_VERSION=v9.9.9 cl_install --no-modify-path >/dev/null
+check "--no-modify-path leaves the rc file alone" "$([ -e "$H/.zshrc" ] && echo touched || echo untouched)" "untouched"
+rm -rf "$CL"
+
 echo "== portability: time, checksums, the watchdog"
 
 # An S3 timestamp must parse to THE SAME value regardless of the timezone of

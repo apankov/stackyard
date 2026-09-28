@@ -195,6 +195,44 @@ An honest caveat: domains are public anyway through Certificate Transparency at
 issue time. What is achieved is "client A's machine holds no inventory of
 client B", not "domains are secret".
 
+## The operator's tools
+
+The tools that act across machines (`new-machine`, `pin`, `fleet`,
+`audit-isolation`, `vendor`) run on the operator's laptop. They work from a
+checkout as `./bin/<tool>.sh`, or installed as one command:
+
+```sh
+curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.28.0/install.sh | bash
+```
+
+A pipe into bash cannot be read before it runs. To read it first:
+
+```sh
+curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.28.0/install.sh
+less install.sh && bash install.sh
+```
+
+The script installs the release its URL names, prints the commit that tag
+resolved to, and leaves the same layout a machine's `.stackyard/` has:
+`~/.stackyard/versions/<commit>/` side by side, `current` pointing at one, and
+a mirror of the repository (`repo.git`) for the history `pin` and `fleet` read.
+`~/.local/bin/stackyard` links to `current`. It needs git and tar, and
+`STACKYARD_VERSION`, `STACKYARD_DIR` and `--no-modify-path` change its
+defaults.
+
+```sh
+stackyard new ~/dev/machines/client-acme    # = ./bin/new-machine.sh
+stackyard pin ~/dev/machines/client-acme    # = ./bin/pin.sh
+stackyard fleet ~/dev/machines/*            # = ./bin/fleet.sh
+stackyard audit ~/dev/machines/*            # = ./bin/audit-isolation.sh
+stackyard version                           # which one this is, and its commit
+stackyard install v0.29.0                   # or `latest`; the old one stays installed
+```
+
+`new` and `pin` write a **commit** into a lock (the running version's, or the
+one `--version` names), never the tag. A machine is never touched by this installer: it gets the platform
+from its own lock through `./bootstrap`.
+
 ## How a machine gets the platform
 
 The platform is **not** in the machine's git. The machine's repository holds

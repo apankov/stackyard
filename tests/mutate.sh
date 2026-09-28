@@ -132,6 +132,14 @@ MUTATIONS=(
   # file created readable by everyone on the host.
   'init: the example looked up by the machine path@@platform/bin/stack.sh@@    ex="$(stack_dir "$s")/.env.example"@@    ex="$ROOT_DIR/stacks/$s/.env.example"'
   'init: the copy keeps the example'"'"'s mode@@platform/bin/stack.sh@@  ( umask 077 \&\& cp "$1" "$2" )@@  cp "$1" "$2"'
+
+  # --- the operator CLI. The first one is the contract the whole installer
+  # rests on: a lock must get the installed commit, and the mirror's HEAD is a
+  # plausible-looking wrong answer.
+  'cli: the lock is written from the mirror'"'"'s HEAD@@bin/lib-workspace.sh@@  if ws_installed; then\n    cat "$ROOT/.commit"@@  if false; then\n    cat "$ROOT/.commit"'
+  'cli: the link in ~/.local/bin is not followed@@bin/stackyard@@while [ -L "$self" ]; do@@while false; do'
+  'install: a release without the CLI becomes current@@install.sh@@mgit cat-file -e "$COMMIT:bin/stackyard" 2>/dev/null@@true'
+  'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 
 pass=0; miss=0
