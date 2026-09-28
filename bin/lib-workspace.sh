@@ -4,9 +4,9 @@
 #
 # The tools run from one of two places. From a checkout of stackyard, ROOT is a
 # git working tree and every question goes to it. From a version the operator
-# CLI installed (~/.stackyard/versions/<commit>/), ROOT is a `git archive`
-# with no .git at all: the history pin shows and fleet counts lives in the
-# mirror next to the versions, ~/.stackyard/repo.git.
+# CLI installed (~/.local/share/stackyard/versions/<commit>/), ROOT is a
+# `git archive` with no .git at all: the history pin shows and fleet counts
+# lives in the mirror next to the versions, ~/.local/share/stackyard/repo.git.
 
 # The commit a tree was installed from. Only an installed version has it.
 ws_installed() { [ -f "$ROOT/.commit" ]; }
@@ -33,18 +33,41 @@ ws_commit() {
   fi
 }
 
-# The fleet: the machines fleet and audit look at when given none, one path
-# per line. Read here once, because fleet and audit each had a copy of the
-# loop and a fix to one would not have reached the other.
+# The store: installed versions, the mirror and the fleet list, in one
+# directory and nowhere else in the home. An installed version lives two levels
+# down in it; a checkout finds it where install.sh puts it by default, so the
+# fleet list is the same one whichever copy of the tools is running.
+ws_store() {
+  if ws_installed; then
+    ( cd "$ROOT/../.." && pwd )
+  else
+    printf '%s' "${STACKYARD_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/stackyard}"
+  fi
+}
+
+# The fleet: the machines fleet and audit look at when given none. Read here
+# once, because fleet and audit each had a copy of the loop and a fix to one
+# would not have reached the other.
 #
 # The tilde is expanded by hand: people write it in the file, and the shell
 # does not expand it inside a variable — the path simply is not found, and the
 # fleet silently looks empty.
-ws_fleet_file() { printf '%s/.stackyard-fleet' "$HOME"; }
+ws_fleet_file() { printf '%s/fleet' "$(ws_store)"; }
+
+# The list lived in ~/.stackyard-fleet before the store existed. It is still
+# read, with a note, rather than the fleet turning up empty after an update.
+ws_fleet_source() {
+  local f; f="$(ws_fleet_file)"
+  if [ ! -f "$f" ] && [ -f "$HOME/.stackyard-fleet" ]; then
+    echo "Note: reading ~/.stackyard-fleet; move it into the store: mv ~/.stackyard-fleet $f" >&2
+    f="$HOME/.stackyard-fleet"
+  fi
+  printf '%s' "$f"
+}
 
 ws_fleet_machines() {
   local f l
-  f="$(ws_fleet_file)"
+  f="$(ws_fleet_source)"
   [ -f "$f" ] || return 1
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in ''|\#*) continue ;; esac

@@ -2,11 +2,11 @@
 #
 # Install the stackyard operator CLI on a laptop.
 #
-#   curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.28.0/install.sh | bash
+#   curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.29.0/install.sh | bash
 #
 # or, to read it before it runs (a pipe into bash cannot be inspected first):
 #
-#   curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.28.0/install.sh
+#   curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.29.0/install.sh
 #   less install.sh && bash install.sh
 #
 # This is for the operator's tools only. A machine never runs it: a machine
@@ -15,14 +15,23 @@
 #
 # What it leaves behind:
 #
-#   ~/.stackyard/repo.git            a mirror of stackyard: tags, and the history
-#                                    pin shows and fleet counts
-#   ~/.stackyard/versions/<commit>/  each installed version, side by side
-#   ~/.stackyard/current             -> the version `stackyard` runs
-#   ~/.local/bin/stackyard           -> current/bin/stackyard
+#   ~/.local/share/stackyard/                the store, and nothing outside it but
+#                                            the link below:
+#     repo.git                               a mirror of stackyard: tags, and the
+#                                            history pin shows and fleet counts
+#     versions/<commit>/                     each installed version, side by side
+#     current                                -> the version `stackyard` runs
+#     fleet                                  your machines (stackyard fleet add),
+#                                            the one file in here written by hand
+#   ~/.local/bin/stackyard                   -> current/bin/stackyard
 #
-# The same layout as a machine's .stackyard/, on purpose: one release tree,
-# whichever end it is used from.
+# Under $XDG_DATA_HOME when that is set. Nothing in the home directory itself:
+# the store is data, and its versions/ keeps the layout of a machine's
+# .stackyard/ on purpose — one release tree, whichever end it is used from.
+#
+# Nothing here deletes the store or anything in it but a version directory
+# being replaced: the fleet file sits among files that can be refetched, and
+# is the one that cannot.
 #
 # Settings: STACKYARD_VERSION (a tag, a commit, or `latest`), STACKYARD_DIR,
 # STACKYARD_REPO, STACKYARD_BIN_DIR; --no-modify-path. Needs git and tar only.
@@ -33,10 +42,10 @@ set -euo pipefail
 # The release this script belongs to. Fetched by its tag, the script installs
 # that tag and nothing newer. selftest holds this equal to platform/VERSION, so
 # the release commit bumps both.
-STACKYARD_RELEASE=v0.28.0
+STACKYARD_RELEASE=v0.29.0
 
 VERSION="${STACKYARD_VERSION:-$STACKYARD_RELEASE}"
-DIR="${STACKYARD_DIR:-$HOME/.stackyard}"
+DIR="${STACKYARD_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/stackyard}"
 REPO="${STACKYARD_REPO:-https://github.com/apankov/stackyard.git}"
 BIN_DIR="${STACKYARD_BIN_DIR:-$HOME/.local/bin}"
 MODIFY_PATH=1

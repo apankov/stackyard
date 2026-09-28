@@ -7,7 +7,7 @@
 # machine.
 #
 #   ./bin/fleet.sh ~/dev/machines/*        # by path
-#   ./bin/fleet.sh                         # from ~/.stackyard-fleet, one path per line
+#   ./bin/fleet.sh                         # from the fleet list in the store
 
 set -uo pipefail
 

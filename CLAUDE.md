@@ -92,9 +92,10 @@ by line and expands `${VAR}` like compose does. Never `source` a `.env` file.
 
 **Workspace tools (`bin/`).** These run on the operator's laptop, not on a
 machine, from a checkout or through the operator CLI (`bin/stackyard`, installed
-by `install.sh` into `~/.stackyard/versions/<commit>/`, a `git archive` with no
-`.git`; git questions go through `bin/lib-workspace.sh` to the mirror
-`~/.stackyard/repo.git`): `new-machine.sh`, `pin.sh` (rewrites one machine's `stackyard.lock`;
+by `install.sh` into `~/.local/share/stackyard/versions/<commit>/`, a
+`git archive` with no `.git`; git questions go through `bin/lib-workspace.sh`
+to the mirror `repo.git` beside it, and the fleet list is the store's `fleet`
+file — nothing of stackyard sits in `$HOME` itself): `new-machine.sh`, `pin.sh` (rewrites one machine's `stackyard.lock`;
 there is deliberately no "update everyone"), `fleet.sh`, `audit-isolation.sh`
 (looks for cross-machine leaks of secrets, buckets, networks and ACME keys) and
 `vendor.sh` (emergency self-contained copy, checked by

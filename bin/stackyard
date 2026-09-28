@@ -2,8 +2,8 @@
 #
 # The operator CLI: the workspace tools behind one command, and the versions
 # of itself installed side by side. Installed by install.sh as
-# ~/.local/bin/stackyard -> ~/.stackyard/current/bin/stackyard; it also runs
-# from a checkout, as ./bin/stackyard.
+# ~/.local/bin/stackyard -> ~/.local/share/stackyard/current/bin/stackyard; it
+# also runs from a checkout, as ./bin/stackyard.
 #
 #   stackyard new <path> [--repo <url>]      a new machine repository
 #   stackyard pin <machine> [--version <v>]  rewrite one machine's stackyard.lock
@@ -36,12 +36,6 @@ ROOT="$( cd -P "$( dirname "$self" )/.." && pwd )"
 usage() { sed -n '8,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
 die() { echo "Error: $*" >&2; exit 1; }
 
-# The version store this copy lives in: two levels up from versions/<commit>/.
-store() {
-  ws_installed || die "this is a checkout ($ROOT), not an installed version — install with ./install.sh"
-  ( cd "$ROOT/../.." && pwd )
-}
-
 cmd="${1-}"
 [ $# -gt 0 ] && shift
 case "$cmd" in
@@ -59,7 +53,7 @@ case "$cmd" in
     fi
     ;;
   versions)
-    s="$(store)"
+    s="$(ws_store)"
     cur="$(readlink "$s/current" 2>/dev/null || true)"
     for d in "$s"/versions/*/; do
       [ -f "$d/.commit" ] || continue
@@ -70,10 +64,11 @@ case "$cmd" in
     ;;
   install)
     [ $# -le 1 ] || usage
-    # This version's install.sh, into the store it lives in. The PATH was
+    # This version's install.sh, into the store it lives in — or, from a
+    # checkout, the one the curl line would have made. The PATH was
     # settled by the first install; a version switch has no business in a
     # shell's rc file.
-    STACKYARD_DIR="$(store)" STACKYARD_VERSION="${1:-latest}" \
+    STACKYARD_DIR="$(ws_store)" STACKYARD_VERSION="${1:-latest}" \
       exec bash "$ROOT/install.sh" --no-modify-path
     ;;
   -h|--help|help) usage 0 ;;

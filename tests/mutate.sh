@@ -139,6 +139,8 @@ MUTATIONS=(
   'cli: the lock is written from the mirror'"'"'s HEAD@@bin/lib-workspace.sh@@  if ws_installed; then\n    cat "$ROOT/.commit"@@  if false; then\n    cat "$ROOT/.commit"'
   'cli: the link in ~/.local/bin is not followed@@bin/stackyard@@while [ -L "$self" ]; do@@while false; do'
   'install: a release without the CLI becomes current@@install.sh@@mgit cat-file -e "$COMMIT:bin/stackyard" 2>/dev/null@@true'
+  'store: the fleet list read from the home again@@bin/lib-workspace.sh@@ws_fleet_file() { printf '"'"'%s/fleet'"'"' "$(ws_store)"; }@@ws_fleet_file() { printf '"'"'%s/.stackyard-fleet'"'"' "$HOME"; }'
+  'store: installed back into the home directory@@install.sh@@DIR="${STACKYARD_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/stackyard}"@@DIR="${STACKYARD_DIR:-$HOME/.stackyard}"'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

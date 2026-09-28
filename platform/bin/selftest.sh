@@ -1712,17 +1712,20 @@ H="$CL/home"; mkdir -p "$H"
 # A PATH without the bin directory, and a zsh user: the case in which the rc
 # file is edited.
 cl_install() {
-  ( HOME="$H" SHELL=/bin/zsh PATH="/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v git)")" \
+  ( unset XDG_DATA_HOME; HOME="$H" SHELL=/bin/zsh PATH="/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v git)")" \
     STACKYARD_REPO="$SRC" bash "$REPO_DIR/install.sh" "$@" 2>&1 )
 }
-sy() { ( HOME="$H" "$H/.local/bin/stackyard" "$@" 2>&1 ); }
+sy() { ( unset XDG_DATA_HOME; HOME="$H" "$H/.local/bin/stackyard" "$@" 2>&1 ); }
+ST="$H/.local/share/stackyard"
 
 out="$(STACKYARD_VERSION=v9.9.9 cl_install)"
 check "install prints the commit the tag resolved to" \
   "$(printf '%s\n' "$out" | grep -c "stackyard v9.9.9 -> $c1")" "1"
-check "install: current is the installed commit" "$(readlink "$H/.stackyard/current")" "versions/$c1"
+check "install: current is the installed commit" "$(readlink "$ST/current")" "versions/$c1"
+# One store and one link, and nothing in the home directory itself.
+check "install: nothing but .local and the rc file in the home" "$(ls -A "$H" | tr '\n' ' ')" ".local .zshrc "
 check "install: the command is linked into ~/.local/bin" \
-  "$(readlink "$H/.local/bin/stackyard")" "$H/.stackyard/current/bin/stackyard"
+  "$(readlink "$H/.local/bin/stackyard")" "$ST/current/bin/stackyard"
 check "install: the version reports itself" "$(sy version | head -n 1 | cut -d' ' -f1-3)" "stackyard v9.9.9 ($c1),"
 check "install: PATH is added to the rc file" "$(grep -c '# stackyard' "$H/.zshrc" 2>/dev/null)" "1"
 out="$(STACKYARD_VERSION=v9.9.9 cl_install)"; rc=$?
@@ -1737,14 +1740,23 @@ sy new "$CL/m" >/dev/null
 check "new: the lock records the installed commit" "$(grep '^commit=' "$CL/m/stackyard.lock")" "commit=$c1"
 check "fleet: runs from an installed version, which has no .git" \
   "$(sy fleet "$CL/m" | awk '$1 == "m" { print $3 }')" "no"
+printf '%s\n' "$CL/m" > "$ST/fleet"
+check "fleet: with no arguments, reads the list in the store" \
+  "$(sy fleet | awk '$1 == "m" { print $3 }')" "no"
+# The list's old home is read rather than the fleet turning up empty.
+mv "$ST/fleet" "$H/.stackyard-fleet"
+out="$(sy fleet)"
+check "fleet: ~/.stackyard-fleet is still read" "$(printf '%s\n' "$out" | awk '$1 == "m" { print $3 }')" "no"
+check "and the note says where it belongs" "$(printf '%s\n' "$out" | grep -c "mv ~/.stackyard-fleet .*/.local/share/stackyard/fleet$")" "1"
+rm -f "$H/.stackyard-fleet"
 sy pin "$CL/m" --version v9.9.10 >/dev/null
 check "pin --version: the lock records that release's commit" "$(grep '^commit=' "$CL/m/stackyard.lock")" "commit=$c2"
 
 out="$(sy install v0.0.1)"
 check "install refuses a release without the CLI" "$(printf '%s\n' "$out" | grep -c 'predates the operator CLI')" "1"
-check "and current stays where it was" "$(readlink "$H/.stackyard/current")" "versions/$c1"
+check "and current stays where it was" "$(readlink "$ST/current")" "versions/$c1"
 sy install latest >/dev/null
-check "install latest: the highest tag becomes current" "$(readlink "$H/.stackyard/current")" "versions/$c2"
+check "install latest: the highest tag becomes current" "$(readlink "$ST/current")" "versions/$c2"
 check "versions: both installed, the current one marked" \
   "$(sy versions | awk '{ print ($1 == "*") ? "*" $2 : $1 }' | sort | tr '\n' ' ')" "*v9.9.10 v9.9.9 "
 check "a version switch leaves the rc file alone" "$(grep -c '# stackyard' "$H/.zshrc")" "1"
@@ -1752,6 +1764,10 @@ check "a version switch leaves the rc file alone" "$(grep -c '# stackyard' "$H/.
 rm -rf "$H"; mkdir -p "$H"
 STACKYARD_VERSION=v9.9.9 cl_install --no-modify-path >/dev/null
 check "--no-modify-path leaves the rc file alone" "$([ -e "$H/.zshrc" ] && echo touched || echo untouched)" "untouched"
+rm -rf "$H"; mkdir -p "$H"
+( HOME="$H" XDG_DATA_HOME="$CL/xdg" STACKYARD_REPO="$SRC" STACKYARD_VERSION=v9.9.9 \
+  bash "$REPO_DIR/install.sh" --no-modify-path >/dev/null 2>&1 )
+check "the store follows XDG_DATA_HOME" "$(readlink "$CL/xdg/stackyard/current")" "versions/$c1"
 rm -rf "$CL"
 
 echo "== portability: time, checksums, the watchdog"

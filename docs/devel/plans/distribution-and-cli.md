@@ -24,7 +24,7 @@ project pinning which one it gets.
 | **stackyard** | the product and its repository | `apankov/stackyard` | rust-lang/rust |
 | **release** | a tag, resolved to the commit it points at; the commit is the truth | git tags | a release channel's version |
 | **installed version** | one release unpacked into a directory named by its commit | `versions/<commit>/` in a version store | a toolchain |
-| **version store** | the directory holding installed versions and the `current`/`previous` links | `<machine>/.stackyard/` on a server, `~/.stackyard/` on a laptop | `~/.rustup/toolchains/` |
+| **version store** | the directory holding installed versions and the `current`/`previous` links | `<machine>/.stackyard/` on a server, `~/.local/share/stackyard/` on a laptop | `~/.rustup/toolchains/` |
 | **platform** | the engine: `platform/` inside an installed version. Knows no machine, no DBMS, no secret | `platform -> .stackyard/current/platform` | rustc + std |
 | **profile** | the library of reusable stacks, versioned apart from the platform (`profiles/VERSION`) but shipped in the same release | `profile -> .stackyard/current/profiles` | — |
 | **machine** | a private repository describing one host: its stacks, manifest, secrets, pin | its own git repository | a cargo project |
@@ -39,7 +39,7 @@ What this settles:
   platform on a machine" is correct; "install stackyard on the laptop" means
   the operator CLI.
 - **The two version stores have one layout on purpose.** A laptop's
-  `~/.stackyard/versions/<commit>/` and a machine's `.stackyard/versions/<commit>/`
+  `~/.local/share/stackyard/versions/<commit>/` and a machine's `.stackyard/versions/<commit>/`
   hold the same release tree; only the entry points used differ.
 - **The operator CLI does NOT dispatch by a machine's pin**, though that was
   the first idea here. Reading the tools settled it: every one of them acts
@@ -53,7 +53,7 @@ What this settles:
   upgrades and rollbacks, the way rustup keeps toolchains.
 - **The history lives in a mirror.** An installed version is a `git archive`,
   like a machine's; `pin` (the diff) and `fleet` (commits behind) ask
-  `~/.stackyard/repo.git` through `bin/lib-workspace.sh`, and the running
+  the store's `repo.git` through `bin/lib-workspace.sh`, and the running
   commit comes from the version's `.commit`, never from the mirror's HEAD.
 - **Nothing is renamed on disk.** `platform/`, `profiles/`, `.stackyard/`,
   `stackyard.lock` and the machine commands stay: machines depend on those
@@ -87,7 +87,9 @@ Proposed:
 curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.18.0/install.sh | bash
 ```
 
-installs `~/.stackyard/versions/v0.18.0/` and a shim `~/.local/bin/stackyard`:
+installs `~/.stackyard/versions/v0.18.0/` and a shim `~/.local/bin/stackyard`
+(as built, the store is `~/.local/share/stackyard/`, since v0.29.0 — one
+directory for versions, mirror and fleet list, nothing in `$HOME` itself):
 
 ```sh
 stackyard new ~/dev/machines/acme     # today: ./bin/new-machine.sh

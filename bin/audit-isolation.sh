@@ -43,7 +43,7 @@ step() { printf '\n== %s\n' "$1"; }
 # whole design exists to prevent. So the paths come from outside.
 #
 #   ./bin/audit-isolation.sh ~/dev/machines/*
-#   ./bin/audit-isolation.sh            # from ~/.stackyard-fleet, one path per line
+#   ./bin/audit-isolation.sh            # from the fleet list in the store
 paths=("$@")
 if [ ${#paths[@]} -eq 0 ]; then
   fleet="$(ws_fleet_machines)" \

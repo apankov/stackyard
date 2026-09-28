@@ -202,21 +202,24 @@ The tools that act across machines (`new-machine`, `pin`, `fleet`,
 checkout as `./bin/<tool>.sh`, or installed as one command:
 
 ```sh
-curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.28.0/install.sh | bash
+curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.29.0/install.sh | bash
 ```
 
 A pipe into bash cannot be read before it runs. To read it first:
 
 ```sh
-curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.28.0/install.sh
+curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.29.0/install.sh
 less install.sh && bash install.sh
 ```
 
-The script installs the release its URL names, prints the commit that tag
-resolved to, and leaves the same layout a machine's `.stackyard/` has:
-`~/.stackyard/versions/<commit>/` side by side, `current` pointing at one, and
-a mirror of the repository (`repo.git`) for the history `pin` and `fleet` read.
-`~/.local/bin/stackyard` links to `current`. It needs git and tar, and
+The script installs the release its URL names and prints the commit that tag
+resolved to. Everything it keeps is in one directory,
+`~/.local/share/stackyard/` (under `$XDG_DATA_HOME` when set), and nothing
+lands in the home directory itself: `versions/<commit>/` side by side in the
+layout a machine's `.stackyard/` has, `current` pointing at one, a mirror of
+the repository (`repo.git`) for the history `pin` and `fleet` read, and
+`fleet`, the list of your machines. `~/.local/bin/stackyard` links to
+`current`. It needs git and tar, and
 `STACKYARD_VERSION`, `STACKYARD_DIR` and `--no-modify-path` change its
 defaults.
 
@@ -338,8 +341,9 @@ client-acme   v0.3.0   no      019829962cd0
 client-beta   v0.2.0   1       a6dbe464c8bd
 ```
 
-Both commands take paths; with no arguments they read `~/.stackyard-fleet`, one
-path per line.
+Both commands take paths; with no arguments they read the fleet list,
+`~/.local/share/stackyard/fleet`, one path per line. A `~/.stackyard-fleet`
+from before the store is still read, with a note to move it.
 
 They exist for one question that otherwise has no quick answer: did the fix
 reach everyone. Lag is counted in commits that **touch the platform** — a
