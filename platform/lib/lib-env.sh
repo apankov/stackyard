@@ -460,7 +460,11 @@ sha256_file() {
 # the offset is not dropped but normalised into a form BSD date accepts.
 iso_to_epoch() {
   local s="${1-}"
-  date -d "$s" +%s 2>/dev/null && return 0
+  # -u for GNU date as well: an offset in the string still wins, -u only sets
+  # the zone of a string without one. Without it such a string was read in the
+  # machine's local time — invisible on a server running in UTC, off by the
+  # zone everywhere else.
+  date -u -d "$s" +%s 2>/dev/null && return 0
   s=$(printf '%s' "$s" | sed -E 's/\.[0-9]+//; s/[Zz]$/+0000/; s/([+-][0-9]{2}):([0-9]{2})$/\1\2/')
   date -j -f '%Y-%m-%dT%H:%M:%S%z' "$s" +%s 2>/dev/null && return 0
   # The string carried no offset. Then it is UTC by the source's convention —
