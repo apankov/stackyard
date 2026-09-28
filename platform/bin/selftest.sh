@@ -1956,6 +1956,11 @@ fixture_machine() {
   mkdir -p "$dst"
   cp -R "$src"/. "$dst"/ 2>/dev/null
   rm -rf "$dst/platform" "$dst/profile" "$dst/.stackyard" "$dst/state"
+  # The environment the working tree happens to hold goes too. Those files are
+  # not in git, so a fresh clone and a developer's tree built different
+  # fixtures: an old .env pointed Platform_Deploy_Dir back into the working
+  # tree, and nginx -t below read certificates left there by some earlier run.
+  rm -f "$dst/.env" "$dst/.env-stacks" "$dst"/stacks/*/.env
   ln -sfn "$REPO_DIR/platform" "$dst/platform"
   ln -sfn "$REPO_DIR/profiles" "$dst/profile"
   [ -f "$dst/.env-stacks" ] || cp "$dst/.env-stacks.example" "$dst/.env-stacks" 2>/dev/null
@@ -2044,6 +2049,80 @@ done
 # asserted explicitly. Two, with different DBMSes, is the minimum the fixtures
 # exist for.
 check "the fixtures really ran" "$([ "$fixtures_seen" -ge 2 ] && echo yes || echo "no ($fixtures_seen)")" "yes"
+
+echo "== nginx -t on the fixtures, in the real image"
+
+# Every check above reads the configuration as text, and none of them can say
+# whether nginx accepts it. alpha's site vhost set `http2 on` and included
+# ssl-params.conf, which sets it too: nginx 1.30 refuses that as a duplicate
+# directive, and all of the above stayed green. So each fixture's configuration
+# is assembled the way a machine's is and given to the image nginx.yaml runs.
+#
+# It needs docker. Without it the block says it was skipped; CI sets
+# STACKYARD_REQUIRE_DOCKER=1, which makes that skip a failure — a skip reads
+# exactly like a pass.
+if ! docker info >/dev/null 2>&1; then
+  if [ -n "${STACKYARD_REQUIRE_DOCKER:-}" ]; then
+    check "docker is available (STACKYARD_REQUIRE_DOCKER is set)" "no" "yes"
+  else
+    echo "  . no docker -- block skipped (STACKYARD_REQUIRE_DOCKER=1 makes this a failure)"
+  fi
+else
+  NT="$WORK/nginx-t"; mkdir -p "$NT/vhosts" "$NT/log"
+  nt_net="stackyard-selftest-$$"
+  docker network create "$nt_net" >/dev/null
+  for m in "$WORK"/fx-*/; do
+    m="${m%/}"; name="${m##*/fx-}"
+    # A project name of its own, never the machine's: compose_project asks a
+    # running container called nginx, and on a developer's laptop that may be
+    # a real machine's.
+    dump=$( ROOT_DIR="$m" NT="$NT" Platform_Network="$nt_net" Platform_Vhosts_Dir="$NT/vhosts" \
+            PROJECT="stackyard-selftest-$name-$$" bash -c '
+      set -e
+      cd "$ROOT_DIR"
+      . platform/lib/lib-stacks.sh
+      . platform/lib/lib-env.sh
+      ensure_state_dirs
+      # The generated files, from the functions docker-compose.sh writes them with.
+      stacks_include_content > "$(stacks_include_file)"
+      stacks_static_content  > "$(stacks_static_file)"
+      # certs.sh makes the placeholders `listen 443 ssl` needs. The dhparam it
+      # would generate takes minutes at 4096 bits; a DSA-style 2048-bit one is
+      # as good for a config test.
+      openssl dhparam -dsaparam -out state/certs/dhparam.pem 2048 2>/dev/null
+      ./platform/bin/certs.sh >/dev/null 2>&1
+      # The upstreams are not started, only resolved: nginx looks every
+      # proxy_pass and fastcgi_pass host up while reading the config. The log
+      # directory is a host path a laptop does not have.
+      {
+        echo "services:"
+        echo "  nginx:"
+        hosts=$(stacks_upstreams | grep -vx host.docker.internal || true)
+        if [ -n "$hosts" ]; then
+          echo "    extra_hosts:"
+          printf "%s\n" "$hosts" | sed "s/.*/      - \"&:127.0.0.1\"/"
+        fi
+        echo "    volumes:"
+        echo "      - $NT/log:/var/log/nginx"
+      } > "$NT/override.yaml"
+      layer_env_export
+      docker compose --project-directory "$ROOT_DIR" -p "$PROJECT" --env-file .env \
+        -f platform/compose/nginx.yaml -f "$(stacks_static_file)" -f "$NT/override.yaml" \
+        run --rm --no-deps -T nginx nginx -T
+    ' 2>&1 )
+    got=$(printf '%s\n' "$dump" | grep -E '\[emerg\]|test is successful' \
+          | sed 's/.*test is successful.*/ok/' | head -n 3)
+    check "$name: nginx -t accepts the assembled configuration" "$got" "ok"
+    # A test of an empty configuration passes too. Every declared domain has to
+    # be in what nginx actually loaded, which proves the includes reached it.
+    declared=$( ROOT_DIR="$m" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_domain_names" 2>/dev/null )
+    loaded=$(printf '%s\n' "$dump" | grep -E '^[[:space:]]*server_name[[:space:]]' \
+             | awk '{for (i = 2; i <= NF; i++) print $i}' | tr -d ';' | sort -u)
+    missing=$(comm -23 <(printf '%s\n' "$declared" | sort -u) <(printf '%s\n' "$loaded"))
+    check "$name: nginx loaded a server block for every declared domain" "$missing" ""
+  done
+  docker network rm "$nt_net" >/dev/null 2>&1 || true
+fi
 
 echo "== stack init"
 

@@ -133,6 +133,11 @@ MUTATIONS=(
   'init: the example looked up by the machine path@@platform/bin/stack.sh@@    ex="$(stack_dir "$s")/.env.example"@@    ex="$ROOT_DIR/stacks/$s/.env.example"'
   'init: the copy keeps the example'"'"'s mode@@platform/bin/stack.sh@@  ( umask 077 \&\& cp "$1" "$2" )@@  cp "$1" "$2"'
 
+  # --- what only a live nginx can refuse. The text checks passed this one; the
+  # image rejects it as a duplicate directive and does not start.
+  'nginx: a vhost sets http2 next to ssl-params.conf@@tests/machines/alpha/stacks/site/nginx/01-app.example.com.conf@@	listen		443 ssl;@@	listen		443 ssl;\n	http2		on;'
+  'nginx: a vhost points at a certificate nobody makes@@tests/machines/beta/stacks/service/nginx/01-svc.example.net.conf@@/etc/nginx/certs/svc.example.net-fullchain.crt@@/etc/nginx/certs/svc.example.org-fullchain.crt'
+
   # --- the operator CLI. The first one is the contract the whole installer
   # rests on: a lock must get the installed commit, and the mirror's HEAD is a
   # plausible-looking wrong answer.
