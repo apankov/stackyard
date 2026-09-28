@@ -118,7 +118,9 @@ there is deliberately no "update everyone"), `fleet.sh`, `audit-isolation.sh`
   `platform/VERSION` (semver) in the same commit, and that commit is tagged
   `vX.Y.Z`. The same commit sets `STACKYARD_RELEASE` in `install.sh` (selftest
   enforces it) and the tag in the install URLs in `install.sh`'s header and in
-  README. Docs-only commits don't
+  README. Pushing the tag moves the `latest` branch
+  (`.github/workflows/latest.yml`); never move `latest` by hand or with
+  `--force`. Docs-only commits don't
   bump it. `profiles/VERSION` is versioned
   separately.
 - Open work is tracked in `docs/devel/plans/extraction-backlog.md` and

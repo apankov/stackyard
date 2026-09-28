@@ -1,0 +1,45 @@
+# Move the `latest` branch to the newest release, so that
+#   https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh
+# always installs the newest release, the way getssl's `latest` URL does.
+#
+# By a workflow rather than by hand: moving it is a release step somebody would
+# have to remember, and a `latest` left one release behind looks exactly like a
+# working one.
+#
+# Only the operator CLI floats. A machine never follows `latest`: it runs the
+# commit in its stackyard.lock (ADR 0001).
+name: latest
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+# `git push --tags` with several new tags starts one run per tag; they must not
+# race each other for the branch.
+concurrency:
+  group: latest
+  cancel-in-progress: false
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move latest to the highest release
+        run: |
+          highest="$(git tag -l 'v*' --sort=-v:refname | head -n 1)"
+          # A tag pushed for an older line (a backport, a late re-push) must not
+          # move latest backwards.
+          if [ "$GITHUB_REF_NAME" != "$highest" ]; then
+            echo "$GITHUB_REF_NAME is not the highest release ($highest); latest stays"
+            exit 0
+          fi
+          # No --force: latest only ever fast-forwards. If it cannot, the run
+          # fails and says so, rather than rewriting what people installed from.
+          git push origin "$highest^{commit}:refs/heads/latest"
+          echo "latest -> $highest ($(git rev-parse "$highest^{commit}"))"
