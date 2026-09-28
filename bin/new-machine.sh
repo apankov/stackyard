@@ -57,7 +57,7 @@ cat > "$DEST/stackyard.lock" <<EOF
 # definition. The tag only makes cloning cheap; if someone moves it, bootstrap
 # refuses to work rather than substituting someone else's code.
 #
-# To update: ./bin/pin.sh <this-machine> from stackyard, then ./bootstrap here.
+# To update: stackyard pin <this-machine> on the laptop, then ./bootstrap here.
 repo=$REPO
 version=$VERSION
 commit=$COMMIT
@@ -137,7 +137,7 @@ sudo ./host-setup
 
 ## Update the platform
 
-From stackyard on your laptop: \`./bin/pin.sh <path-to-this-machine>\`, commit
+On your laptop: \`stackyard pin <path-to-this-machine>\`, commit
 here, then on the server \`git pull && ./bootstrap && ./stack --check\`.
 EOF
 

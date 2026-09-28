@@ -56,5 +56,7 @@ done
 
 echo
 echo "In stackyard: $HEAD_VERSION (${HEAD_COMMIT:0:12})"
-[ "$behind" -gt 0 ] && echo "Behind on the platform: $behind. Update with: ./bin/pin.sh <machine>"
+# The command the operator actually has: an installed CLI has no ./bin.
+pin_cmd="./bin/pin.sh"; ws_installed && pin_cmd="stackyard pin"
+[ "$behind" -gt 0 ] && echo "Behind on the platform: $behind. Update with: $pin_cmd <machine>"
 exit 0
