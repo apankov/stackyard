@@ -27,7 +27,12 @@ shellcheck platform/bin/*.sh platform/lib/*.sh bin/*.sh
 ```
 
 selftest has no per-test filter. It is one script of `check "<name>" "$got"
-"$expected"` calls, so run the whole thing. `mutate.sh` works on a clone in a
+"$expected"` calls, so run the whole thing. One block runs `nginx -T` on each
+fixture in the real nginx image and needs docker; without it the block is
+skipped, and `STACKYARD_REQUIRE_DOCKER=1` (set in CI,
+`.github/workflows/selftest.yml`, which runs on Ubuntu) turns the skip into a
+failure. A green run on macOS says nothing about GNU tools: CI is where those
+differences show. `mutate.sh` works on a clone in a
 temporary directory and never touches the working tree.
 
 When you fix a bug in the engine, add a selftest check that fails without the

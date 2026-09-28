@@ -1,0 +1,31 @@
+# The selftest on Linux, with docker, on every push and pull request.
+#
+# Machines are Linux and development happens on macOS, and the two disagree in
+# ways only a run on the other system shows: GNU date read an offsetless
+# timestamp in local time while BSD date did not, and nothing on the laptop
+# could see it. docker is here for the block that hands each fixture's
+# assembled configuration to the real nginx image — text checks alone passed a
+# duplicate directive the image refuses.
+name: selftest
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck (errors only; the warnings are a known debt)
+        run: |
+          sudo apt-get install -y -qq shellcheck >/dev/null
+          shellcheck -S error platform/bin/*.sh platform/lib/*.sh bin/*.sh bin/stackyard \
+            install.sh templates/machine/bootstrap tests/mutate.sh
+      - name: selftest
+        # Without docker the nginx block would skip itself, and a skip reads
+        # like a pass. Here it must run.
+        env:
+          STACKYARD_REQUIRE_DOCKER: "1"
+        run: ./platform/bin/selftest.sh
