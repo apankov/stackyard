@@ -28,6 +28,8 @@ ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # Needed for sha256_file: a bare `shasum` may not be available.
 # shellcheck source=platform/lib/lib-env.sh
 . "$ROOT/platform/lib/lib-env.sh"
+# shellcheck source=bin/lib-workspace.sh
+. "$ROOT/bin/lib-workspace.sh"
 PROBLEMS=0
 WARNINGS=0
 
@@ -44,12 +46,9 @@ step() { printf '\n== %s\n' "$1"; }
 #   ./bin/audit-isolation.sh            # from ~/.stackyard-fleet, one path per line
 paths=("$@")
 if [ ${#paths[@]} -eq 0 ]; then
-  list="${HOME}/.stackyard-fleet"
-  [ -f "$list" ] || { echo "Give the paths to the machines, or create $list" >&2; exit 2; }
-  while IFS= read -r l; do
-    case "$l" in ''|\#*) continue ;; esac
-    paths+=("${l/#\~/$HOME}")
-  done < "$list"
+  fleet="$(ws_fleet_machines)" \
+    || { echo "Give the paths to the machines, or create $(ws_fleet_file)" >&2; exit 2; }
+  while IFS= read -r l; do [ -n "$l" ] && paths+=("$l"); done <<< "$fleet"
 fi
 
 machines=(); declare -A MDIR=()

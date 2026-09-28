@@ -19,15 +19,9 @@ HEAD_VERSION="v$(cat "$ROOT/platform/VERSION")"
 
 paths=("$@")
 if [ ${#paths[@]} -eq 0 ]; then
-  list="${HOME}/.stackyard-fleet"
-  [ -f "$list" ] || { echo "Give the paths to the machines, or create $list" >&2; exit 2; }
-  # The tilde is expanded here by hand: people write it in the file, and the
-  # shell does not expand it inside a variable — the path simply is not found,
-  # and the fleet silently looks empty.
-  while IFS= read -r l; do
-    case "$l" in ''|\#*) continue ;; esac
-    paths+=("${l/#\~/$HOME}")
-  done < "$list"
+  fleet="$(ws_fleet_machines)" \
+    || { echo "Give the paths to the machines, or create $(ws_fleet_file)" >&2; exit 2; }
+  while IFS= read -r l; do [ -n "$l" ] && paths+=("$l"); done <<< "$fleet"
 fi
 
 printf '%-24s %-10s %-10s %s\n' MACHINE VERSION BEHIND COMMIT

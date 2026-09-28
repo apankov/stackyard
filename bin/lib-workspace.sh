@@ -32,3 +32,22 @@ ws_commit() {
     ws_git rev-parse HEAD
   fi
 }
+
+# The fleet: the machines fleet and audit look at when given none, one path
+# per line. Read here once, because fleet and audit each had a copy of the
+# loop and a fix to one would not have reached the other.
+#
+# The tilde is expanded by hand: people write it in the file, and the shell
+# does not expand it inside a variable — the path simply is not found, and the
+# fleet silently looks empty.
+ws_fleet_file() { printf '%s/.stackyard-fleet' "$HOME"; }
+
+ws_fleet_machines() {
+  local f l
+  f="$(ws_fleet_file)"
+  [ -f "$f" ] || return 1
+  while IFS= read -r l || [ -n "$l" ]; do
+    case "$l" in ''|\#*) continue ;; esac
+    printf '%s\n' "${l/#\~/$HOME}"
+  done < "$f"
+}
