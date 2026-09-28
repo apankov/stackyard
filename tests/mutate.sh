@@ -141,6 +141,8 @@ MUTATIONS=(
   'install: a release without the CLI becomes current@@install.sh@@mgit cat-file -e "$COMMIT:bin/stackyard" 2>/dev/null@@true'
   'store: the fleet list read from the home again@@bin/lib-workspace.sh@@ws_fleet_file() { printf '"'"'%s/fleet'"'"' "$(ws_store)"; }@@ws_fleet_file() { printf '"'"'%s/.stackyard-fleet'"'"' "$HOME"; }'
   'store: installed back into the home directory@@install.sh@@DIR="${STACKYARD_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/stackyard}"@@DIR="${STACKYARD_DIR:-$HOME/.stackyard}"'
+  'fleet: a machines_dir line is taken for a path@@bin/lib-workspace.sh@@      machines_dir=*)@@      NEVER=*)'
+  'fleet: the first add starts an empty list next to the old one@@bin/fleet.sh@@    if [ -f "$HOME/.stackyard-fleet" ]; then@@    if false; then'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

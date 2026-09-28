@@ -49,6 +49,12 @@ ws_store() {
 # once, because fleet and audit each had a copy of the loop and a fix to one
 # would not have reached the other.
 #
+# Two kinds of line. `machines_dir=<dir>` is every directory directly under
+# <dir> that holds a stackyard.lock, found afresh on every run: a machine
+# created there is in the fleet without anyone remembering to add it, which is
+# the step that gets forgotten. Any other line is the path of one machine
+# living somewhere else. A machine reached both ways is listed once.
+#
 # The tilde is expanded by hand: people write it in the file, and the shell
 # does not expand it inside a variable — the path simply is not found, and the
 # fleet silently looks empty.
@@ -66,11 +72,22 @@ ws_fleet_source() {
 }
 
 ws_fleet_machines() {
-  local f l
+  local f l d p
   f="$(ws_fleet_source)"
   [ -f "$f" ] || return 1
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in ''|\#*) continue ;; esac
-    printf '%s\n' "${l/#\~/$HOME}"
-  done < "$f"
+    case "$l" in
+      machines_dir=*)
+        d="${l#machines_dir=}"; d="${d/#\~/$HOME}"
+        for p in "${d%/}"/*/; do
+          [ -f "$p/stackyard.lock" ] && printf '%s\n' "${p%/}"
+        done
+        ;;
+      *) l="${l/#\~/$HOME}"; printf '%s\n' "${l%/}" ;;
+    esac
+  done < "$f" | awk '!seen[$0]++'
+  # Explicitly: under pipefail the loop's status is that of its last test, and
+  # a machines_dir whose last entry is not a machine would read as "no list".
+  return 0
 }

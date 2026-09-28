@@ -8,6 +8,9 @@
 #   stackyard new <path> [--repo <url>]      a new machine repository
 #   stackyard pin <machine> [--version <v>]  rewrite one machine's stackyard.lock
 #   stackyard fleet [<machine>...]           which version each machine runs
+#   stackyard fleet add <machine>...         put machines on the fleet list
+#   stackyard fleet add-dir <dir>            every machine under <dir>, now and later
+#   stackyard fleet list                     the machines the list resolves to
 #   stackyard audit [<machine>...]           cross-machine leaks
 #   stackyard vendor ...                     an emergency self-contained copy
 #   stackyard version                        which version this is, and from where
@@ -33,7 +36,7 @@ ROOT="$( cd -P "$( dirname "$self" )/.." && pwd )"
 # shellcheck source=bin/lib-workspace.sh
 . "$ROOT/bin/lib-workspace.sh"
 
-usage() { sed -n '8,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
+usage() { sed -n '8,18p' "$self" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
 die() { echo "Error: $*" >&2; exit 1; }
 
 cmd="${1-}"

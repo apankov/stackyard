@@ -145,5 +145,14 @@ echo "Machine created: $DEST"
 echo "  stackyard: $VERSION ($COMMIT)"
 echo
 echo "Next:"
-echo "  cd $DEST && git init && ./bootstrap"
-echo "  fill in .env and .env-stacks, describe the stacks in stacks/"
+echo "  cd $DEST && git init"
+echo "  edit .env.example and .env-stacks.example, describe the stacks in stacks/"
+echo "  commit, push, and deploy on the server as README.md there says"
+# A machine outside every machines_dir is invisible to fleet and audit until
+# somebody remembers to list it, so the reminder is printed here, once.
+abs="$(cd "$DEST" && pwd)"
+fleet_now="$(ws_fleet_machines 2>/dev/null || true)"
+case $'\n'"$fleet_now"$'\n' in
+  *$'\n'"$abs"$'\n'*) ;;
+  *) echo "  stackyard fleet add $abs    # or add-dir its parent, for every machine there" ;;
+esac

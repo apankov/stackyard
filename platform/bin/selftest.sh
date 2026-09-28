@@ -1749,6 +1749,27 @@ out="$(sy fleet)"
 check "fleet: ~/.stackyard-fleet is still read" "$(printf '%s\n' "$out" | awk '$1 == "m" { print $3 }')" "no"
 check "and the note says where it belongs" "$(printf '%s\n' "$out" | grep -c "mv ~/.stackyard-fleet .*/.local/share/stackyard/fleet$")" "1"
 rm -f "$H/.stackyard-fleet"
+
+# machines_dir: every machine under it, found afresh on each run — a machine
+# created there is in the fleet without anybody remembering to add it.
+sy fleet add-dir "$CL" >/dev/null
+check "add-dir: the machine under it is in the fleet" "$(sy fleet list)" "$CL/m"
+mkdir -p "$CL/m2"; cp "$CL/m/stackyard.lock" "$CL/m2/"
+check "add-dir: a machine created there later is found without an add" \
+  "$(sy fleet list | grep -c '/m2$')" "1"
+check "add-dir: a directory there without a lock is not a machine" \
+  "$(sy fleet list | grep -c '/src$')" "0"
+sy fleet add "$CL/m" >/dev/null
+check "a machine reached two ways is listed once" "$(sy fleet list | grep -c '/m$')" "1"
+sy fleet add "$SRC" >/dev/null 2>&1
+check "add refuses a directory that is not a machine" "$?" "2"
+rm -rf "$CL/m2" "$ST/fleet"
+# The first add next to an old list starts from it: an empty new list would
+# drop every machine in the old one out of the fleet at once.
+printf '%s\n' "$CL/m" > "$H/.stackyard-fleet"
+mkdir -p "$CL/other"; sy fleet add-dir "$CL/other" >/dev/null
+check "the first add carries the old list over" "$(sy fleet list)" "$CL/m"
+rm -rf "$H/.stackyard-fleet" "$ST/fleet" "$CL/other"
 sy pin "$CL/m" --version v9.9.10 >/dev/null
 check "pin --version: the lock records that release's commit" "$(grep '^commit=' "$CL/m/stackyard.lock")" "commit=$c2"
 

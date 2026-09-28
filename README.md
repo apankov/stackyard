@@ -202,13 +202,13 @@ The tools that act across machines (`new-machine`, `pin`, `fleet`,
 checkout as `./bin/<tool>.sh`, or installed as one command:
 
 ```sh
-curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.29.0/install.sh | bash
+curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.30.0/install.sh | bash
 ```
 
 A pipe into bash cannot be read before it runs. To read it first:
 
 ```sh
-curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.29.0/install.sh
+curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.30.0/install.sh
 less install.sh && bash install.sh
 ```
 
@@ -229,7 +229,7 @@ stackyard pin ~/dev/machines/client-acme    # = ./bin/pin.sh
 stackyard fleet ~/dev/machines/*            # = ./bin/fleet.sh
 stackyard audit ~/dev/machines/*            # = ./bin/audit-isolation.sh
 stackyard version                           # which one this is, and its commit
-stackyard install v0.29.0                   # or `latest`; the old one stays installed
+stackyard install <tag>                     # or `latest`; the old one stays installed
 ```
 
 `new` and `pin` write a **commit** into a lock (the running version's, or the
@@ -342,8 +342,17 @@ client-beta   v0.2.0   1       a6dbe464c8bd
 ```
 
 Both commands take paths; with no arguments they read the fleet list,
-`~/.local/share/stackyard/fleet`, one path per line. A `~/.stackyard-fleet`
-from before the store is still read, with a note to move it.
+`~/.local/share/stackyard/fleet`. Keep it with the CLI rather than by hand:
+
+```sh
+stackyard fleet add-dir ~/dev/machines   # every machine under it, found afresh on each run
+stackyard fleet add ~/work/odd-one       # one machine that lives elsewhere
+stackyard fleet list                     # what the list resolves to
+```
+
+A `machines_dir=` line means a machine created under that directory is in
+the fleet without anyone adding it. A `~/.stackyard-fleet` from before the
+store is still read, with a note, and the first `add` carries it over.
 
 They exist for one question that otherwise has no quick answer: did the fix
 reach everyone. Lag is counted in commits that **touch the platform** — a

@@ -47,7 +47,7 @@ step() { printf '\n== %s\n' "$1"; }
 paths=("$@")
 if [ ${#paths[@]} -eq 0 ]; then
   fleet="$(ws_fleet_machines)" \
-    || { echo "Give the paths to the machines, or create $(ws_fleet_file)" >&2; exit 2; }
+    || { echo "Give the paths to the machines, or: stackyard fleet add-dir ~/dev/machines" >&2; exit 2; }
   while IFS= read -r l; do [ -n "$l" ] && paths+=("$l"); done <<< "$fleet"
 fi
 
