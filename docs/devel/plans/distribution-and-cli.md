@@ -2,12 +2,53 @@
 
 Written 2026-09-21, from a discussion that ended without code; status updated
 2026-09-28. Section 3 is implemented (v0.27.0), section 4 was solved another
-way (v0.24.0), section 2 is still open. The question was: could stackyard be installed the way nvm is —
+way (v0.24.0), section 2 is still open. The question was: could stackyard be
+installed the way nvm is —
 `curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.18.0/install.sh | bash` —
 and if so, for which part.
 
 The answer is yes for exactly one of the three things that question conflates.
 They are listed separately below because the wrong one is the tempting one.
+
+## 0. Terminology (proposed, 2026-09-28)
+
+"stackyard" has been used for at least three different things: the
+repository, the code running on a machine, and the operator's tools. They are
+one tree at one commit put to different uses, and the plan below cannot be
+discussed without telling them apart. The closest model is rustup/cargo: one
+manager on the laptop, toolchains installed side by side, a file in each
+project pinning which one it gets.
+
+| Term | What it is | Where it lives | rustup analogue |
+|---|---|---|---|
+| **stackyard** | the product and its repository | `apankov/stackyard` | rust-lang/rust |
+| **release** | a tag, resolved to the commit it points at; the commit is the truth | git tags | a release channel's version |
+| **installed version** | one release unpacked into a directory named by its commit | `versions/<commit>/` in a version store | a toolchain |
+| **version store** | the directory holding installed versions and the `current`/`previous` links | `<machine>/.stackyard/` on a server, `~/.stackyard/` on a laptop | `~/.rustup/toolchains/` |
+| **platform** | the engine: `platform/` inside an installed version. Knows no machine, no DBMS, no secret | `platform -> .stackyard/current/platform` | rustc + std |
+| **profile** | the library of reusable stacks, versioned apart from the platform (`profiles/VERSION`) but shipped in the same release | `profile -> .stackyard/current/profiles` | — |
+| **machine** | a private repository describing one host: its stacks, manifest, secrets, pin | its own git repository | a cargo project |
+| **pin** | `stackyard.lock`: the commit a machine runs | the machine's repository | `rust-toolchain.toml` |
+| **bootstrap** | installs the pinned release into the machine's version store and switches `current` | the machine root | `rustup toolchain install` |
+| **machine commands** | `./stack`, `./dc`, `./certs`…: generated wrappers that run the current platform | the machine root | the `cargo` proxy picking the pinned toolchain |
+| **operator CLI** | `stackyard`: the tools that act across machines (`new`, `pin`, `fleet`, `audit`, `vendor`) plus managing its own installed versions | `~/.local/bin/stackyard` | `rustup` |
+
+What this settles:
+
+- **"platform" means the engine only**, never the product. "Update the
+  platform on a machine" is correct; "install stackyard on the laptop" means
+  the operator CLI.
+- **The two version stores have one layout on purpose.** A laptop's
+  `~/.stackyard/versions/<commit>/` and a machine's `.stackyard/versions/<commit>/`
+  hold the same release tree; only the entry points used differ.
+- **The operator CLI should dispatch like rustup.** Run inside a machine's
+  directory, `stackyard` reads that machine's pin and runs the tools of that
+  installed version, fetching it if needed. That gives section 2's "several
+  versions side by side" for free, and `stackyard new --version vX` becomes the
+  same mechanism rather than a special case.
+- **Nothing is renamed on disk.** `platform/`, `profiles/`, `.stackyard/`,
+  `stackyard.lock` and the machine commands stay: machines depend on those
+  paths, and the vocabulary is what was ambiguous, not the layout.
 
 ## 1. The platform onto a machine — leave it alone
 
