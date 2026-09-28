@@ -3,6 +3,10 @@
 # Install the stackyard operator CLI on a laptop.
 #
 #   curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.30.0/install.sh | bash
+#   curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
+#
+# The second is the newest release: `latest` is a branch that
+# .github/workflows/latest.yml moves onto each release tag.
 #
 # or, to read it before it runs (a pipe into bash cannot be inspected first):
 #

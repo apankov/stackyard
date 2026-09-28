@@ -205,6 +205,16 @@ checkout as `./bin/<tool>.sh`, or installed as one command:
 curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.30.0/install.sh | bash
 ```
 
+or, for whatever the newest release is (the `latest` branch, moved onto each
+release by `.github/workflows/latest.yml`):
+
+```sh
+curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
+```
+
+Either way the script prints the tag and commit it installed. Only the CLI
+floats like this: a machine always runs the commit in its `stackyard.lock`.
+
 A pipe into bash cannot be read before it runs. To read it first:
 
 ```sh
