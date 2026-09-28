@@ -78,7 +78,8 @@ instances.
    Made unnecessary in v0.24.0: the versioned `.stackyard/` layout keeps the
    mount alive across an update, so there is nothing left to recreate. See
    section 4 of `distribution-and-cli.md`.
-3. **`install.sh` + a `stackyard` CLI** for the operator's tools. Same file.
+3. ~~**`install.sh` + a `stackyard` CLI**~~ for the operator's tools — done in
+   v0.28.0. Same file.
 4. **`apiVersion` in `stack.conf`** — idea 3 of `../architecture/k8s-assessment.md`.
    The platform's code is versioned; the declaration format is not, so an
    incompatible change will be read silently and wrongly.

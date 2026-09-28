@@ -1,8 +1,8 @@
 # Distribution: an installer, an operator CLI, and fewer remembered steps
 
 Written 2026-09-21, from a discussion that ended without code; status updated
-2026-09-28. Section 3 is implemented (v0.27.0), section 4 was solved another
-way (v0.24.0), section 2 is still open. The question was: could stackyard be
+2026-09-28. Section 3 is implemented (v0.27.0), section 2 too (v0.28.0), and
+section 4 was solved another way (v0.24.0). The question was: could stackyard be
 installed the way nvm is —
 `curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.18.0/install.sh | bash` —
 and if so, for which part.
@@ -41,11 +41,20 @@ What this settles:
 - **The two version stores have one layout on purpose.** A laptop's
   `~/.stackyard/versions/<commit>/` and a machine's `.stackyard/versions/<commit>/`
   hold the same release tree; only the entry points used differ.
-- **The operator CLI should dispatch like rustup.** Run inside a machine's
-  directory, `stackyard` reads that machine's pin and runs the tools of that
-  installed version, fetching it if needed. That gives section 2's "several
-  versions side by side" for free, and `stackyard new --version vX` becomes the
-  same mechanism rather than a special case.
+- **The operator CLI does NOT dispatch by a machine's pin**, though that was
+  the first idea here. Reading the tools settled it: every one of them acts
+  across machines (`fleet`, `audit`) or writes a commit into a lock (`new`,
+  `pin`), and none runs anything of the machine's version. What a machine
+  receives is already decided by its lock and fetched by its `bootstrap`.
+  Running `pin` from each machine's own version would even be harmful: a
+  machine being rolled back would get the old `bootstrap` template, and the
+  ones before v0.24.0 delete `.stackyard` wholesale. So the tools run from the
+  version the operator made `current`, and "side by side" is for the CLI's own
+  upgrades and rollbacks, the way rustup keeps toolchains.
+- **The history lives in a mirror.** An installed version is a `git archive`,
+  like a machine's; `pin` (the diff) and `fleet` (commits behind) ask
+  `~/.stackyard/repo.git` through `bin/lib-workspace.sh`, and the running
+  commit comes from the version's `.commit`, never from the mirror's HEAD.
 - **Nothing is renamed on disk.** `platform/`, `profiles/`, `.stackyard/`,
   `stackyard.lock` and the machine commands stay: machines depend on those
   paths, and the vocabulary is what was ambiguous, not the layout.
@@ -63,6 +72,10 @@ property ADR 0001 exists to protect, and the reason vendoring was rejected.
 No change. `bootstrap` stays as it is.
 
 ## 2. The operator's tools on a laptop — this is the nvm-shaped part
+
+**Done in v0.28.0**: `install.sh` and `bin/stackyard`, as section 0 describes.
+Every requirement below holds, and selftest checks each against a scratch
+repository with three releases. The one deliberate gap: no vanity URL yet.
 
 `bin/new-machine.sh`, `pin.sh`, `fleet.sh`, `audit-isolation.sh` and
 `vendor.sh` currently require "first clone stackyard somewhere and remember
@@ -172,14 +185,13 @@ from the manifest as much as a missing include is. The shape:
 1. ~~**`./stack init`**~~ — done, v0.27.0.
 2. ~~**Recreation inside `sync`**~~ — made unnecessary by the versioned layout,
    v0.24.0 (section 4).
-3. **`install.sh` + the `stackyard` CLI** — gives "distributed like everything
-   else" without touching how machines receive the platform. Next.
+3. ~~**`install.sh` + the `stackyard` CLI**~~ — done, v0.28.0.
 4. **`bootstrap`** — do not touch its contract. (Its layout did change in
    v0.24.0; what it records and how a machine pins it did not.)
 
 ## Where things stand (2026-09-28)
 
-- stackyard `master` at v0.27.0. The first machine was migrated on 2026-09-27
-  and receives updates through `bin/pin.sh`; the blockers listed here on
+- stackyard `master` at v0.28.0 (plus a hint fix after it). The first machine
+  was migrated on 2026-09-27 and receives updates through `pin`; the blockers listed here on
   2026-09-21 (stackyard not pushed, the machine's lock pointing at an
   unpublished commit) are gone.
