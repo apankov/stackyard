@@ -80,6 +80,13 @@ MUTATIONS=(
   'htpasswd: the host sets ownership, not the container@@platform/bin/htpasswd.sh@@  sh -c "$IN_CONTAINER"@@  sh -c "$IN_CONTAINER"\n\nchmod 640 "$FILE"'
   'nginx: the image is hardcoded past nginx_image@@platform/bin/htpasswd.sh@@"$(nginx_image)"@@nginx:1.30-alpine'
 
+  # --- foreign containers watch-host.sh is responsible for. A mistake here is
+  # silence: the alert that never comes looks exactly like a healthy machine.
+  'watch: a declared project is not watched@@platform/lib/lib-stacks.sh@@  [ -n "$project" ] \&\& [ "$project" != "-" ] \&\& list_has "$declared" "$project" \&\& return 0@@  true'
+  'watch: every foreign container counts as ours@@platform/lib/lib-stacks.sh@@  for n in "$@"; do\n    [ -n "$n" ] \&\& list_has "$upstreams" "$n" \&\& return 0\n  done\n  return 1@@  return 0'
+  'watch: projects of disabled stacks are watched too@@platform/lib/lib-stacks.sh@@  for s in $(stacks_enabled 2>/dev/null); do\n    for p in $(stack_conf_get "$s" Watch_Project)@@  for s in $(stacks_available 2>/dev/null); do\n    for p in $(stack_conf_get "$s" Watch_Project)'
+  'watch-host: the declared projects are never read@@platform/bin/watch-host.sh@@WATCHED_PROJECTS=$(stacks_watch_projects)@@WATCHED_PROJECTS=""'
+
   # --- a profile port published past the host firewall.
   'ports: pg is published on every interface again@@profiles/stacks/pg/compose.yaml@@      - "127.0.0.1:5432:5432"@@      - "5432:5432"'
 

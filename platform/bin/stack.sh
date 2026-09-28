@@ -1107,7 +1107,23 @@ verb_check() {
       # vhosts directory. That is distinguished from a stack that HAS a compose
       # file in which no services were found — which is a parsing failure.
       if [ ! -f "$(stack_compose_file "$s")" ]; then
-        ok "$s: no containers of its own — runs on the platform's nginx/php-fpm"
+        # Unless it declares where its application does run. Then that project
+        # is the stack's containers, and none of them running is the same
+        # finding as for a stack with its own: the site is down while every
+        # line about this machine is green.
+        local proj n
+        if [ -n "$(stack_conf_get "$s" Watch_Project)" ]; then
+          for proj in $(stack_conf_get "$s" Watch_Project); do
+            n=$(docker ps -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null | grep -c . || true)
+            if [ "$n" -eq 0 ]; then
+              bad "$s: Watch_Project=$proj, but not a single container of that project is running"
+            else
+              ok "$s: its application runs in compose project $proj — $n running, watched by watch-host"
+            fi
+          done
+        else
+          ok "$s: no containers of its own — runs on the platform's nginx/php-fpm"
+        fi
       else
         warn "$s: no services found in its compose file"
       fi

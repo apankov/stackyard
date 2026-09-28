@@ -552,6 +552,43 @@ fixture romeo nginx/83-romeo-ws.conf 'upstream romeo_ws { server romeo-ws:5000; 
 printf 'Enabled_Stacks="mike november romeo"\n' > "$WORK/.env-stacks"
 check "an upstream block resolves to its server hosts, not to its own name" \
   "$(errexit_run stacks_upstreams | tr '\n' ' ')" "november-app romeo-backend romeo-ws "
+# Which containers watch-host.sh alerts about. A stack fronting an
+# application that lives in a compose project of its own — reached through
+# host.docker.internal, so named by no vhost — declares that project; without
+# the declaration a machine whose whole point is that application watches
+# none of it, and a crash loop there raises no alert.
+fixture xray stack.conf 'Containers="no"
+Watch_Project="xray-app xray-jobs"'
+fixture yankee stack.conf 'Containers="no"
+Watch_Project="yankee-app"'
+printf 'Enabled_Stacks="xray"\n' > "$WORK/.env-stacks"
+check "the projects enabled stacks declare are the ones watched" \
+  "$(errexit_run stacks_watch_projects | tr '\n' ' ')" "xray-app xray-jobs "
+W_UP="$(printf 'november-app\nromeo-backend\n')"
+W_DECL="$(errexit_run stacks_watch_projects)"
+watched() { container_is_watched "$@" && echo yes || echo no; }
+check "watch: our own container is watched" \
+  "$(watched ours ours "$W_DECL" "$W_UP" anything)" "yes"
+check "watch: a container of a declared project is watched" \
+  "$(watched xray-app ours "$W_DECL" "$W_UP" xray-app-web-1)" "yes"
+check "watch: a foreign container a vhost names is watched" \
+  "$(watched elsewhere ours "$W_DECL" "$W_UP" november-app)" "yes"
+check "watch: a foreign container a vhost reaches by alias is watched" \
+  "$(watched elsewhere ours "$W_DECL" "$W_UP" elsewhere-backend-1 romeo-backend)" "yes"
+check "watch: a foreign container nobody uses is not watched" \
+  "$(watched elsewhere ours "$W_DECL" "$W_UP" elsewhere-web-1)" "no"
+check "watch: the project of a DISABLED stack is not watched" \
+  "$(watched yankee-app ours "$W_DECL" "$W_UP" yankee-app-web-1)" "no"
+check "watch: a container without a compose label is not taken for a declared project" \
+  "$(watched - ours "$(printf '%s\n-' "$W_DECL")" "$W_UP" stray)" "no"
+# The decision is tested here, but watch-host.sh is what has to make it: a
+# script that never reads the declarations passes every check above.
+WH="$REPO_DIR/platform/bin/watch-host.sh"
+check "watch-host.sh reads the declared projects" \
+  "$(grep -c '^WATCHED_PROJECTS=$(stacks_watch_projects)$' "$WH")" "1"
+check "watch-host.sh decides through container_is_watched with them" \
+  "$(grep -c 'container_is_watched "$project" "$PROJECT" "$WATCHED_PROJECTS" "$UPSTREAMS"' "$WH")" "1"
+
 printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
 check "a domain without a vhost is found under set -e" \
   "$(errexit_run check_domains_match mike | wc -l | tr -d ' ')" "1"

@@ -53,6 +53,7 @@ declarations too: `compose.yaml`, `nginx/` (vhost includes), `systemd/` (units),
 `scripts/health.sh` (asked by `--check`), `scripts/host-setup.sh`,
 `scripts/check-decl.sh`, and `scripts/backup-dump.sh`. The `stack.conf` keys are
 `Requires`, `Domains`, `Containers`, `Certs` (`getssl` or `external`),
+`Watch_Project` (a foreign compose project watch-host treats as the stack's),
 `Provides_DB`, `DB_Init_Service`, and `<Provider>_DB/_User/_Password/...`.
 Values are references into the stack's `.env`, not copies.
 

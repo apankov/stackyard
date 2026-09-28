@@ -45,7 +45,7 @@ stack declares. A stack whose TLS is terminated **in front of** the
 machine — behind a load balancer or a CDN — says so:
 
 ```
-# stacks/ledger/stack.conf
+# stacks/shop/stack.conf
 Domains="ledger.staging.example.com"
 Certs="external"
 ```
@@ -64,6 +64,25 @@ exactly like a domain whose renewal has broken, and the first machine to need
 this had spent two weeks failing a renewal every night for a domain an ALB had
 been terminating all along — with a green timer, because getssl exits zero
 when there is nothing it can do.
+
+## Whose containers they are
+
+`watch-host` alerts about the machine's own containers — those in its compose
+project — and about a foreign one only while an enabled stack's vhost points
+at it. A stack whose application lives in a compose project of its own,
+started from another repository and reached through `host.docker.internal`,
+is pointed at by no vhost. It says whose containers those are:
+
+```
+# stacks/shop/stack.conf
+Containers="no"
+Watch_Project="shop-main"
+```
+
+Then those containers are watched while the stack is enabled, and
+`./stack --check` fails when not one of them is running. Without the line, a
+machine whose whole point is that application would raise no alert when it
+crash-loops: every one of its containers looks like somebody else's.
 
 ## Copy or link
 

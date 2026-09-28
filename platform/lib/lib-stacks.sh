@@ -659,6 +659,41 @@ stacks_upstreams() {
   return 0
 }
 
+# The foreign compose projects enabled stacks declare as their own, one per
+# line: Watch_Project= in stack.conf.
+#
+# A stack with Containers="no" often fronts an application that lives in a
+# compose project of its own, started from another repository, and reached
+# through host.docker.internal or a published port. No vhost names its
+# containers, so nothing else ties them to the stack: watch-host.sh would
+# treat all of them as somebody else's, and a crash loop of the one thing the
+# machine exists for would raise no alert.
+stacks_watch_projects() {
+  local s p
+  for s in $(stacks_enabled 2>/dev/null); do
+    for p in $(stack_conf_get "$s" Watch_Project); do printf '%s\n' "$p"; done
+  done | sort -u
+  return 0
+}
+
+# container_is_watched <its project> <ours> <declared projects> <upstreams> <name>...
+#
+# Whether watch-host.sh is this machine's business to alert about a container.
+# Ours always; a foreign one while an enabled stack declares its project, or
+# while an enabled vhost reaches it by one of the names given (the container's
+# name and its network aliases). Factored out of watch-host.sh because the
+# decision needs testing and the script needs docker.
+container_is_watched() {
+  local project="${1-}" ours="${2-}" declared="${3-}" upstreams="${4-}" n
+  shift 4 2>/dev/null || return 1
+  [ -n "$project" ] && [ "$project" = "$ours" ] && return 0
+  [ -n "$project" ] && [ "$project" != "-" ] && list_has "$declared" "$project" && return 0
+  for n in "$@"; do
+    [ -n "$n" ] && list_has "$upstreams" "$n" && return 0
+  done
+  return 1
+}
+
 # host.docker.internal is excluded on purpose: it is not a container but an
 # alias for the host itself, provided by `extra_hosts: host-gateway`. The check
 # looks for upstreams among running containers, so it would always report this

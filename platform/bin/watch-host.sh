@@ -163,19 +163,23 @@ trap 'rm -f "$NEW_RESTARTS"' EXIT
 # here. Watching every container on the host meant that disabling the stack
 # that proxied to one did not stop the alerts about it, and a channel that
 # keeps reporting what nobody here can act on stops being read.
+#
+# A stack may also claim a foreign project outright (Watch_Project= in its
+# stack.conf): an application in its own compose project that the stack
+# fronts through host.docker.internal is named by no vhost, and without the
+# declaration a machine whose whole point is that application would watch
+# none of it. The decision itself is container_is_watched in lib-stacks.sh.
 PROJECT=$(compose_project)
 UPSTREAMS=$(stacks_upstreams)
+WATCHED_PROJECTS=$(stacks_watch_projects)
 
-# is_referenced <container> — is it reachable under a name some enabled vhost
-# uses? nginx resolves the container name and its network aliases alike, and a
-# container from another compose project is often addressed by its service
-# name rather than its own.
-is_referenced() {
-  local n
-  for n in $1 $(docker inspect -f '{{range .NetworkSettings.Networks}}{{range .Aliases}}{{.}} {{end}}{{end}}' "$1" 2>/dev/null); do
-    list_has "$UPSTREAMS" "$n" && return 0
-  done
-  return 1
+# The names nginx could reach a container by: its own and its network aliases.
+# A container from another compose project is often addressed by its service
+# name rather than its own. Asked only of foreign containers: ours are watched
+# regardless, and this is one docker call per container every run.
+container_names() {
+  printf '%s ' "$1"
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{range .Aliases}}{{.}} {{end}}{{end}}' "$1" 2>/dev/null
 }
 
 while IFS= read -r name; do
@@ -193,8 +197,12 @@ while IFS= read -r name; do
   ) || continue
   [ -n "${state:-}" ] || continue
 
-  if [ "$project" != "$PROJECT" ] && ! is_referenced "$name"; then
-    printf '  [--]   %-22s %s (foreign, no enabled vhost uses it)\n' "$name" "$state"
+  names="$name"
+  [ "$project" = "$PROJECT" ] || names="$(container_names "$name")"
+  # $names unquoted on purpose: one argument per name.
+  # shellcheck disable=SC2086
+  if ! container_is_watched "$project" "$PROJECT" "$WATCHED_PROJECTS" "$UPSTREAMS" $names; then
+    printf '  [--]   %-22s %s (foreign, no enabled stack uses it)\n' "$name" "$state"
     # An alert raised while it still mattered is closed rather than left
     # hanging: otherwise the last word in the channel is "not running", about
     # something that is no longer watched at all.
