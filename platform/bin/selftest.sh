@@ -379,6 +379,16 @@ printf 'Foxtrot_DB_Dir=/mnt/data/fox\nFoxtrot_DB_File=f.db\n' > "$WORK/stacks/fo
 stack_backup_sources foxtrot >/dev/null
 check "a stack's environment does not leak into the next one" "$(stack_backup_sources bravo)" ""
 
+echo "== unfilled values"
+
+# host-setup and stack init both decide by this what is left to fill in. A
+# commented-out example line is documentation, not a value.
+printf '# Old_Key=CHANGE_ME\nA=CHANGE_ME\nB="CHANGE_ME"\nC='"'"'CHANGE_ME'"'"'\nD=CHANGE_ME_TOO\nE=set\n' > "$WORK/unfilled.env"
+check "CHANGE_ME is found bare and quoted, and nowhere else" \
+  "$(env_unfilled "$WORK/unfilled.env" | tr '\n' ' ')" "A B C "
+check "a missing file has nothing unfilled" "$(env_unfilled "$WORK/no-such.env")" ""
+rm -f "$WORK/unfilled.env"
+
 echo "== declaration checks"
 
 # A stack that violates everything at once: a domain duplicated with delta, a

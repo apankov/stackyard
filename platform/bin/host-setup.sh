@@ -287,22 +287,13 @@ done
 
 step "Unfilled secrets"
 
-# The .env examples carry CHANGE_ME wherever a value must be supplied: without
-# it, `--examples` could not validate compose syntax on a machine that holds no
-# secrets. The price of that convenience is a placeholder which is easy to copy
-# and overlook, so it is checked here. Searched for by VALUE rather than
-# against a list of keys: the platform does not know which keys the next stack
-# will introduce.
+# A placeholder copied from an example and overlooked (see env_unfilled).
 left=0
 for f in "$ROOT_DIR"/.env "$ROOT_DIR"/.env-backup "$ROOT_DIR"/.env-notify "$ROOT_DIR"/stacks/*/.env; do
   [ -f "$f" ] || continue
-  while IFS= read -r line; do
-    case "$line" in \#*|'') continue ;; esac
-    case "${line#*=}" in
-      CHANGE_ME|'"CHANGE_ME"'|"'CHANGE_ME'")
-        bad "${f#"$ROOT_DIR"/}: ${line%%=*} is not filled in (still CHANGE_ME)"; left=$((left + 1)) ;;
-    esac
-  done < "$f"
+  while IFS= read -r key; do
+    bad "${f#"$ROOT_DIR"/}: $key is not filled in (still CHANGE_ME)"; left=$((left + 1))
+  done < <(env_unfilled "$f")
 done
 [ "$left" -eq 0 ] && ok "no unfilled values"
 

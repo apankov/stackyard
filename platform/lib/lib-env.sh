@@ -101,6 +101,28 @@ env_require() {
   printf '%s' "$val"
 }
 
+# env_unfilled <file>
+# The keys of an env file still set to CHANGE_ME, one per line.
+#
+# The .env examples carry CHANGE_ME wherever a value must be supplied: without
+# it, `--examples` could not validate compose syntax on a machine that holds no
+# secrets. The price of that convenience is a placeholder which is easy to copy
+# and overlook. Searched for by VALUE rather than against a list of keys: the
+# platform does not know which keys the next stack will introduce.
+#
+# Here rather than in host-setup because stack init asks the same question,
+# and two copies would soon disagree on what "filled in" means.
+env_unfilled() {
+  local line
+  [ -f "$1" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in \#*|'') continue ;; esac
+    case "${line#*=}" in
+      CHANGE_ME|'"CHANGE_ME"'|"'CHANGE_ME'") printf '%s\n' "${line%%=*}" ;;
+    esac
+  done < "$1"
+}
+
 # ---------------------------------------------------------------------------
 # Derived values computed by SEVERAL scripts.
 #
