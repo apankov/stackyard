@@ -17,6 +17,8 @@
 set -euo pipefail
 
 ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# shellcheck source=bin/lib-workspace.sh
+. "$ROOT/bin/lib-workspace.sh"
 DEST=""; REPO="https://github.com/apankov/stackyard.git"
 
 while [ $# -gt 0 ]; do
@@ -33,7 +35,7 @@ done
 
 NAME="$(basename "$DEST")"
 VERSION="v$(cat "$ROOT/platform/VERSION")"
-COMMIT="$( cd "$ROOT" && git rev-parse HEAD )"
+COMMIT="$(ws_commit)"
 
 mkdir -p "$DEST"/{stacks,state/htpasswd,state/certs,dumps,gpg,nginx}
 touch "$DEST/state/.keepit" "$DEST/dumps/.keepit" "$DEST/gpg/.keepit" "$DEST/nginx/.keepit"

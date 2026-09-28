@@ -13,6 +13,8 @@
 set -euo pipefail
 
 ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# shellcheck source=bin/lib-workspace.sh
+. "$ROOT/bin/lib-workspace.sh"
 DEST=""; WANT=""
 
 while [ $# -gt 0 ]; do
@@ -30,16 +32,23 @@ done
 LOCK="$DEST/stackyard.lock"
 [ -f "$LOCK" ] || { echo "Error: no $LOCK — is this really a stackyard machine?" >&2; exit 2; }
 
+COMMIT=""
 if [ -n "$WANT" ]; then
-  COMMIT="$( cd "$ROOT" && git rev-parse "$WANT^{commit}" )"
+  # An installed CLI's mirror is as fresh as its last install. A release made
+  # since then is fetched rather than reported as not existing.
+  if ! COMMIT="$(ws_git rev-parse --verify --quiet "$WANT^{commit}")" && ws_installed; then
+    ws_git fetch --quiet --prune origin || true
+    COMMIT="$(ws_git rev-parse --verify --quiet "$WANT^{commit}" || true)"
+  fi
+  [ -n "$COMMIT" ] || { echo "Error: no $WANT in stackyard" >&2; exit 2; }
   VERSION="$WANT"
 else
   VERSION="v$(cat "$ROOT/platform/VERSION")"
-  COMMIT="$( cd "$ROOT" && git rev-parse HEAD )"
+  COMMIT="$(ws_commit)"
   # Uncommitted edits to the platform never reach a machine: bootstrap fetches
   # a commit. Staying quiet about that is not an option — someone would see
-  # "updated" and not get their own change.
-  if ! ( cd "$ROOT" && git diff --quiet HEAD -- platform profiles ); then
+  # "updated" and not get their own change. An installed version has no edits.
+  if ! ws_installed && ! ws_git diff --quiet HEAD -- platform profiles; then
     echo "Warning: platform/ or profiles/ has uncommitted changes." >&2
     echo "  Only what is committed ($COMMIT) will reach the machine." >&2
   fi
@@ -81,7 +90,7 @@ fi
 # What exactly will arrive. The platform diff is shown BEFORE the lock is
 # edited: the decision to update is made from it, not from a version number.
 echo "== what changes in the platform"
-( cd "$ROOT" && git --no-pager diff --stat "$OLD_C..$COMMIT" -- platform profiles 2>/dev/null ) \
+ws_git --no-pager diff --stat "$OLD_C..$COMMIT" -- platform profiles 2>/dev/null \
   || echo "  (the old commit $OLD_C was not found in this repository)"
 
 python3 - "$LOCK" "$VERSION" "$COMMIT" <<'PY'

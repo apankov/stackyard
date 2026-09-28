@@ -12,7 +12,9 @@
 set -uo pipefail
 
 ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
-HEAD_COMMIT="$( cd "$ROOT" && git rev-parse HEAD )"
+# shellcheck source=bin/lib-workspace.sh
+. "$ROOT/bin/lib-workspace.sh"
+HEAD_COMMIT="$(ws_commit)"
 HEAD_VERSION="v$(cat "$ROOT/platform/VERSION")"
 
 paths=("$@")
@@ -45,7 +47,7 @@ for p in "${paths[@]}"; do
   else
     # What is counted is commits that TOUCH the platform: a machine twenty
     # README commits behind is behind on nothing.
-    n="$( cd "$ROOT" && git rev-list --count "$c..$HEAD_COMMIT" -- platform profiles 2>/dev/null || echo '?' )"
+    n="$(ws_git rev-list --count "$c..$HEAD_COMMIT" -- platform profiles 2>/dev/null || echo '?')"
     lag="$n"
     [ "$n" != "0" ] && behind=$((behind + 1))
   fi
