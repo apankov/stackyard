@@ -13,6 +13,7 @@
 # between them produces `host not found in upstream`, an nginx crash loop, and
 # every site on the machine at once.
 #
+#   ./stack init  [<stack>...]  # create the missing .env files from their examples
 #   ./stack list                # what is enabled and what is actually alive
 #   ./stack enable  <stack>...  # enable and bring up
 #   ./stack disable <stack>...  # stop; data and images are left intact
@@ -141,6 +142,10 @@ usage() {
 Enable and disable stacks. The source of truth is Enabled_Stacks in
 .env-stacks; this script brings both docker compose and nginx in line with it.
 
+  stack init [<stack>...]     create the missing .env files from their examples
+                              (the machine's, and those of the enabled or named
+                              stacks), chmod 600, name what is still CHANGE_ME;
+                              exit code 1 until nothing is
   stack list                  what is enabled, what is running, what has vhosts
   stack enable  <stack>...    enable: manifest -> containers -> vhost -> units
   stack disable <stack>...    disable: manifest -> units -> vhost -> containers
@@ -409,6 +414,134 @@ verb_list() {
   printf '\nManifest: %s\n' "$([ -f "$MANIFEST" ] && echo "$MANIFEST" || echo 'NONE (every stack with a complete file set counts as enabled)')"
 }
 
+# Copy an example into place, readable by its owner only. umask rather than a
+# chmod afterwards: the file is about to hold secrets, and it should not exist
+# readable by others even for the instant between two commands.
+copy_private() {
+  mkdir -p "$(dirname "$2")"
+  ( umask 077 && cp "$1" "$2" )
+}
+
+# init's one write, reported in paths relative to the machine.
+init_create() {
+  local ex="${1#"$ROOT_DIR"/}" f="${2#"$ROOT_DIR"/}"
+  created=$((created + 1))
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '  [dry] would create %s from %s\n' "$f" "$ex"
+    return 0
+  fi
+  copy_private "$1" "$2"
+  ok "created $f from $ex"
+}
+
+# Create the .env files a machine needs from their examples, then name what is
+# still to be filled in.
+#
+# On a migration these used to be copied by hand from a list in the runbook:
+# the machine's .env, the manifest, and one per stack — a profile stack's
+# example under profile/ while its .env goes under stacks/, two paths that are
+# easy to cross. An existing file is never touched: it is the operator's, and
+# the value in it may be the only copy of a password.
+#
+# The stacks are the enabled ones, or the ones named, together with what they
+# Require: enable adds those by itself and would then stop at the dependency's
+# missing .env.
+#
+# Exits non-zero while anything is still CHANGE_ME, so "init, fill in, init"
+# ends with a run that proves it.
+verb_init() {
+  local want=() s req i f ex key created=0 left=0 files=() examples=()
+
+  # Run as root on a machine owned by someone else, the files would come out
+  # root's and mode 600 — unreadable by the user every container and timer on
+  # the machine runs as.
+  local owner
+  owner=$(stat -c '%U' "$ROOT_DIR" 2>/dev/null || stat -f '%Su' "$ROOT_DIR" 2>/dev/null || echo "")
+  if [ "$(id -u)" -eq 0 ] && [ -n "$owner" ] && [ "$owner" != "root" ]; then
+    die "run init as $owner, who owns the machine, not as root"
+  fi
+  # Before anything is written: a typo should not leave half an init behind.
+  for s in "$@"; do
+    stack_exists "$s" || die "no such stack: '$s' (see ./stack list)"
+  done
+
+  step "Machine"
+  # The manifest first: without arguments it is what says which stacks to set up.
+  for f in .env-stacks .env; do
+    if [ -f "$ROOT_DIR/$f" ]; then
+      ok "$f is present — left as it is"
+    elif [ -f "$ROOT_DIR/$f.example" ]; then
+      init_create "$ROOT_DIR/$f.example" "$ROOT_DIR/$f"
+    else
+      bad "no $f and no $f.example to create it from"
+    fi
+    files+=("$ROOT_DIR/$f"); examples+=("$ROOT_DIR/$f.example")
+  done
+  # Optional: a machine without backups or alerts is a choice, and creating
+  # these would turn that choice into a list of CHANGE_ME to fill.
+  for f in .env-backup .env-notify; do
+    if [ -f "$ROOT_DIR/$f" ]; then
+      files+=("$ROOT_DIR/$f"); examples+=("")
+    elif [ -f "$ROOT_DIR/$f.example" ]; then
+      echo "  optional, not created: $f (cp $f.example $f && chmod 600 $f)"
+    fi
+  done
+
+  if [ $# -gt 0 ]; then
+    want=("$@")
+  else
+    # Under --dry-run the manifest was not copied; its example is what it
+    # would have said.
+    if [ ! -f "$MANIFEST" ] && [ -f "$MANIFEST.example" ]; then
+      # Read by stacks_enabled in lib-stacks.sh.
+      # shellcheck disable=SC2034
+      STACKS_ENABLED_OVERRIDE=$(grep -E '^[[:space:]]*Enabled_Stacks=' "$MANIFEST.example" \
+                                | tail -n 1 | cut -d '=' -f2- | tr -d '"'"'" || true)
+    fi
+    while IFS= read -r s; do [ -n "$s" ] && want+=("$s"); done < <(stacks_enabled 2>/dev/null)
+    unset STACKS_ENABLED_OVERRIDE
+  fi
+  # An index loop over a growing list: a dependency's own Requires count too.
+  for ((i = 0; i < ${#want[@]}; i++)); do
+    for req in $(stack_requires "${want[$i]}"); do
+      case " ${want[*]} " in *" $req "*) ;; *) want+=("$req") ;; esac
+    done
+  done
+
+  step "Stacks"
+  [ ${#want[@]} -gt 0 ] || warn "no stacks enabled or named — ./stack init <stack>... sets up the ones you are about to enable"
+  for s in "${want[@]}"; do
+    f="$(stack_env_file "$s")"
+    # Next to the stack, wherever it lives — the same rule as stack_missing_files.
+    ex="$(stack_dir "$s")/.env.example"
+    if [ -f "$f" ]; then
+      ok "stacks/$s/.env is present — left as it is"
+    elif [ -f "$ex" ]; then
+      init_create "$ex" "$f"
+    else
+      ok "$s needs no .env"
+      continue
+    fi
+    files+=("$f"); examples+=("$ex")
+  done
+
+  step "Still to fill in"
+  for i in "${!files[@]}"; do
+    f="${files[$i]}"
+    # Under --dry-run nothing was copied, and the example is what would be.
+    ex="$f"; [ -f "$f" ] || ex="${examples[$i]}"
+    while IFS= read -r key; do
+      bad "${f#"$ROOT_DIR"/}: $key"; left=$((left + 1))
+    done < <(env_unfilled "$ex")
+  done
+  [ "$left" -eq 0 ] && ok "nothing left at CHANGE_ME"
+
+  step "Summary"
+  echo "  $([ "$DRY_RUN" -eq 1 ] && echo "would create" || echo created): $created, still to fill in: $left"
+  [ "$PROBLEMS" -gt 0 ] && exit 1
+  exit 0
+}
+
 verb_enable() {
   local want=() s req add enabled_now new_list svc_args=()
   want=("$@")
@@ -432,7 +565,7 @@ verb_enable() {
 
   for s in "${want[@]}"; do
     missing="$(stack_missing_files "$s" | tr '\n' ' ')"
-    [ -n "$(echo $missing)" ] && die "stack '$s' is missing files: $missing"
+    [ -n "$(echo $missing)" ] && die "stack '$s' is missing files: $missing(./stack init $s creates the .env ones)"
   done
 
   enabled_now="$(stacks_enabled 2>/dev/null | tr '\n' ' ')"
@@ -1370,11 +1503,12 @@ while [ $# -gt 0 ]; do
 done
 
 case "${VERB:-list}" in
+  init)    verb_init ${ARGS[@]+"${ARGS[@]}"} ;;
   list)    verb_list ;;
   check)   verb_check ;;
   sync)    verb_sync ;;
   enable)  [ ${#ARGS[@]} -gt 0 ] || die "name a stack: $0 enable <stack>..."; verb_enable "${ARGS[@]}" ;;
   disable) [ ${#ARGS[@]} -gt 0 ] || die "name a stack: $0 disable <stack>..."; verb_disable "${ARGS[@]}" ;;
   purge)   [ ${#ARGS[@]} -eq 1 ] || die "purge takes EXACTLY one stack: $0 purge <stack>"; verb_purge "${ARGS[0]}" ;;
-  *)       die "unknown command: '$VERB' (list|enable|disable|purge|sync|--check)" ;;
+  *)       die "unknown command: '$VERB' (init|list|enable|disable|purge|sync|--check)" ;;
 esac

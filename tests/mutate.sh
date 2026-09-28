@@ -127,6 +127,11 @@ MUTATIONS=(
   'certs: an unknown value is read as the default@@platform/lib/lib-stacks.sh@@    case "$m" in getssl|external) continue ;; esac@@    case "$m" in *) continue ;; esac'
   'certs: the machine always wants getssl timers@@platform/lib/lib-stacks.sh@@  [ -z "$(stacks_enabled 2>/dev/null)" ] || [ -n "$(stacks_domains_getssl)" ]@@  true'
   'certs: an empty manifest reads as nothing needing getssl@@platform/lib/lib-stacks.sh@@  [ -z "$(stacks_enabled 2>/dev/null)" ] || [ -n "$(stacks_domains_getssl)" ]@@  [ -n "$(stacks_domains_getssl)" ]'
+
+  # --- stack init: a profile stack's .env silently not created, or a secrets
+  # file created readable by everyone on the host.
+  'init: the example looked up by the machine path@@platform/bin/stack.sh@@    ex="$(stack_dir "$s")/.env.example"@@    ex="$ROOT_DIR/stacks/$s/.env.example"'
+  'init: the copy keeps the example'"'"'s mode@@platform/bin/stack.sh@@  ( umask 077 \&\& cp "$1" "$2" )@@  cp "$1" "$2"'
 )
 
 pass=0; miss=0

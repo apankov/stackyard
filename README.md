@@ -137,6 +137,7 @@ privileges is knowledge about MySQL, not about the platform.
 
 ```sh
 cd machines/client-acme
+./stack init           # create missing .env files from their examples, name what is still CHANGE_ME
 ./stack list           # what is enabled and what is actually alive
 ./stack --check        # declarations, domains, databases, upstreams, vhosts, units
 ./stack enable <stack> # containers first, then the vhost — the order matters
@@ -257,13 +258,15 @@ fail the install — the platform is already installed by that point.
 cd ~/dev/stackyard
 ./bin/new-machine.sh ~/dev/machines/client-acme
 cd ~/dev/machines/client-acme && git init
-$EDITOR .env.example .env-stacks.example   # then cp without .example
+$EDITOR .env.example .env-stacks.example   # Enabled_Stacks lists what the machine runs
 # describe the sites in stacks/, commit, push
 
 # on the server
 git clone <the machine's repository> /mnt/data/client-acme
 cd /mnt/data/client-acme
 ./bootstrap
+./stack init mysql php-fpm site   # their .env files from the examples; rerun until it passes
+$EDITOR .env stacks/*/.env
 sudo ./host-setup
 ./stack enable mysql php-fpm site
 ```

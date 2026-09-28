@@ -1934,6 +1934,59 @@ done
 # exist for.
 check "the fixtures really ran" "$([ "$fixtures_seen" -ge 2 ] && echo yes || echo "no ($fixtures_seen)")" "yes"
 
+echo "== stack init"
+
+# A fixture machine exactly as a fresh clone has it: examples, no .env at all.
+# alpha on purpose — it enables profile stacks (mysql, php-fpm), whose example
+# sits under profile/ while the .env goes under stacks/, which is the path init
+# exists to get right.
+IM="$WORK/init-alpha"
+cp -R "$FIXTURES/alpha"/. "$IM"/
+rm -rf "$IM/platform" "$IM/profile" "$IM/.stackyard" "$IM/state"
+rm -f "$IM/.env" "$IM/.env-stacks" "$IM"/stacks/*/.env
+ln -sfn "$REPO_DIR/platform" "$IM/platform"
+ln -sfn "$REPO_DIR/profiles" "$IM/profile"
+# ROOT_DIR as the ./stack wrapper sets it: platform/ here links straight into
+# the working tree, and the script's own fallback would land on the repository.
+init_run() { ( cd "$IM" && ROOT_DIR="$IM" ./platform/bin/stack.sh init "$@" ) 2>&1; }
+mode() { ls -l "$1" 2>/dev/null | cut -c1-10; }
+
+init_run --dry-run >/dev/null
+check "init --dry-run creates nothing" \
+  "$(ls "$IM"/.env "$IM"/.env-stacks "$IM"/stacks/*/.env 2>/dev/null)" ""
+
+out=$(init_run); rc=$?
+check "init creates the machine's .env" "$(mode "$IM/.env")" "-rw-------"
+check "init creates the manifest" "$([ -f "$IM/.env-stacks" ] && echo yes || echo no)" "yes"
+check "init creates a machine stack's .env from the example next to it" "$(mode "$IM/stacks/site/.env")" "-rw-------"
+check "init creates a profile stack's .env from the profile's example" \
+  "$(cmp -s "$IM/stacks/mysql/.env" "$REPO_DIR/profiles/stacks/mysql/.env.example" && echo same || echo differs)" "same"
+check "init creates no .env for a stack without an example" \
+  "$([ -e "$IM/stacks/redirect/.env" ] && echo yes || echo no)" "no"
+check "init fails while CHANGE_ME remains" "$rc" "1"
+check "and names the key" "$(printf '%s\n' "$out" | grep -c 'stacks/mysql/.env: Mysql_Root_Password')" "1"
+
+# A second run must leave a filled-in file alone: it may hold the only copy of
+# a password.
+for f in "$IM"/.env "$IM"/stacks/*/.env; do [ -f "$f" ] || continue; sed 's/CHANGE_ME/init-fixture-pw/' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
+printf 'Kept=1\n' >> "$IM/stacks/site/.env"
+init_run >/dev/null; rc=$?
+check "init leaves an existing .env as it is" "$(tail -n 1 "$IM/stacks/site/.env")" "Kept=1"
+check "init succeeds once nothing is CHANGE_ME" "$rc" "0"
+
+# Named stacks bring what they Require: enable would add the dependency itself
+# and then stop at its missing .env.
+printf 'Enabled_Stacks=""\n' > "$IM/.env-stacks"
+rm -f "$IM"/stacks/*/.env
+init_run site >/dev/null
+check "init <stack> also sets up what it requires" \
+  "$([ -f "$IM/stacks/mysql/.env" ] && echo yes || echo no)" "yes"
+rm -f "$IM"/stacks/*/.env
+init_run nosuch site >/dev/null
+check "an unknown stack stops init before it writes anything" \
+  "$(ls "$IM"/stacks/*/.env 2>/dev/null)" ""
+rm -rf "$IM"
+
 echo "== .gitignore"
 
 # An `.env*` rule without an exception silently eats every new example: files

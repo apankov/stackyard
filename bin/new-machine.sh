@@ -96,7 +96,7 @@ EOF
 
 cat > "$DEST/.env.example" <<EOF
 # Platform-level values. Loaded always, for every compose command.
-#   cp .env.example .env && chmod 600 .env
+#   ./stack init creates .env from this file (chmod 600).
 
 # Where THIS repository is deployed on the server.
 Platform_Deploy_Dir=/mnt/data/$NAME
@@ -127,8 +127,8 @@ it at the version recorded in \`stackyard.lock\`.
 git clone <this repository> /mnt/data/$NAME
 cd /mnt/data/$NAME
 ./bootstrap                     # platform $VERSION
-cp .env.example .env && \$EDITOR .env
-cp .env-stacks.example .env-stacks && \$EDITOR .env-stacks
+./stack init <stacks>           # .env files from their examples; rerun until it passes
+\$EDITOR .env stacks/*/.env
 sudo ./host-setup
 ./stack enable <stacks>
 \`\`\`

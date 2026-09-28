@@ -234,7 +234,7 @@ step "Vendored layers"
 step "Environment files"
 
 if [ ! -f "$ENV_FILE" ]; then
-  bad "no $ENV_FILE — cp .env.example .env && chmod 600 .env, then fill it in"
+  bad "no $ENV_FILE — ./stack init creates it from .env.example, then fill it in"
 else
   ok ".env is present"
 
@@ -274,11 +274,12 @@ for stack in $(stacks_enabled 2>/dev/null); do
     ok "stack $stack: all files present"
   else
     for f in $missing; do
-      if [ -f "$ROOT_DIR/$f.example" ]; then
-        bad "stack $stack: no $f — cp $f.example $f && chmod 600 $f, then fill in the secrets"
-      else
-        bad "stack $stack: no $f"
-      fi
+      # A .env is reported missing only when the stack has an example, which
+      # for a profile stack sits under profile/ rather than next to $f.
+      case "$f" in
+        */.env) bad "stack $stack: no $f — ./stack init $stack creates it, then fill in the secrets" ;;
+        *)      bad "stack $stack: no $f" ;;
+      esac
     done
   fi
 done
