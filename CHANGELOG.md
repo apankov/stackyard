@@ -8,7 +8,7 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
-## [Unreleased]
+## [0.34.1] — 2026-09-29
 
 ### Fixed
 - `stackyard pin` ends by saying which steps run on the laptop (`./bootstrap`
@@ -115,7 +115,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
-[Unreleased]: https://github.com/apankov/stackyard/compare/v0.34.0...HEAD
+[0.34.1]: https://github.com/apankov/stackyard/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/apankov/stackyard/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/apankov/stackyard/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/apankov/stackyard/compare/v0.31.0...v0.32.0
