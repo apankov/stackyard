@@ -16,7 +16,7 @@ Two places, never mixed up:
 | the server | a clone of the same repository | `git pull`, `./bootstrap`, the `./stack` verbs, checks |
 
 The machine's repository is the whole truth about the machine: which stacks run
-(`.env-stacks`), what each one is (`stacks/*/stack.conf`) and which platform it
+(`machine.conf`), what each one is (`stacks/*/stack.conf`) and which platform it
 runs on (`stackyard.lock`). Secrets are not in it: `.env` files exist only on
 the server. An agent session scoped to one machine's repository therefore
 cannot see another client's composition or secrets, which is the least

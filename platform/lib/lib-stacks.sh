@@ -2,7 +2,7 @@
 # Which stacks a machine has and which of them are enabled. Sourced, never run
 # on its own.
 #
-# There is exactly one source of truth — Enabled_Stacks in .env-stacks — and
+# There is exactly one source of truth — Enabled_Stacks in machine.conf — and
 # everything else is derived from it: the set of compose files, the vhost
 # includes, the systemd units, the certificate domains. A second list of
 # "which stacks are enabled" anywhere means compose and nginx can disagree,
@@ -345,13 +345,21 @@ stack_exists() {
   list_has "$(stacks_available)" "$1"   # in full first: see stack_dir
 }
 
-# The enabled stacks come from Enabled_Stacks in .env-stacks, in file order.
+# The machine's manifest: which stacks run, and nothing secret. Committed to
+# the machine's repository, so what the machine is meant to run is read from
+# git, and a change to it is a diff somebody can review.
+stacks_manifest() { printf '%s/machine.conf' "$(stacks_root)"; }
+
+# The enabled stacks come from Enabled_Stacks in machine.conf, in file order.
 #
-# A missing .env-stacks is NOT a failure: a fresh `git pull` on a server must
-# not break every compose command on the machine. Hence a warning on stderr and
-# a fallback to "every stack that has all of its files".
+# A missing manifest means NOTHING is enabled, said on stderr. It used to mean
+# "every stack with all of its files", which was harmless while only a person
+# acted on the list. Now that sync starts what the manifest names, a guess
+# there would start stacks nobody asked for; stack.sh refuses to change the
+# machine without the file instead.
 stacks_enabled() {
-  local manifest="$(stacks_root)/.env-stacks" raw s
+  local manifest raw s
+  manifest="$(stacks_manifest)"
 
   # An override from stack.sh: it already knows what the manifest is about to
   # become, and under --dry-run it does not write the file. Without this,
@@ -368,17 +376,14 @@ stacks_enabled() {
       if stack_exists "$s"; then
         printf '%s\n' "$s"
       else
-        echo "Warning: .env-stacks lists stack '$s', but there is no stacks/$s directory — skipping" >&2
+        echo "Warning: machine.conf lists stack '$s', but there is no stacks/$s directory — skipping" >&2
       fi
     done
     return 0
   fi
 
-  echo "Warning: no .env-stacks — treating every stack with a complete file set as enabled." >&2
-  echo "  Create the manifest: cp .env-stacks.example .env-stacks && ./stack sync" >&2
-  while IFS= read -r s; do
-    [ -z "$(stack_missing_files "$s")" ] && printf '%s\n' "$s"
-  done < <(stacks_available)
+  echo "Warning: no machine.conf — no stack counts as enabled." >&2
+  return 0
 }
 
 stack_is_enabled() {
@@ -974,7 +979,7 @@ stacks_domains_external() {
 # NO enabled stacks is deliberately answered YES, not no. "Every enabled stack
 # is external" and "the manifest is missing or empty" are different
 # statements, and only the first one is a decision anybody made. Reading the
-# second as "nothing here needs a certificate" would let an .env-stacks that
+# second as "nothing here needs a certificate" would let a machine.conf that
 # failed to arrive uninstall the renewal timers of a machine that was working
 # — quietly, and in the direction that breaks TLS a month later.
 stacks_getssl_any() {
@@ -1099,7 +1104,7 @@ MACHINE_CONF_DIR_IN_CONTAINER="/etc/nginx/machine"
 stacks_include_content() {
   cat <<'HDR'
 # GENERATED FILE — edits will be overwritten.
-# Produced by stack.sh from Enabled_Stacks in .env-stacks.
+# Produced by stack.sh from Enabled_Stacks in machine.conf.
 #
 # The point: nginx reads only the top level of conf.d, while stack vhosts live
 # outside it, under the mounted /etc/nginx/stacks/<stack>/nginx/. They are read

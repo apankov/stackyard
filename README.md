@@ -7,7 +7,7 @@ front, TLS for every domain, a shared database, backups, alerts and systemd
 timers — and keep a fleet of such hosts on known, pinned versions. Plain bash;
 the server needs nothing but docker.
 
-- **One list decides.** `Enabled_Stacks` in a machine's `.env-stacks` is the only
+- **One list decides.** `Enabled_Stacks` in a machine's `machine.conf` is the only
   place that says what runs. Compose files, vhost includes, certificate domains,
   systemd units and database grants are derived from it.
 - **Nothing half-enabled.** `./stack enable` starts the containers before the
@@ -56,7 +56,7 @@ host with one compose project is all there is.
 An AI agent can run a stackyard fleet with the same guarantees a careful human
 gets, because the design already assumes nobody should have to guess:
 
-- **The whole state is text in git.** A machine is `stack.conf`, `.env-stacks`
+- **The whole state is text in git.** A machine is `stack.conf`, `machine.conf`
   and `stackyard.lock`: no control plane, no UI, no API token to a panel. Every
   change an agent makes is a diff a human can read before it is pushed.
 - **Commands reconcile, and are safe to repeat.** `enable`, `disable`, `sync`
@@ -100,7 +100,7 @@ curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh |
 stackyard fleet add-dir ~/dev/machines     # every machine created there is in the fleet
 ```
 
-`latest` is the newest release; `…/stackyard/v0.32.0/install.sh` pins one. The
+`latest` is the newest release; `…/stackyard/v0.33.0/install.sh` pins one. The
 script prints the tag and commit it installed and keeps everything in
 `~/.local/share/stackyard/`. A pipe into bash cannot be read first; to read it:
 `curl -o install.sh <url> && less install.sh && bash install.sh`.
@@ -110,7 +110,7 @@ A new machine:
 ```sh
 stackyard new ~/dev/machines/acme          # skeleton, pinned to the CLI's commit
 cd ~/dev/machines/acme                     # already a git repository
-$EDITOR .env.example .env-stacks.example   # paths, network; Enabled_Stacks
+$EDITOR .env.example machine.conf          # paths, network; Enabled_Stacks
 # describe your own stacks in stacks/, commit, push to a private repository
 ```
 
@@ -131,7 +131,7 @@ Updating a machine:
 ```sh
 stackyard install latest                   # the CLI itself; older versions stay installed
 stackyard pin ~/dev/machines/acme          # shows the platform diff, rewrites the lock
-git -C ~/dev/machines/acme commit -am "platform v0.32.0" && git -C ~/dev/machines/acme push
+git -C ~/dev/machines/acme commit -am "platform v0.33.0" && git -C ~/dev/machines/acme push
 # on the server: git pull && ./bootstrap && ./stack sync && ./stack --check
 stackyard fleet                            # who runs what, and how far behind
 ```

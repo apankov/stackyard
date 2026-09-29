@@ -9,10 +9,10 @@ it at the version recorded in `stackyard.lock`.
 git clone <this repository> /mnt/data/alpha
 cd /mnt/data/alpha
 ./bootstrap                     # platform v0.3.0
-cp .env.example .env && $EDITOR .env
-cp .env-stacks.example .env-stacks && $EDITOR .env-stacks
+./stack init                    # .env files for the stacks in machine.conf
+$EDITOR .env stacks/*/.env
 sudo ./host-setup
-./stack enable <stacks>
+./stack sync
 ```
 
 ## Update the platform

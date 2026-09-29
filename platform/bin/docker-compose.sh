@@ -4,7 +4,7 @@
 #
 # It assembles one `docker compose` invocation from the platform's files and
 # the files of the ENABLED stacks. Which stacks those are comes from
-# Enabled_Stacks in .env-stacks. No script holds its own list of files: a
+# Enabled_Stacks in machine.conf. No script holds its own list of files: a
 # second place with the same knowledge drifts from the manifest silently.
 #
 # A consequence: a disabled stack's file is never parsed, so a missing .env in
@@ -137,7 +137,7 @@ fi
 if [ -n "$MISSING" ]; then
   echo "Error: enabled stacks are missing files:" >&2
   printf '%s' "$MISSING" >&2
-  echo "Create them from the examples (cp stacks/<stack>/.env.example stacks/<stack>/.env && chmod 600 ...)" >&2
+  echo "Create them from their examples: ./stack init" >&2
   echo "or disable the stack: ./stack disable <stack>" >&2
   exit 1
 fi

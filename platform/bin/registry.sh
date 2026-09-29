@@ -320,7 +320,7 @@ verb_check() {
     esac
   done < <(stacks_enabled 2>/dev/null)
   # Zero stacks is not "all is well" but "there was nothing to look at": on a
-  # machine without .env-stacks nobody counts as enabled, and silence here
+  # machine without machine.conf nobody counts as enabled, and silence here
   # would read as health.
   if [ "$seen" -eq 0 ]; then
     warn "no ENABLED stack pulls images from an external registry — there was nothing to check"

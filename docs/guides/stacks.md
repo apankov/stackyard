@@ -25,7 +25,7 @@ Its subdirectories are declarations too:
 | `.env.example` | the stack's variables; `./stack init` makes `stacks/<name>/.env` from it |
 
 Everything runs through the machine's `./dc`, and the composition is one
-`Enabled_Stacks` line in its `.env-stacks`. Compose files, vhost includes,
+`Enabled_Stacks` line in its `machine.conf`. Compose files, vhost includes,
 certificate domains, systemd units and database orders all follow from that
 line; there is no second list anywhere. If compose and nginx disagreed, nginx
 would crash-loop and take every vhost down with it.

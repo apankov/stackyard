@@ -107,7 +107,7 @@ fixture zulu compose.yaml 'services:
 fixture zulu nginx/10-zulu.test.conf 'server {
     server_name zulu.test;
 }'
-printf 'Enabled_Stacks="alpha zulu"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="alpha zulu"\n' > "$WORK/machine.conf"
 
 got=$(stacks_include_lines)
 want='include /etc/nginx/stacks/zulu/nginx/*.conf;
@@ -131,7 +131,7 @@ fixture_root profile/stacks papa compose.yaml 'services:
     image: alpine'
 fixture_root profile/stacks papa nginx/50-papa.conf 'server { server_name papa.test; }'
 fixture_root profile/stacks quebec stack.conf 'Requires=""'
-printf 'Enabled_Stacks="papa quebec alpha"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa quebec alpha"\n' > "$WORK/machine.conf"
 
 check "a profile stack appears in the list" \
   "$(stacks_available | grep -cx papa)" "1"
@@ -224,9 +224,9 @@ fixture charlie compose.yaml 'services:
   charlie-app:
     image: alpine'
 
-printf 'Enabled_Stacks="alpha zulu bravo charlie"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="alpha zulu bravo charlie"\n' > "$WORK/machine.conf"
 with_all=$(stacks_static_content)
-printf 'Enabled_Stacks="alpha"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="alpha"\n' > "$WORK/machine.conf"
 with_one=$(stacks_static_content)
 
 # The central invariant: the text of the nginx spec is the same for any set of
@@ -251,12 +251,12 @@ fixture delta compose.yaml 'services:
   delta-app:
     image: alpine'
 fixture bravo stack.conf 'Domains="bravo.test"'
-printf 'Enabled_Stacks="delta bravo"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="delta bravo"\n' > "$WORK/machine.conf"
 
 check "domains are collected from enabled stacks, deduplicated and sorted" \
   "$(stacks_domains | tr '\n' ' ')" "bravo.test d1.test d2.test "
 
-printf 'Enabled_Stacks="bravo"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="bravo"\n' > "$WORK/machine.conf"
 check "a disabled stack contributes no domains" "$(stacks_domains | tr '\n' ' ')" "bravo.test "
 
 echo "== whose certificate it is"
@@ -266,7 +266,7 @@ echo "== whose certificate it is"
 fixture own stack.conf 'Domains="own.test"'
 fixture alb stack.conf 'Domains="alb.test+www.alb.test"
 Certs="external"'
-printf 'Enabled_Stacks="own alb"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="own alb"\n' > "$WORK/machine.conf"
 
 # The split that matters: what nginx must SERVE does not change with who
 # signed the certificate, while what getssl is pointed at does.
@@ -279,17 +279,17 @@ check "the getssl-managed domains leave it out" \
 check "the external list carries the aliases too" \
   "$(stacks_domains_external | tr '\n' ' ')" "alb.test www.alb.test "
 
-printf 'Enabled_Stacks="alb"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="alb"\n' > "$WORK/machine.conf"
 check "a machine with nothing but external domains needs no getssl" \
   "$(stacks_getssl_any && echo yes || echo no)" "no"
 check "...and asks for no getssl configs at all" "$(stacks_domain_specs)" ""
 
 # The direction that matters: a manifest that did not arrive must not read as
 # a decision to stop renewing anything.
-printf 'Enabled_Stacks=""\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks=""\n' > "$WORK/machine.conf"
 check "an empty manifest is not a declaration that nothing needs getssl" \
   "$(stacks_getssl_any && echo yes || echo no)" "yes"
-rm -f "$WORK/.env-stacks"
+rm -f "$WORK/machine.conf"
 check "a missing manifest is not one either" \
   "$(stacks_getssl_any && echo yes || echo no)" "yes"
 
@@ -298,13 +298,13 @@ check "a missing manifest is not one either" \
 # issuing the certificate, which is the safe half of the two.
 fixture oops stack.conf 'Domains="oops.test"
 Certs="exernal"'
-printf 'Enabled_Stacks="alb oops"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="alb oops"\n' > "$WORK/machine.conf"
 check "a typo in Certs is reported" \
   "$(check_certs_mode | grep -c 'stack oops: Certs="exernal" is not a known value')" "1"
 check "a misdeclared stack is still treated as one this machine issues for" \
   "$(stacks_getssl_any && echo yes || echo no)" "yes"
 
-printf 'Enabled_Stacks="bravo"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="bravo"\n' > "$WORK/machine.conf"
 
 echo "== stack units"
 
@@ -360,7 +360,7 @@ fixture foxtrot compose.yaml 'services:
   foxtrot-app:
     image: alpine'
 printf 'Foxtrot_DB_Dir=/mnt/data/fox\nFoxtrot_DB_File=f.db\n' > "$WORK/stacks/foxtrot/.env"
-printf 'Enabled_Stacks="foxtrot bravo"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="foxtrot bravo"\n' > "$WORK/machine.conf"
 
 # Here substitutions ARE expanded, unlike Static: backup.sh works only on
 # enabled stacks, and an enabled stack has an .env by construction.
@@ -421,7 +421,7 @@ fixture golf systemd/wrong-name.timer '[Timer]
 OnCalendar=daily'
 fixture golf systemd/devbox-golf-job.timer '[Timer]
 OnCalendar=daily'
-printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="golf delta"\n' > "$WORK/machine.conf"
 
 check "a duplicate domain is found" "$(check_domains_unique | wc -l | tr -d ' ')" "1"
 check "a duplicate domain is attributed to two different stacks" \
@@ -432,13 +432,13 @@ check "a duplicate domain is attributed to two different stacks" \
 # finding, and people stop reading it along with the rest of the report.
 fixture hotel stack.conf 'Domains="hotel.test hotel.test"
 Containers="no"'
-printf 'Enabled_Stacks="golf delta hotel"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="golf delta hotel"\n' > "$WORK/machine.conf"
 check "a duplicate within one stack is described in its own words" \
   "$(check_domains_unique | grep -c 'declared twice by stack hotel' | tr -d ' ')" "1"
 check "nothing says \"both hotel and hotel\"" \
   "$(check_domains_unique | grep -c 'both hotel and hotel' | tr -d ' ')" "0"
 rm -rf "$WORK/stacks/hotel"
-printf 'Enabled_Stacks="golf delta"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="golf delta"\n' > "$WORK/machine.conf"
 check "a domain without a vhost and a vhost without a domain — both directions" \
   "$(check_domains_match golf | wc -l | tr -d ' ')" "2"
 # A host path must have both properties at once: absolute AND through a
@@ -525,7 +525,7 @@ fixture november nginx/70-november.test.conf 'server {
         proxy_pass http://november-app:3000;
     }
 }'
-printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="mike november"\n' > "$WORK/machine.conf"
 
 check "upstreams are found even though the manifest's first stack has no nginx/" \
   "$(errexit_run stacks_upstreams)" "november-app"
@@ -544,7 +544,7 @@ fixture oscar2 nginx/80-oscar2.conf 'server {
 		fastcgi_pass	php-fpm:9000;
 	}
 }'
-printf 'Enabled_Stacks="mike november oscar2"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="mike november oscar2"\n' > "$WORK/machine.conf"
 check "fastcgi_pass counts as an upstream too" \
   "$(errexit_run stacks_upstreams | grep -cx 'php-fpm')" "1"
 
@@ -567,7 +567,7 @@ fixture romeo nginx/82-romeo.conf 'server {
 # The same written on one line, which is valid nginx and invisible to a
 # pattern anchored at the start of a line.
 fixture romeo nginx/83-romeo-ws.conf 'upstream romeo_ws { server romeo-ws:5000; } server { location /ws/ { proxy_pass http://romeo_ws; } }'
-printf 'Enabled_Stacks="mike november romeo"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="mike november romeo"\n' > "$WORK/machine.conf"
 check "an upstream block resolves to its server hosts, not to its own name" \
   "$(errexit_run stacks_upstreams | tr '\n' ' ')" "november-app romeo-backend romeo-ws "
 # Which containers watch-host.sh alerts about. A stack fronting an
@@ -579,7 +579,7 @@ fixture xray stack.conf 'Containers="no"
 Watch_Project="xray-app xray-jobs"'
 fixture yankee stack.conf 'Containers="no"
 Watch_Project="yankee-app"'
-printf 'Enabled_Stacks="xray"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="xray"\n' > "$WORK/machine.conf"
 check "the projects enabled stacks declare are the ones watched" \
   "$(errexit_run stacks_watch_projects | tr '\n' ' ')" "xray-app xray-jobs "
 W_UP="$(printf 'november-app\nromeo-backend\n')"
@@ -607,7 +607,7 @@ check "watch-host.sh reads the declared projects" \
 check "watch-host.sh decides through container_is_watched with them" \
   "$(grep -c 'container_is_watched "$project" "$PROJECT" "$WATCHED_PROJECTS" "$UPSTREAMS"' "$WH")" "1"
 
-printf 'Enabled_Stacks="mike november"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="mike november"\n' > "$WORK/machine.conf"
 check "a domain without a vhost is found under set -e" \
   "$(errexit_run check_domains_match mike | wc -l | tr -d ' ')" "1"
 check "a vhost without a domain is found under set -e" \
@@ -747,7 +747,7 @@ Zulu_Dump="lima-seed.sql"'
 fixture lima compose.yaml 'services:
   lima-app:
     image: alpine'
-printf 'Enabled_Stacks="papa kilo lima alpha"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa kilo lima alpha"\n' > "$WORK/machine.conf"
 
 check "the provider is found by role" "$(stacks_db_provider)" "papa"
 check "the order prefix comes from the provider" "$(stacks_db_prefix)" "Zulu"
@@ -779,17 +779,17 @@ check "a stack that declares nothing stays out of the YAML" \
 # A disabled stack has no use for a database. There is no failure in the other
 # direction: the initializer deletes nothing, so disable leaves the database
 # alone and enable brings it back.
-printf 'Enabled_Stacks="papa lima"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima"\n' > "$WORK/machine.conf"
 check "a disabled stack declares no database" \
   "$(stacks_databases_content | grep -c 'kilo')" "0"
 
 # With no provider enabled there is nobody to order from — and that is a
 # legitimate state rather than a breakage: a machine with a single proxy stack
 # needs no shared DBMS.
-printf 'Enabled_Stacks="lima"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="lima"\n' > "$WORK/machine.conf"
 check "without a provider the YAML is empty" "$(stacks_databases_content)" ""
 check "without a provider the file path is empty" "$(stacks_databases_file)" ""
-printf 'Enabled_Stacks="papa lima"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima"\n' > "$WORK/machine.conf"
 
 # A partial declaration is a failure rather than half an entry: a user without
 # a password would be created with an empty one and would let in anyone who can
@@ -798,7 +798,7 @@ fixture mike stack.conf 'Zulu_DB="mike"'
 fixture mike compose.yaml 'services:
   mike-app:
     image: alpine'
-printf 'Enabled_Stacks="papa lima mike"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima mike"\n' > "$WORK/machine.conf"
 check "a partial declaration is found" "$(check_db_decl mike | wc -l | tr -d ' ')" "1"
 check "a complete declaration raises nothing" "$(check_db_decl lima)" ""
 check "a stack that orders nothing raises nothing" "$(check_db_decl alpha)" ""
@@ -811,7 +811,7 @@ Zulu_Password="x"'
 fixture november compose.yaml 'services:
   november-app:
     image: alpine'
-printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/machine.conf"
 check "a duplicate database name is found" "$(check_databases_unique | wc -l | tr -d ' ')" "1"
 
 # There cannot be two providers: orders are distinguished by prefix rather than
@@ -822,9 +822,9 @@ DB_Init_Service="other-init"'
 fixture quebec compose.yaml 'services:
   quebec:
     image: alpine'
-printf 'Enabled_Stacks="papa quebec"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa quebec"\n' > "$WORK/machine.conf"
 check "two providers at once are found" "$(check_db_providers_unique | wc -l | tr -d ' ')" "1"
-printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/machine.conf"
 
 echo "== image registries"
 
@@ -845,7 +845,7 @@ fixture quebec stack.conf 'Image_Tag="master"'
 fixture quebec compose.yaml 'services:
   quebec-app:
     image: alpine:3.20'
-printf 'Enabled_Stacks="oscar papa quebec"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="oscar papa quebec"\n' > "$WORK/machine.conf"
 
 # The `image:` value is taken whole: a `:?` substitution contains spaces, and
 # splitting on them would leave half an image name — and purge uses that name
@@ -1321,7 +1321,7 @@ fixture tango nginx/70-tango.conf 'server { server_name tango.test; }'
 fixture_root profile/stacks uniform stack.conf 'Domains="uniform.test"
 Containers="no"'
 fixture_root profile/stacks uniform nginx/71-uniform.conf 'server { server_name uniform.test; }'
-printf 'Enabled_Stacks="papa lima november tango uniform"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima november tango uniform"\n' > "$WORK/machine.conf"
 
 mkdir -p "$(dirname "$(stacks_include_file)")"
 stacks_include_content > "$(stacks_include_file)"
@@ -1331,7 +1331,7 @@ check "the reader sees an enabled machine stack" \
 check "the reader sees an enabled PROFILE stack" \
   "$(stack_vhost_enabled uniform && echo yes || echo no)" "yes"
 
-printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/machine.conf"
 stacks_include_content > "$(stacks_include_file)"
 check "a disabled stack is invisible to the reader" \
   "$(stack_vhost_enabled tango && echo yes || echo no)" "no"
@@ -1345,7 +1345,7 @@ echo "== the state of a fresh machine"
 # demanded a `sync` that does not create it either. A closed loop in the first
 # minute of using the platform.
 rm -rf "$WORK/state"
-printf 'Enabled_Stacks="papa lima"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima"\n' > "$WORK/machine.conf"
 ensure_state_dirs
 for d in nginx-vhosts certs htpasswd getssl-config; do
   check "state/$d was created" "$([ -d "$WORK/state/$d" ] && echo yes || echo no)" "yes"
@@ -1355,12 +1355,12 @@ check "the provider's directory was created" "$([ -d "$WORK/state/papa" ] && ech
 # On a machine without a provider that directory must not exist: an empty one
 # is as misleading there as a missing one is where it is needed.
 rm -rf "$WORK/state"
-printf 'Enabled_Stacks="lima"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="lima"\n' > "$WORK/machine.conf"
 ensure_state_dirs
 check "without a provider its directory is not created" \
   "$([ -d "$WORK/state/papa" ] && echo yes || echo no)" "no"
 check "without a provider the database file path is empty" "$(stacks_databases_file)" ""
-printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/machine.conf"
 
 # Placeholder certificates must be created for profile stacks too. Otherwise
 # the domain is declared, the getssl config exists, and the file does not —
@@ -1372,10 +1372,10 @@ fixture_root profile/stacks sierra nginx/60-sierra.conf 'server {
 	ssl_certificate /etc/nginx/certs/sierra.test-fullchain.crt;
 	ssl_certificate_key /etc/nginx/certs/sierra.test.key;
 }'
-printf 'Enabled_Stacks="papa lima november sierra"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima november sierra"\n' > "$WORK/machine.conf"
 check "a profile stack's certificate path is visible" \
   "$(stacks_cert_paths | grep -c 'sierra.test-fullchain.crt')" "1"
-printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/.env-stacks"
+printf 'Enabled_Stacks="papa lima november"\n' > "$WORK/machine.conf"
 
 echo "== a stray directory among the vhosts"
 
@@ -1958,7 +1958,7 @@ done
 # DBMSes on purpose: the platform counts as shared exactly when both work.
 # The fixture is set up HERE, not by hand beforehand.
 #
-# Its .env, .env-stacks and stacks/*/.env are not in git (they are .env files,
+# Its .env and stacks/*/.env are not in git (they are .env files,
 # and the rule is the same for everyone). So a fresh clone does not have them,
 # and this block used to skip itself -- and a skip is indistinguishable from a
 # pass. The selftest was green only on the author's machine, where those files
@@ -1976,10 +1976,9 @@ fixture_machine() {
   # not in git, so a fresh clone and a developer's tree built different
   # fixtures: an old .env pointed Platform_Deploy_Dir back into the working
   # tree, and nginx -t below read certificates left there by some earlier run.
-  rm -f "$dst/.env" "$dst/.env-stacks" "$dst"/stacks/*/.env
+  rm -f "$dst/.env" "$dst"/stacks/*/.env
   ln -sfn "$REPO_DIR/platform" "$dst/platform"
   ln -sfn "$REPO_DIR/profiles" "$dst/profile"
-  [ -f "$dst/.env-stacks" ] || cp "$dst/.env-stacks.example" "$dst/.env-stacks" 2>/dev/null
   if [ ! -f "$dst/.env" ] && [ -f "$dst/.env.example" ]; then
     sed "s|^Platform_Deploy_Dir=.*|Platform_Deploy_Dir=$dst|" "$dst/.env.example" > "$dst/.env"
   fi
@@ -2187,7 +2186,7 @@ echo "== stack init"
 IM="$WORK/init-alpha"
 cp -R "$FIXTURES/alpha"/. "$IM"/
 rm -rf "$IM/platform" "$IM/profile" "$IM/.stackyard" "$IM/state"
-rm -f "$IM/.env" "$IM/.env-stacks" "$IM"/stacks/*/.env
+rm -f "$IM/.env" "$IM"/stacks/*/.env
 ln -sfn "$REPO_DIR/platform" "$IM/platform"
 ln -sfn "$REPO_DIR/profiles" "$IM/profile"
 # ROOT_DIR as the ./stack wrapper sets it: platform/ here links straight into
@@ -2197,11 +2196,12 @@ mode() { ls -l "$1" 2>/dev/null | cut -c1-10; }
 
 init_run --dry-run >/dev/null
 check "init --dry-run creates nothing" \
-  "$(ls "$IM"/.env "$IM"/.env-stacks "$IM"/stacks/*/.env 2>/dev/null)" ""
+  "$(ls "$IM"/.env "$IM"/stacks/*/.env 2>/dev/null)" ""
 
 out=$(init_run); rc=$?
 check "init creates the machine's .env" "$(mode "$IM/.env")" "-rw-------"
-check "init creates the manifest" "$([ -f "$IM/.env-stacks" ] && echo yes || echo no)" "yes"
+check "init leaves the manifest as the repository has it" \
+  "$(cmp -s "$IM/machine.conf" "$FIXTURES/alpha/machine.conf" && echo same || echo changed)" "same"
 check "init creates a machine stack's .env from the example next to it" "$(mode "$IM/stacks/site/.env")" "-rw-------"
 check "init creates a profile stack's .env from the profile's example" \
   "$(cmp -s "$IM/stacks/mysql/.env" "$REPO_DIR/profiles/stacks/mysql/.env.example" && echo same || echo differs)" "same"
@@ -2220,7 +2220,7 @@ check "init succeeds once nothing is CHANGE_ME" "$rc" "0"
 
 # Named stacks bring what they Require: enable would add the dependency itself
 # and then stop at its missing .env.
-printf 'Enabled_Stacks=""\n' > "$IM/.env-stacks"
+printf 'Enabled_Stacks=""\n' > "$IM/machine.conf"
 rm -f "$IM"/stacks/*/.env
 init_run site >/dev/null
 check "init <stack> also sets up what it requires" \
@@ -2229,6 +2229,17 @@ rm -f "$IM"/stacks/*/.env
 init_run nosuch site >/dev/null
 check "an unknown stack stops init before it writes anything" \
   "$(ls "$IM"/stacks/*/.env 2>/dev/null)" ""
+
+# Without the manifest, the verbs that change the machine refuse rather than
+# guess what it should run.
+rm -f "$IM/machine.conf"
+for v in sync "enable site" "disable site"; do
+  # shellcheck disable=SC2086
+  ( cd "$IM" && ROOT_DIR="$IM" ./platform/bin/stack.sh $v --dry-run ) >/dev/null 2>&1
+  check "without machine.conf, $v refuses" "$?" "1"
+done
+init_run >/dev/null
+check "without machine.conf and without names, init fails" "$?" "1"
 rm -rf "$IM"
 
 echo "== .gitignore"
@@ -2251,7 +2262,6 @@ ignored() {
 # Fixture secrets and state stay out of git. There are no real machines here by
 # construction: the repository is public.
 for f in tests/machines/alpha/.env \
-         tests/machines/alpha/.env-stacks \
          tests/machines/alpha/stacks/site/.env \
          tests/machines/alpha/state/certs/x.crt \
          tests/machines/alpha/.stackyard/platform/bin/stack.sh \
@@ -2262,7 +2272,7 @@ done
 # The examples are the opposite: without them there is nothing on the server to
 # build the real file from.
 for f in tests/machines/alpha/.env.example \
-         tests/machines/alpha/.env-stacks.example \
+         tests/machines/alpha/machine.conf \
          tests/machines/alpha/stacks/site/.env.example \
          profiles/stacks/mysql/.env.example \
          platform/getssl-config/getssl.cfg \

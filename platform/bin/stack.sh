@@ -2,7 +2,7 @@
 
 # Enabling and disabling stacks with one command instead of three manual steps.
 #
-# There is one source of truth — Enabled_Stacks in .env-stacks. This script
+# There is one source of truth — Enabled_Stacks in machine.conf. This script
 # brings both compose and nginx in line with it, in the right order: when
 # enabling, the application first and the vhost second; when disabling, the
 # vhost first and the containers second. At no point does nginx hold a vhost
@@ -60,7 +60,14 @@ LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 # ./dc, and the file refuses to render without these.
 layer_env_export
 
-MANIFEST="$ROOT_DIR/.env-stacks"
+MANIFEST="$(stacks_manifest)"
+
+# The verbs that change the machine act on the manifest, so without one they
+# refuse: guessing what a machine should run is how it ends up running what
+# nobody asked for. The file is committed with the machine.
+manifest_required() {
+  [ -f "$MANIFEST" ] || die "no machine.conf in $ROOT_DIR — it lists the machine's stacks (Enabled_Stacks=\"...\") and belongs in its repository"
+}
 
 # State directories, before any command that writes into them. On a fresh
 # machine they do not exist at all, and the first write would die with a raw
@@ -144,7 +151,7 @@ _row() {
 usage() {
   cat <<'USAGE'
 Enable and disable stacks. The source of truth is Enabled_Stacks in
-.env-stacks; this script brings both docker compose and nginx in line with it.
+machine.conf; this script brings both docker compose and nginx in line with it.
 
   stack init [<stack>...]     create the missing .env files from their examples
                               (the machine's, and those of the enabled or named
@@ -171,12 +178,14 @@ USAGE
 # ---------------------------------------------------------------- manifest
 
 # Rewrite Enabled_Stacks while preserving the rest of the file: the comments in
-# .env-stacks explain how to use it, and erasing them on every enable would be
+# machine.conf explain how to use it, and erasing them on every enable would be
 # a poor trade.
 manifest_write() {
   local stacks="$*" tmp
   # From this point every derived value (nginx includes, dependency checks) is
   # computed from the NEW set — in normal mode and under --dry-run alike.
+  # Read by stacks_enabled in lib-stacks.sh.
+  # shellcheck disable=SC2034
   STACKS_ENABLED_OVERRIDE="$stacks"
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '  [dry] Enabled_Stacks="%s" (file left untouched)\n' "$stacks"
@@ -189,11 +198,8 @@ manifest_write() {
       { print }
     ' "$MANIFEST" > "$tmp"
   else
-    [ -f "$MANIFEST" ] && cat "$MANIFEST" > "$tmp"
-    {
-      [ -f "$MANIFEST" ] || cat "$ROOT_DIR/.env-stacks.example" 2>/dev/null | sed '/^Enabled_Stacks=/d'
-      printf 'Enabled_Stacks="%s"\n' "$stacks"
-    } >> "$tmp"
+    cat "$MANIFEST" > "$tmp"
+    printf 'Enabled_Stacks="%s"\n' "$stacks" >> "$tmp"
   fi
   cat "$tmp" > "$MANIFEST"
   rm -f "$tmp"
@@ -484,17 +490,21 @@ verb_init() {
   done
 
   step "Machine"
-  # The manifest first: without arguments it is what says which stacks to set up.
-  for f in .env-stacks .env; do
-    if [ -f "$ROOT_DIR/$f" ]; then
-      ok "$f is present — left as it is"
-    elif [ -f "$ROOT_DIR/$f.example" ]; then
-      init_create "$ROOT_DIR/$f.example" "$ROOT_DIR/$f"
-    else
-      bad "no $f and no $f.example to create it from"
-    fi
-    files+=("$ROOT_DIR/$f"); examples+=("$ROOT_DIR/$f.example")
-  done
+  # Without arguments the manifest says which stacks to set up. It is not made
+  # here: it comes with the machine's repository, like its stacks.
+  if [ -f "$MANIFEST" ]; then
+    ok "machine.conf is present"
+  elif [ $# -eq 0 ]; then
+    bad "no machine.conf — it lists the stacks to set up, and belongs in the machine's repository"
+  fi
+  if [ -f "$ROOT_DIR/.env" ]; then
+    ok ".env is present — left as it is"
+  elif [ -f "$ROOT_DIR/.env.example" ]; then
+    init_create "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
+  else
+    bad "no .env and no .env.example to create it from"
+  fi
+  files+=("$ROOT_DIR/.env"); examples+=("$ROOT_DIR/.env.example")
   # Optional: a machine without backups or alerts is a choice, and creating
   # these would turn that choice into a list of CHANGE_ME to fill.
   for f in .env-backup .env-notify; do
@@ -508,16 +518,7 @@ verb_init() {
   if [ $# -gt 0 ]; then
     want=("$@")
   else
-    # Under --dry-run the manifest was not copied; its example is what it
-    # would have said.
-    if [ ! -f "$MANIFEST" ] && [ -f "$MANIFEST.example" ]; then
-      # Read by stacks_enabled in lib-stacks.sh.
-      # shellcheck disable=SC2034
-      STACKS_ENABLED_OVERRIDE=$(grep -E '^[[:space:]]*Enabled_Stacks=' "$MANIFEST.example" \
-                                | tail -n 1 | cut -d '=' -f2- | tr -d '"'"'" || true)
-    fi
     while IFS= read -r s; do [ -n "$s" ] && want+=("$s"); done < <(stacks_enabled 2>/dev/null)
-    unset STACKS_ENABLED_OVERRIDE
   fi
   # An index loop over a growing list: a dependency's own Requires count too.
   for ((i = 0; i < ${#want[@]}; i++)); do
@@ -903,10 +904,10 @@ verb_check() {
 
   step "Manifest"
   if [ -f "$MANIFEST" ]; then
-    ok ".env-stacks is present"
+    ok "machine.conf is present"
     ok "enabled: $(stacks_enabled 2>/dev/null | tr '\n' ' ')"
   else
-    warn "no .env-stacks — every stack with a complete file set counts as enabled (cp .env-stacks.example .env-stacks)"
+    bad "no machine.conf — no stack counts as enabled, and enable, disable and sync refuse to run"
   fi
 
   step "Files of the enabled stacks"
@@ -1539,9 +1540,9 @@ case "${VERB:-list}" in
   init)    verb_init ${ARGS[@]+"${ARGS[@]}"} ;;
   list)    verb_list ;;
   check)   verb_check ;;
-  sync)    verb_sync ;;
-  enable)  [ ${#ARGS[@]} -gt 0 ] || die "name a stack: $0 enable <stack>..."; verb_enable "${ARGS[@]}" ;;
-  disable) [ ${#ARGS[@]} -gt 0 ] || die "name a stack: $0 disable <stack>..."; verb_disable "${ARGS[@]}" ;;
-  purge)   [ ${#ARGS[@]} -eq 1 ] || die "purge takes EXACTLY one stack: $0 purge <stack>"; verb_purge "${ARGS[0]}" ;;
+  sync)    manifest_required; verb_sync ;;
+  enable)  manifest_required; [ ${#ARGS[@]} -gt 0 ] || die "name a stack: $0 enable <stack>..."; verb_enable "${ARGS[@]}" ;;
+  disable) manifest_required; [ ${#ARGS[@]} -gt 0 ] || die "name a stack: $0 disable <stack>..."; verb_disable "${ARGS[@]}" ;;
+  purge)   manifest_required; [ ${#ARGS[@]} -eq 1 ] || die "purge takes EXACTLY one stack: $0 purge <stack>"; verb_purge "${ARGS[0]}" ;;
   *)       die "unknown command: '$VERB' (init|list|enable|disable|purge|sync|--check)" ;;
 esac

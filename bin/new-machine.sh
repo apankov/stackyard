@@ -81,12 +81,10 @@ cat > "$DEST/.gitignore" <<'EOF'
 
 # Secrets and machine state.
 .env
-.env-stacks
 .env-backup
 .env-notify
 stacks/*/.env
 !.env.example
-!.env-stacks.example
 !stacks/*/.env.example
 !.env-backup.example
 !.env-notify.example
@@ -111,9 +109,12 @@ Platform_Network=$NAME-net
 Platform_Data_Mount=/mnt/data
 EOF
 
-cat > "$DEST/.env-stacks.example" <<'EOF'
-# Which stacks are enabled. The single source of truth about a machine's
-# composition. Stacks come from profile/stacks (shared) and stacks/ (its own).
+cat > "$DEST/machine.conf" <<'EOF'
+# The machine's manifest: which stacks run here, in order. The single source
+# of truth about its composition, committed with the machine. Stacks come from
+# profile/stacks (shared) and stacks/ (its own). Change it here or with
+# ./stack enable|disable <stack> --manifest-only, then on the server:
+# git pull && ./stack sync.
 Enabled_Stacks=""
 EOF
 
@@ -129,11 +130,19 @@ it at the version recorded in \`stackyard.lock\`.
 git clone <this repository> /mnt/data/$NAME
 cd /mnt/data/$NAME
 ./bootstrap                     # platform $VERSION
-./stack init <stacks>           # .env files from their examples; rerun until it passes
+./stack init                    # .env files for the stacks in machine.conf; rerun until it passes
 \$EDITOR .env stacks/*/.env
 sudo ./host-setup
-./stack enable <stacks>
+./stack sync                    # start what machine.conf lists
+./stack --check
 \`\`\`
+
+## Change what runs
+
+\`machine.conf\` is the list. Edit it on the laptop, or run \`./bootstrap\` there
+once and let \`./stack enable|disable <stack> --manifest-only\` edit it with the
+dependencies resolved. Commit, push, then on the server
+\`git pull && ./stack sync --dry-run && ./stack sync\`.
 
 ## Update the platform
 
@@ -158,7 +167,8 @@ fi
 
 echo
 echo "Next:"
-echo "  edit .env.example and .env-stacks.example, describe the stacks in stacks/"
+echo "  edit .env.example, list the stacks in machine.conf, describe your own in stacks/"
+echo "  ./bootstrap here too: then ./stack enable <stack> --manifest-only edits machine.conf"
 echo "  commit, push, and deploy on the server as README.md there says"
 # A machine outside every machines_dir is invisible to fleet and audit until
 # somebody remembers to list it, so the reminder is printed here, once.

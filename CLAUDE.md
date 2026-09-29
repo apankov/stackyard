@@ -65,7 +65,7 @@ declarations too: `compose.yaml`, `nginx/` (vhost includes), `systemd/` (units),
 `Provides_DB`, `DB_Init_Service`, and `<Provider>_DB/_User/_Password/...`.
 Values are references into the stack's `.env`, not copies.
 
-**Single source of truth.** `Enabled_Stacks` in the machine's `.env-stacks` is
+**Single source of truth.** `Enabled_Stacks` in the machine's `machine.conf` (committed with it) is
 the only list of enabled stacks. Compose files, nginx includes, cert domains,
 systemd units and DB orders are all derived from it in `platform/lib/lib-stacks.sh`.
 Do not add a second list anywhere: if compose and nginx disagree, nginx

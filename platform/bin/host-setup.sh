@@ -260,12 +260,12 @@ else
 fi
 
 # Which stacks are enabled and what they are missing is asked of lib-stacks.sh
-# rather than listed here: the set is defined by Enabled_Stacks in .env-stacks,
+# rather than listed here: the set is defined by Enabled_Stacks in machine.conf,
 # and a second list would be exactly the drift this script guards against.
-if [ -f "$ROOT_DIR/.env-stacks" ]; then
-  ok ".env-stacks (enabled: $(stacks_enabled 2>/dev/null | tr '\n' ' '))"
+if [ -f "$(stacks_manifest)" ]; then
+  ok "machine.conf (enabled: $(stacks_enabled 2>/dev/null | tr '\n' ' '))"
 else
-  warn "no .env-stacks — every stack with a complete file set counts as enabled (cp .env-stacks.example .env-stacks)"
+  bad "no machine.conf — no stack counts as enabled; it belongs in the machine's repository"
 fi
 
 for stack in $(stacks_enabled 2>/dev/null); do

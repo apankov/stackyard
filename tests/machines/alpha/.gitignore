@@ -7,12 +7,10 @@
 
 # Secrets and machine state.
 .env
-.env-stacks
 .env-backup
 .env-notify
 stacks/*/.env
 !.env.example
-!.env-stacks.example
 !stacks/*/.env.example
 !.env-backup.example
 !.env-notify.example

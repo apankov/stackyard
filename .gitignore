@@ -7,10 +7,8 @@
 # them: the example sits next to them, and confusing an example with a filled-in
 # file is a bad habit anywhere.
 tests/machines/*/.env
-tests/machines/*/.env-stacks
 tests/machines/*/stacks/*/.env
 !tests/machines/*/.env.example
-!tests/machines/*/.env-stacks.example
 !tests/machines/*/stacks/*/.env.example
 profiles/stacks/*/.env
 
