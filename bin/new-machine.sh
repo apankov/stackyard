@@ -144,8 +144,20 @@ EOF
 echo "Machine created: $DEST"
 echo "  stackyard: $VERSION ($COMMIT)"
 echo
+# A machine is a repository from its first minute: everything that describes
+# it, the lock included, is meant to be committed, and `git init` was the step
+# every quick start had to repeat. Not inside another repository, though — a
+# repository nested in someone's monorepo is a surprise nobody asked for.
+if ! command -v git >/dev/null 2>&1; then
+  echo "  Warning: git not found — run git init in $DEST yourself" >&2
+elif top="$(git -C "$DEST" rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "  git: $DEST is inside the repository $top — not initialising a nested one"
+else
+  git -C "$DEST" init -q && echo "  git: initialised an empty repository"
+fi
+
+echo
 echo "Next:"
-echo "  cd $DEST && git init"
 echo "  edit .env.example and .env-stacks.example, describe the stacks in stacks/"
 echo "  commit, push, and deploy on the server as README.md there says"
 # A machine outside every machines_dir is invisible to fleet and audit until

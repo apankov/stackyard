@@ -1749,6 +1749,11 @@ check "install again: PATH is not added a second time" "$(grep -c '# stackyard' 
 # mirror's HEAD happens to be.
 sy new "$CL/m" >/dev/null
 check "new: the lock records the installed commit" "$(grep '^commit=' "$CL/m/stackyard.lock")" "commit=$c1"
+check "new: the machine starts as a git repository of its own" \
+  "$(git -C "$CL/m" rev-parse --show-toplevel 2>/dev/null)" "$(cd "$CL/m" && pwd -P)"
+sy new "$SRC/nested" >/dev/null
+check "new: no repository nested inside another" "$([ -e "$SRC/nested/.git" ] && echo nested || echo none)" "none"
+rm -rf "$SRC/nested"
 check "fleet: runs from an installed version, which has no .git" \
   "$(sy fleet "$CL/m" | awk '$1 == "m" { print $3 }')" "no"
 printf '%s\n' "$CL/m" > "$ST/fleet"

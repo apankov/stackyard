@@ -152,6 +152,7 @@ MUTATIONS=(
   # --- --json: a program reads it, so a broken one is broken silently.
   'json: the human report lands on stdout@@platform/bin/stack.sh@@  exec 3>&1 1>&2@@  exec 3>&1'
   'json: a double quote is not escaped@@platform/lib/lib-env.sh@@  s="${s//\"/\\\"}"@@  :'
+  'new: the machine is left without a repository@@bin/new-machine.sh@@  git -C "$DEST" init -q \&\& echo@@  true \&\& echo'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 
