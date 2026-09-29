@@ -43,3 +43,10 @@ quick start, the commands. Then the guide for whatever you are about to do.
   whether to install stackyard the way nvm is installed: which part that fits
   (the operator's tools), which part it must not touch (the platform onto a
   machine), and the `./stack init` command that removes the remembered steps.
+
+## Assets
+
+- [assets/logo/](assets/logo/) — the mark (`stackyard-mark.svg`, and
+  `stackyard-mark-dark.svg` for dark backgrounds) and the repository's social
+  preview (`social-preview.svg`, rendered to `social-preview.png` at 1280×640
+  for GitHub's Settings → Social preview).

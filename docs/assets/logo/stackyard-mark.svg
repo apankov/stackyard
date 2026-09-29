@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>stackyard</title>
+  <!-- Three containers in a yard. The grooves are cut out with a mask rather
+       than drawn in a background colour, so the mark sits on any background. -->
+  <defs>
+    <mask id="grooves" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="#fff"/>
+      <path d="M29 10v8M36 10v8M43 10v8M20 27v8M27 27v8M34 27v8M41 27v8M48 27v8M12 44v8M19 44v8M26 44v8M33 44v8M40 44v8M47 44v8M54 44v8" stroke="#000" stroke-width="1.4" stroke-linecap="round" opacity="0.55"/>
+    </mask>
+  </defs>
+  <g mask="url(#grooves)">
+    <rect x="22" y="7" width="28" height="14" rx="2" fill="#1F2A30"/>
+    <rect x="13" y="24" width="42" height="14" rx="2" fill="#C4532D"/>
+    <rect x="5" y="41" width="54" height="14" rx="2" fill="#1F2A30"/>
+  </g>
+</svg>

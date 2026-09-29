@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <title>stackyard</title>
+  <!-- The repository's social preview (Settings → Social preview takes a PNG:
+       social-preview.png is this file rendered). -->
+  <defs>
+    <mask id="grooves" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="#fff"/>
+      <path d="M29 10v8M36 10v8M43 10v8M20 27v8M27 27v8M34 27v8M41 27v8M48 27v8M12 44v8M19 44v8M26 44v8M33 44v8M40 44v8M47 44v8M54 44v8" stroke="#000" stroke-width="1.4" stroke-linecap="round" opacity="0.55"/>
+    </mask>
+  </defs>
+  <rect width="1280" height="640" fill="#F3EFE6"/>
+  <g transform="translate(104 158) scale(4.6)">
+    <g mask="url(#grooves)">
+      <rect x="22" y="7" width="28" height="14" rx="2" fill="#1F2A30"/>
+      <rect x="13" y="24" width="42" height="14" rx="2" fill="#C4532D"/>
+      <rect x="5" y="41" width="54" height="14" rx="2" fill="#1F2A30"/>
+    </g>
+  </g>
+  <text x="446" y="318" font-family="Menlo, 'IBM Plex Mono', ui-monospace, monospace" font-size="104" font-weight="700" letter-spacing="-3"><tspan fill="#1F2A30">stack</tspan><tspan fill="#C4532D">yard</tspan></text>
+  <text font-family="Menlo, 'IBM Plex Mono', ui-monospace, monospace" font-size="25" fill="#3D484D">
+    <tspan x="450" y="382">Many small docker-compose projects on one host,</tspan>
+    <tspan x="450" y="421">and a fleet of such hosts, pinned, from git.</tspan>
+    <tspan x="450" y="460">Plain bash, agent-friendly.</tspan>
+  </text>
+</svg>

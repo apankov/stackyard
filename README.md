@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/stackyard-mark-dark.svg">
+  <img src="docs/assets/logo/stackyard-mark.svg" alt="" width="72" height="72">
+</picture>
+
 # stackyard
 
 [![selftest](https://github.com/apankov/stackyard/actions/workflows/selftest.yml/badge.svg)](https://github.com/apankov/stackyard/actions/workflows/selftest.yml)
