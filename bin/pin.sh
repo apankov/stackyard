@@ -109,4 +109,6 @@ PY
 # forgotten.
 echo
 echo "Pinned: $OLD_V ($OLD_C) -> $VERSION ($COMMIT)"
-echo "Next, on the machine: ./bootstrap && ./stack --check, then git commit stackyard.lock"
+echo "Next, here: (cd $DEST && ./bootstrap) so this laptop's copy is the new version too,"
+echo "  then commit and push stackyard.lock with the refreshed bootstrap and commands."
+echo "On the server: git pull && ./bootstrap && ./stack sync && ./stack --check"
