@@ -413,6 +413,19 @@ backup_min_globals_bytes() { env_get Backup_Min_Globals_Bytes 128; }
 # keeps looking in the same place and reports "no backups" for healthy backups.
 backup_db_prefix() { env_get Backup_DB_Prefix "$(stacks_db_provider)"; }
 
+# The GPG public key backups are encrypted to, as an absolute path. backup.sh
+# encrypts with it and systemd.sh refuses to install the timers without it, so
+# both read it here. They used to carry a default each — gpg/ in one,
+# platform/gpg/ in the other — and on a machine whose .env-backup left the key
+# unset, systemd.sh looked in the wrong place, skipped backups "for want of a
+# key" and left the old units failing every night for three days.
+backup_pubkey_path() {
+  local p
+  p="$(env_get Backup_GPG_Pubkey "gpg/backup-pubkey.asc")"
+  case "$p" in /*) ;; *) p="$ROOT_DIR/$p" ;; esac
+  printf '%s' "$p"
+}
+
 # The S3 prefix for this file: sqlite/<name without extension>.
 sqlite_s3_subpath() {
   local base

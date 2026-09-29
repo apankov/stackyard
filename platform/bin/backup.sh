@@ -110,8 +110,7 @@ AWS_KEY=$(env_get Backup_AWS_Access_Key_Id)
 AWS_SECRET=$(env_get Backup_AWS_Secret_Access_Key)
 
 GPG_RECIPIENT=$(env_require Backup_GPG_Recipient "the recipient's fingerprint or email") || exit 2
-GPG_PUBKEY=$(env_get Backup_GPG_Pubkey "gpg/backup-pubkey.asc")
-case "$GPG_PUBKEY" in /*) ;; *) GPG_PUBKEY="$ROOT_DIR/$GPG_PUBKEY" ;; esac
+GPG_PUBKEY=$(backup_pubkey_path)
 
 LOCAL_DIR=$(env_get Backup_Local_Dir /mnt/data/backups)
 LOCAL_KEEP=$(env_get Backup_Local_Keep 1)
