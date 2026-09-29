@@ -16,6 +16,14 @@
 
 set -uo pipefail
 
+# SIGPIPE ignored, the way systemd runs every unit (IgnoreSIGPIPE=yes) and the
+# way CI runs this. With it ignored, a writer whose reader has already gone does
+# not die quietly: it prints "write error: Broken pipe" into whatever captures
+# its stderr. A loop that returned on its first match left stack_roots writing
+# into a closed pipe, and three checks failed on CI and on no laptop. The
+# disposition is inherited by everything started from here.
+trap '' PIPE
+
 DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # The stackyard root rather than a machine's: the subject here is the engine.
 REPO_DIR="$( cd "$DIR0/../.." && pwd )"
