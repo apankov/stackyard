@@ -108,30 +108,41 @@ script prints the tag and commit it installed and keeps everything in
 A new machine:
 
 ```sh
-stackyard new ~/dev/machines/acme          # skeleton, pinned to the CLI's commit
-cd ~/dev/machines/acme                     # already a git repository
-$EDITOR .env.example machine.conf          # paths, network; Enabled_Stacks
-# describe your own stacks in stacks/, commit, push to a private repository
+stackyard new ~/dev/machines/acme          # skeleton, pinned to the CLI's commit; a git repository
+cd ~/dev/machines/acme
+./bootstrap                                # the pinned platform here too, for ./stack on the laptop
+$EDITOR .env.example                       # paths, network (no secrets: this is committed)
+# describe your own stacks in stacks/, then list what runs:
+./stack enable site --manifest-only        # writes machine.conf: site, and mysql and php-fpm it requires
+git add -A && git commit -m acme && git push   # to a private repository
 ```
+
+The secrets are never on the laptop: `.env.example` and `machine.conf` are
+committed, and the real `.env` files are made on the server.
 
 On the server:
 
 ```sh
 git clone <the machine's repository> /mnt/data/acme && cd /mnt/data/acme
 ./bootstrap                        # the platform, at the commit in stackyard.lock
-./stack init mysql php-fpm site    # .env files from their examples; rerun until it passes
-$EDITOR .env stacks/*/.env
+./stack init                       # .env files for what machine.conf lists; rerun until it passes
+$EDITOR .env stacks/*/.env         # the secrets, here and only here
 sudo ./host-setup                  # packages, placeholder certificates, timers
-./stack enable mysql php-fpm site
+./stack sync                       # start what machine.conf lists, nginx last
 ./stack --check
 ```
+
+Changing what runs is a commit: `./stack enable|disable <stack> --manifest-only`
+on the laptop (or an edit of `machine.conf`), push, and on the server
+`git pull && ./stack sync --dry-run && ./stack sync`. `sync` starts what the
+manifest lists and reports, without stopping it, what it no longer lists.
 
 Updating a machine:
 
 ```sh
 stackyard install latest                   # the CLI itself; older versions stay installed
 stackyard pin ~/dev/machines/acme          # shows the platform diff, rewrites the lock
-git -C ~/dev/machines/acme commit -am "platform v0.34.0" && git -C ~/dev/machines/acme push
+git -C ~/dev/machines/acme commit -am "platform <tag>" && git -C ~/dev/machines/acme push
 # on the server: git pull && ./bootstrap && ./stack sync && ./stack --check
 stackyard fleet                            # who runs what, and how far behind
 ```
@@ -172,9 +183,9 @@ changes. Subdirectories are declarations too — `systemd/` installs units,
 ```sh
 ./stack list           # what is enabled and what is actually alive
 ./stack --check        # declarations, domains, databases, upstreams, vhosts, units
-./stack enable <stack> # containers first, then the vhost
-./stack disable <stack> # the vhost first, then the containers; data stays
-./stack sync           # bring nginx in line with the manifest (nginx -t, then reload)
+./stack sync           # apply machine.conf: start what it lists, rebuild vhosts (nginx -t, then reload)
+./stack enable <stack> # add to machine.conf and bring up: containers first, then the vhost
+./stack disable <stack> # remove from machine.conf: the vhost first, then the containers; data stays
 ./stack init           # missing .env files from their examples; names what is still CHANGE_ME
 ./dc <compose args>    # the only path to docker compose
 sudo ./host-setup      # packages, certificate placeholders, timers, stack host parts

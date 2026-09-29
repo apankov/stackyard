@@ -12,8 +12,8 @@ Two places, never mixed up:
 
 | Where | Repository | What an agent does there |
 |---|---|---|
-| the laptop | a machine's private repository, and the `stackyard` CLI | edits stacks and the manifest, pins versions, reads the fleet, audits isolation; commits and pushes |
-| the server | a clone of the same repository | `git pull`, `./bootstrap`, the `./stack` verbs, checks |
+| the laptop | a machine's private repository (bootstrapped there too), and the `stackyard` CLI | edits stacks and `machine.conf` (`--manifest-only`), pins versions, reads the fleet, audits isolation; commits and pushes |
+| the server | a clone of the same repository | `git pull`, `./bootstrap`, `./stack sync`, checks; the secrets |
 
 The machine's repository is the whole truth about the machine: which stacks run
 (`machine.conf`), what each one is (`stacks/*/stack.conf`) and which platform it
@@ -21,6 +21,11 @@ runs on (`stackyard.lock`). Secrets are not in it: `.env` files exist only on
 the server. An agent session scoped to one machine's repository therefore
 cannot see another client's composition or secrets, which is the least
 privilege it should have.
+
+A change to what runs is made where it can be reviewed, as a diff of
+`machine.conf`, and the server follows. `sync` applies the manifest and never
+edits it; if the manifest cannot be applied (a dependency missing from it, a
+`.env` not made yet) it stops before changing anything and says why.
 
 ## The loop: plan, apply, check
 
@@ -48,17 +53,24 @@ it`, `stackyard fleet add-dir …`). Follow those rather than improvising.
 
 ## Typical tasks
 
-**Deploy a new project on an existing machine.** Add `stacks/<name>/` in the
-machine's repository (see [stacks.md](stacks.md)), push, then on the server:
-`git pull`, `./stack init <name>`, have a human fill in what it names, rerun
-`init` until it exits 0, `./stack enable <name>`, `./stack --check`.
+**Deploy a new project on an existing machine.** On the laptop, add
+`stacks/<name>/` (see [stacks.md](stacks.md)), run
+`./stack enable <name> --manifest-only` (it adds what the stack requires),
+commit, push. On the server: `git pull`, `./stack init`, have a human fill in
+what it names, rerun `init` until it exits 0, then `./stack sync --dry-run`,
+`./stack sync`, `./stack --check`.
 
-**Take a project off.** `./stack disable <name>`: the units and the vhost go before
-the containers; volumes, images and data stay. Only `purge` removes volumes and
-images, and it asks for the stack's name on a terminal on purpose.
+**Take a project off.** On the laptop, `./stack disable <name> --manifest-only`
+(it refuses while another stack requires this one), commit, push. On the
+server, `git pull && ./stack sync`: sync reports that the stack left the
+manifest and names the command, and `./stack disable <name>` stops it — the
+units and the vhost before the containers; volumes, images and data stay. Only
+`purge` removes volumes and images, and it asks for the stack's name on a
+terminal on purpose.
 
 **Update the platform on one machine.** On the laptop, `stackyard pin
-<machine>` and read the diff it prints before committing. On the server,
+<machine>`, read the diff it prints, run `./bootstrap` in the machine's
+directory so the laptop has the new version too, commit. On the server,
 `git pull && ./bootstrap && ./stack sync && ./stack --check`. A rollback is
 `stackyard pin <machine> --version <tag>`.
 
@@ -67,6 +79,11 @@ images, and it asks for the stack's name on a terminal on purpose.
 
 ## Rules
 
+- **Change `machine.conf` on the laptop, not on the server.** An `enable` on
+  the server makes the host run something its repository does not say, and the
+  next `git pull` of a laptop-side change conflicts. `--check` warns while the
+  host's `machine.conf` differs from the last commit; if a change was made
+  there anyway, commit it from there.
 - **Change machines one at a time.** There is no "update everyone" on purpose;
   do not build one out of a loop.
 - **Never edit `platform/` or `profile/` on a machine.** They are replaced on the

@@ -55,8 +55,11 @@ mounts; `./bootstrap` says so, and no update after that needs one.
 
 On the laptop, `stackyard pin <machine>` shows the platform diff, rewrites the
 two lines of the lock, and refreshes `bootstrap` and the machine commands
-(`./stack`, `./dc`, …) from the templates if they fell behind. Commit, push, and
-on the server:
+(`./stack`, `./dc`, …) from the templates if they fell behind. Run `./bootstrap`
+in the machine's directory there as well: the laptop's copy of the platform is
+what `./stack enable|disable --manifest-only` resolves dependencies with, and
+it should be the version the machine is about to run. Commit, push, and on
+the server:
 
 ```sh
 git pull && ./bootstrap && ./stack sync && ./stack --check
