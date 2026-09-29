@@ -193,7 +193,7 @@ rm -rf "$WORK/stacks/papa"
 fixture_root profile/stacks papa systemd/devbox-papa-x.service '[Service]
 ExecStart=@STACK_DIR@/scripts/x.sh'
 check "a profile stack's unit points into the profile" \
-  "$( DEPLOY_DIR=/srv/m SERVICE_USER=u ONFAILURE= \
+  "$( DEPLOY_DIR=/srv/m SERVICE_USER=u ONFAILURE='' \
       unit_render "$WORK/profile/stacks/papa/systemd/devbox-papa-x.service" papa \
       | grep -c 'ExecStart=/srv/m/profile/stacks/papa/scripts/x.sh' )" "1"
 
@@ -2110,6 +2110,8 @@ else
     # A project name of its own, never the machine's: compose_project asks a
     # running container called nginx, and on a developer's laptop that may be
     # a real machine's.
+    # NT is this script's own variable, passed on; "$NT/vhosts" reads the same one.
+    # shellcheck disable=SC2097,SC2098
     dump=$( ROOT_DIR="$m" NT="$NT" Platform_Network="$nt_net" Platform_Vhosts_Dir="$NT/vhosts" \
             PROJECT="stackyard-selftest-$name-$$" bash -c '
       set -e

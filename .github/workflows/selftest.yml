@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: shellcheck (errors only; the warnings are a known debt)
+      - name: shellcheck (warnings and errors; the debt is paid)
         run: |
           sudo apt-get install -y -qq shellcheck >/dev/null
-          shellcheck -S error platform/bin/*.sh platform/lib/*.sh bin/*.sh bin/stackyard \
+          shellcheck -S warning platform/bin/*.sh platform/lib/*.sh bin/*.sh bin/stackyard \
             install.sh templates/machine/bootstrap tests/mutate.sh
       - name: selftest
         # Without docker the nginx block would skip itself, and a skip reads

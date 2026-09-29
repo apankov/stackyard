@@ -1071,7 +1071,8 @@ stack_volumes() { _stacks_yaml_keys "$(stack_compose_file "$1")" volumes; }
 
 # The images a stack references (as repository:tag or repository).
 stack_images() {
-  local f="$(stack_compose_file "$1")"
+  local f
+  f="$(stack_compose_file "$1")"
   [ -f "$f" ] || return 0
   awk '
     /^[[:space:]]+image:[[:space:]]*[^[:space:]]/ {

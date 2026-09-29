@@ -421,7 +421,8 @@ verb_list() {
 
     vhosts="-"; n=0; von=null
     if [ -d "$(stack_vhost_dir "$s")" ]; then
-      n=$(ls -1 "$(stack_vhost_dir "$s")"/*.conf 2>/dev/null | grep -c . || true)
+      n=0
+      for f in "$(stack_vhost_dir "$s")"/*.conf; do [ -f "$f" ] && n=$((n + 1)); done
       if [ "$n" -gt 0 ]; then
         if stack_vhost_enabled "$s"; then
           vhosts="$n (on)"; von=true
@@ -613,7 +614,9 @@ verb_enable() {
   done
 
   step "Manifest"
-  manifest_write $(echo $new_list)
+  # Word-split on purpose: one argument per stack.
+  # shellcheck disable=SC2086
+  manifest_write $new_list
 
   [ "$MANIFEST_ONLY" -eq 1 ] && { manifest_only_done; return 0; }
   stacks_bring_up "${want[@]}"
@@ -724,7 +727,9 @@ verb_disable() {
   done
 
   step "Manifest"
-  manifest_write $(echo $new_list)
+  # Word-split on purpose: one argument per stack.
+  # shellcheck disable=SC2086
+  manifest_write $new_list
   [ "$MANIFEST_ONLY" -eq 1 ] && { manifest_only_done; return 0; }
 
   # Units are removed BEFORE the containers: a timer firing between the

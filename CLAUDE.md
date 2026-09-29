@@ -26,7 +26,7 @@ lives in `docs/guides/stacks.md` (what a stack declares),
 ./tests/mutate.sh certs                    # only mutations whose name contains "certs"
 ./tests/machines/alpha/stack --check       # run the engine against a fixture machine
 ./tests/machines/alpha/dc --all-stacks --examples config -q   # validate every compose file without secrets
-shellcheck platform/bin/*.sh platform/lib/*.sh bin/*.sh
+shellcheck -S warning platform/bin/*.sh platform/lib/*.sh bin/*.sh bin/stackyard install.sh templates/machine/bootstrap tests/mutate.sh   
 ```
 
 selftest has no per-test filter. It is one script of `check "<name>" "$got"

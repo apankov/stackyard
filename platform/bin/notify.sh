@@ -87,7 +87,7 @@ while [ $# -gt 0 ]; do
     --resolve)   MODE=resolve; shift ;;
     --unit)      MODE=unit; shift; KEY="unit:${1-}"; UNIT="${1-}"; shift || true ;;
     --heartbeat) MODE=heartbeat; shift ;;
-    --test)      MODE=test; shift ;;
+    --test)      MODE="test"; shift ;;
     --force)     FORCE=1; shift ;;
     --help|-h)   usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
