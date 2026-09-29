@@ -126,7 +126,10 @@ for key in $MUST_DIFFER; do
           | sort | awk -F'\t' '{ if ($1 == prev && $2 != prevm) print prev "\t" prevm "\t" $2; prev = $1; prevm = $2 }')
   [ -n "$dupes" ] || continue
   while IFS=$'\t' read -r val m1 m2; do
-    bad "$key is identical on machines $m1 and $m2 (value: ${val:0:24}...)"
+    # The key and the machines are all it takes to fix it. Not even a prefix
+    # of the value: an audit's output ends up in terminals, logs and tickets,
+    # and 24 characters of an AWS secret or a bot token is most of one.
+    bad "$key is identical on machines $m1 and $m2"
     shared=1
   done <<< "$dupes"
 done

@@ -2473,6 +2473,23 @@ out="$(cb)"; rc=$?
 check "check-backups: nothing expected at all is not a green result" "$rc" "2"
 rm -rf "$BM" "$WORK/awsstub"
 
+echo "== audit-isolation: findings without the secrets"
+
+# The report names the key and the machines, never the value: it ends up in
+# terminals, logs and tickets, and it used to print 24 characters of it.
+AU="$WORK/audit"; mkdir -p "$AU/one" "$AU/two"
+for m in one two; do
+  touch "$AU/$m/stackyard.lock"
+  printf 'Platform_Network=%s-net\nPlatform_Deploy_Dir=/srv/%s\n' "$m" "$m" > "$AU/$m/.env"
+  printf 'Backup_AWS_Secret_Access_Key=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY\n' > "$AU/$m/.env-backup"
+done
+out="$( cd "$REPO_DIR" && HOME="$AU" ./bin/audit-isolation.sh "$AU/one" "$AU/two" 2>&1 )"
+check "audit: a secret shared by two machines is reported" \
+  "$(printf '%s\n' "$out" | grep -c 'Backup_AWS_Secret_Access_Key is identical on machines one and two')" "1"
+check "audit: and not one character of it is printed" \
+  "$(printf '%s\n' "$out" | grep -c 'wJalrX')" "0"
+rm -rf "$AU"
+
 echo "== .gitignore"
 
 # An `.env*` rule without an exception silently eats every new example: files
