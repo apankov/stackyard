@@ -13,6 +13,8 @@ quick start, the commands. Then the guide for whatever you are about to do.
 - [guides/stacks.md](guides/stacks.md) — writing stacks: what a directory
   declares, every `stack.conf` key, copy or link, the database provider role,
   external certificates, foreign containers.
+- [guides/agents.md](guides/agents.md) — how an AI agent should work with a
+  fleet: plan, apply, check by exit code; the rules; what is still missing.
 - [guides/isolation.md](guides/isolation.md) — what keeps clients apart,
   `stackyard audit`, machine state, pinned getssl.
 

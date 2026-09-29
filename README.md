@@ -23,9 +23,56 @@ the server needs nothing but docker.
   certificates, mounts, units, databases. The engine's own tests include a
   mutation run and a real `nginx -t` on every commit.
 
-It is not a cluster scheduler and not a PaaS with a web UI or git-push deploys:
-one host, several projects, and an operator who wants to know exactly what is
-on it.
+## Who it's for
+
+Anyone keeping several small hosts, each running a handful of unrelated
+projects: client sites and APIs on a VPS per client, a pile of side projects,
+a team's internal tools (n8n, Metabase, Grafana, an admin panel), staging and
+demo environments that come and go, an isolated installation per customer —
+and, increasingly, the many small apps that AI agents build and that need
+somewhere safe and cheap to live.
+
+The pains it removes are the silent ones, because a fleet's state lives in
+someone's head and in hand edits on the servers:
+
+- a certificate expires while its renewal timer stays green → `Certs="external"`
+  for names terminated elsewhere, and `check-certs.sh` for the rest;
+- switching one project off takes every site on the host down with it, because
+  its vhost still points at the removed container → `./stack disable` removes
+  the vhost first, `--check` verifies every upstream;
+- a fix reaches some hosts and not others, and a month later nobody knows which
+  → one pinned commit per machine, `stackyard fleet` shows who is behind;
+- a new host is built from a neighbour's `.env`, and two clients now share a
+  backup bucket, an alert chat and an ACME key → `stackyard audit`;
+- backups stop without a word, a 1 GB host is killed by OOM → `check-backups.sh`
+  and `watch-host` alert, `./memory` shows what each project costs.
+
+Not for you if you need high availability or a cluster (Kubernetes, Nomad), a
+`git push` deploy (Dokku, Kamal) or a web UI (Coolify, CapRover), or if one
+host with one compose project is all there is.
+
+## Built for agents
+
+An AI agent can run a stackyard fleet with the same guarantees a careful human
+gets, because the design already assumes nobody should have to guess:
+
+- **The whole state is text in git.** A machine is `stack.conf`, `.env-stacks`
+  and `stackyard.lock`: no control plane, no UI, no API token to a panel. Every
+  change an agent makes is a diff a human can read before it is pushed.
+- **Commands reconcile, and are safe to repeat.** `enable`, `disable`, `sync`
+  and `init` bring the host in line with the manifest; the ones that change it
+  take `--dry-run`.
+- **Outcomes are checked by exit code**, one `[ok]` / `[!]` / `[FAIL]` line per
+  finding, and failures name the command that fixes them.
+- **Mistakes stay small.** Data and databases are never dropped, `purge` asks for
+  the stack's name, `nginx -t` runs before every reload, there is no "update
+  everyone", and a rollback is one command.
+- **Isolation is least privilege.** One machine is one repository with no
+  secrets in it, so an agent working on one client cannot see another.
+
+What is still missing (machine-readable output, remote runs, per-machine agent
+instructions) and how an agent should work with a machine:
+[docs/guides/agents.md](docs/guides/agents.md).
 
 ## How it fits together
 
@@ -154,6 +201,8 @@ tags pinned to digests), getssl renewals on a timer.
 - [docs/architecture/platform-delivery.md](docs/architecture/platform-delivery.md)
   — the lock, `bootstrap`, versions side by side, rollback, offline and
   vendored installs.
+- [docs/guides/agents.md](docs/guides/agents.md) — working with a fleet as an
+  AI agent: the check loop, the rules, the gaps.
 - [docs/guides/isolation.md](docs/guides/isolation.md) — what keeps clients
   apart, `audit`, machine state, pinned getssl.
 - [docs/NAVIGATOR.md](docs/NAVIGATOR.md) — everything else: decisions, plans.
