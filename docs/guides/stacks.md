@@ -50,6 +50,21 @@ copies. The file is parsed line by line and never sourced.
 | `Backup_Sqlite`, `Backup_Files`, `Backup_Volume` | `"${App_Dir}/db.sqlite"` | what `backup.sh` takes from this stack besides its databases |
 | `Image_Tag` | `"registry.example.com/app:main"` | the moving tag `./registry pin <stack>` resolves to a digest |
 
+## The profile's stacks
+
+| Stack | Image | Status |
+|---|---|---|
+| `pg` | `postgres:16-alpine` | current |
+| `mysql` | `devilbox/mysql:mysql-5.5` | **legacy**: MySQL 5.5 is long out of support |
+| `php-fpm` | built from `alpine:3.8`, PHP 5.6 | **legacy**: both long out of support |
+| `redis` | `redis`, no tag | current, but floating: whatever `latest` is on pull |
+
+The legacy ones exist because a machine migrated onto stackyard runs on them,
+not as a recommendation. For a new machine, prefer `pg`, or copy a stack into
+the machine's `stacks/` and give it a current image. Profile images are
+referenced by tag rather than digest, and the initializers add packages when
+they start; see [SECURITY.md](../../SECURITY.md) for what that means.
+
 ## Copy or link
 
 Stacks are looked up in two roots, the machine one first:

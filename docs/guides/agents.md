@@ -95,6 +95,9 @@ directory so the laptop has the new version too, commit. On the server,
   or a log. Secrets are for a human to enter where `init` says.
 - **Only `./dc` runs `docker compose`.** A bare `docker compose` misses the env
   files, the generated files and the project name.
+- **After a failed change, reconcile.** `enable` and `disable` are not
+  transactional; if one stops part way, `./stack sync` brings the machine back
+  in line with `machine.conf`, and `./stack --check` says what still differs.
 - **Do not bypass a refusal.** `disable` refusing a dependency, `bootstrap`
   refusing an unknown commit, `sync` rolling back an include that fails `nginx -t`: each one
   is the platform stopping an outage.

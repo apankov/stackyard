@@ -221,6 +221,8 @@ tags pinned to digests), getssl renewals on a timer.
   AI agent: the check loop, the rules, the gaps.
 - [docs/guides/isolation.md](docs/guides/isolation.md) — what keeps clients
   apart, `audit`, machine state, pinned getssl.
+- [SECURITY.md](SECURITY.md) — the threat model (what is isolated and what is
+  not), and how to report a vulnerability.
 - [docs/NAVIGATOR.md](docs/NAVIGATOR.md) — everything else: decisions, plans.
 
 ## Development
