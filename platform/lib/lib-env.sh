@@ -499,3 +499,55 @@ run_with_timeout() {
   [ "$rc" -eq 143 ] && rc=124
   return "$rc"
 }
+
+# ------------------------------------------------------------------ JSON
+#
+# For --json, written by hand because a machine has no jq and host-setup does
+# not install one. Output meant for a program is a contract: it must be valid
+# JSON for any message, including one that quotes a path with a backslash or a
+# line from nginx with a tab in it.
+
+# json_str <string> — the string as a JSON literal, quotes included.
+json_str() {
+  local s="${1-}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  # Any other control character is invalid inside a JSON string. Dropped
+  # rather than escaped: none of them carries meaning in a finding.
+  case "$s" in *[[:cntrl:]]*) s="$(printf '%s' "$s" | tr -d '\000-\037')" ;; esac
+  printf '"%s"' "$s"
+}
+
+# json_list <item>... — the arguments as a JSON array of strings.
+json_list() {
+  local out="" x
+  for x in "$@"; do out="$out${out:+,}$(json_str "$x")"; done
+  printf '[%s]' "$out"
+}
+
+# A checking script records each finding as it prints it, and prints them all
+# as one object at the end. Recorded at the same call that prints the line, so
+# the text a person reads and the JSON a program reads cannot disagree.
+JSON_FINDINGS=()
+JSON_SECTION=""
+JSON_ERROR=""
+
+# json_finding <level> <message>; level is ok, warn, fail or info.
+json_finding() {
+  JSON_FINDINGS+=("{\"section\":$(json_str "$JSON_SECTION"),\"level\":$(json_str "$1"),\"message\":$(json_str "$2")}")
+}
+
+# json_findings_object <command> <problems> <warnings>
+# "ok" is false when anything failed, or when the run stopped with an error
+# before it could check everything — a report cut short is not a clean one.
+json_findings_object() {
+  local ok=true IFS=,
+  { [ "${2:-0}" -gt 0 ] || [ -n "$JSON_ERROR" ]; } && ok=false
+  printf '{"command":%s,"ok":%s,"problems":%d,"warnings":%d,"error":%s,"findings":[%s]}\n' \
+    "$(json_str "$1")" "$ok" "${2:-0}" "${3:-0}" \
+    "$([ -n "$JSON_ERROR" ] && json_str "$JSON_ERROR" || printf null)" \
+    "${JSON_FINDINGS[*]}"
+}

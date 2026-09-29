@@ -77,11 +77,15 @@ WARNINGS=0
 # would hang the whole report with it.
 HEALTH_TIMEOUT=10
 
-ok()   { printf '  [ok]   %s\n' "$1"; }
-warn() { printf '  [!]    %s\n' "$1"; WARNINGS=$((WARNINGS + 1)); }
-bad()  { printf '  [FAIL] %s\n' "$1"; PROBLEMS=$((PROBLEMS + 1)); }
-step() { printf '\n== %s\n' "$1"; }
-die()  { echo "Error: $*" >&2; exit 1; }
+# Each also records its line for --json (json_finding in lib-env.sh), at the
+# same call that prints it.
+JSON=0
+ok()   { printf '  [ok]   %s\n' "$1"; [ "$JSON" -eq 0 ] || json_finding ok "$1"; }
+warn() { printf '  [!]    %s\n' "$1"; WARNINGS=$((WARNINGS + 1)); [ "$JSON" -eq 0 ] || json_finding warn "$1"; }
+bad()  { printf '  [FAIL] %s\n' "$1"; PROBLEMS=$((PROBLEMS + 1)); [ "$JSON" -eq 0 ] || json_finding fail "$1"; }
+info() { printf '  [--]   %s\n' "$1"; [ "$JSON" -eq 0 ] || json_finding info "$1"; }
+step() { printf '\n== %s\n' "$1"; JSON_SECTION="$1"; }
+die()  { echo "Error: $*" >&2; JSON_ERROR="$*"; exit 1; }
 
 # Everything that changes the machine goes through run(): that way --dry-run
 # covers docker and file writes alike, and no branch has to remember it.
@@ -383,10 +387,10 @@ containers_remove() {
 # ---------------------------------------------------------------- verbs
 
 verb_list() {
-  local s enabled_list missing running vhosts mark files
+  local s f enabled_list missing running vhosts mark files n von rows=() mlist=()
   enabled_list=" $(stacks_enabled 2>/dev/null | tr '\n' ' ') "
 
-  _row "STACK" "MANIFEST" "FILES" "CONTAINERS" "VHOSTS"
+  [ "$JSON" -eq 1 ] || _row "STACK" "MANIFEST" "FILES" "CONTAINERS" "VHOSTS"
   while IFS= read -r s; do
     case "$enabled_list" in *" $s "*) mark="on" ;; *) mark="off" ;; esac
 
@@ -396,21 +400,35 @@ verb_list() {
     running="$(stack_running "$s")"
     total="$(stack_services "$s" 2>/dev/null | grep -c . || true)"
 
-    vhosts="-"
+    vhosts="-"; n=0; von=null
     if [ -d "$(stack_vhost_dir "$s")" ]; then
       n=$(ls -1 "$(stack_vhost_dir "$s")"/*.conf 2>/dev/null | grep -c . || true)
       if [ "$n" -gt 0 ]; then
         if stack_vhost_enabled "$s"; then
-          vhosts="$n (on)"
+          vhosts="$n (on)"; von=true
         else
-          vhosts="$n (off)"
+          vhosts="$n (off)"; von=false
         fi
       fi
     fi
 
-    _row "$s" "$mark" "$files" "$running/$total" "$vhosts"
+    if [ "$JSON" -eq 1 ]; then
+      mlist=()
+      while IFS= read -r f; do [ -n "$f" ] && mlist+=("$f"); done < <(stack_missing_files "$s")
+      rows+=("$(printf '{"name":%s,"enabled":%s,"missing":%s,"containers":{"running":%d,"total":%d},"vhosts":{"count":%d,"included":%s}}' \
+        "$(json_str "$s")" "$([ "$mark" = on ] && echo true || echo false)" \
+        "$(json_list ${mlist[@]+"${mlist[@]}"})" "$running" "$total" "$n" "$von")")
+    else
+      _row "$s" "$mark" "$files" "$running/$total" "$vhosts"
+    fi
   done < <(stacks_available)
 
+  if [ "$JSON" -eq 1 ]; then
+    local IFS=,
+    printf '{"command":"list","manifest":%s,"stacks":[%s]}\n' \
+      "$([ -f "$MANIFEST" ] && json_str "$MANIFEST" || printf null)" "${rows[*]}" >&3
+    return 0
+  fi
   printf '\nManifest: %s\n' "$([ -f "$MANIFEST" ] && echo "$MANIFEST" || echo 'NONE (every stack with a complete file set counts as enabled)')"
 }
 
@@ -1377,7 +1395,7 @@ verb_check() {
       *)   bad "$s: health.sh returned $hrc — $(printf '%s' "$hout" | sed -n '1p')" ;;
     esac
   done < <(stacks_enabled 2>/dev/null)
-  [ -n "$without" ] && printf '  [--]   no health check of their own:%s (stacks/<stack>/scripts/health.sh)\n' "$without"
+  [ -n "$without" ] && info "$(printf 'no health check of their own:%s (stacks/<stack>/scripts/health.sh)' "$without")"
 
   # Cross-checking the YAML parser against compose itself. The library obtains
   # the service list with a regular expression, and a silent mismatch here
@@ -1494,6 +1512,7 @@ while [ $# -gt 0 ]; do
     --dry-run)  DRY_RUN=1 ;;
     --no-start) NO_START=1 ;;
     --no-units) NO_UNITS=1 ;;
+    --json)     JSON=1 ;;
     --check)    VERB="check" ;;
     -h|--help)  usage 0 ;;
     -*)         die "unknown flag: $1" ;;
@@ -1501,6 +1520,20 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# --json: stdout carries the JSON and nothing else, so a program can read it
+# whole; the human-readable report moves to stderr, where it still helps
+# whoever is looking. The exit code means what it means without the flag.
+if [ "$JSON" -eq 1 ]; then
+  case "${VERB:-list}" in
+    list|check) ;;
+    *) die "--json is supported by list and --check" ;;
+  esac
+  exec 3>&1 1>&2
+  # From the EXIT trap, so a run cut short by die still answers with an
+  # object that says why, instead of an empty stdout.
+  [ "${VERB:-list}" = check ] && trap 'json_findings_object check "$PROBLEMS" "$WARNINGS" >&3' EXIT
+fi
 
 case "${VERB:-list}" in
   init)    verb_init ${ARGS[@]+"${ARGS[@]}"} ;;

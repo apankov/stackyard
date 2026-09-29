@@ -2135,6 +2135,44 @@ else
   docker network rm "$nt_net" >/dev/null 2>&1 || true
 fi
 
+echo "== --json"
+
+# JSON is a contract with a program, so it is checked as one: parsed by a real
+# parser, with the text it was built from compared field by field.
+roundtrip() { python3 -c 'import json, sys; print(json.loads(sys.stdin.read()) == sys.argv[1])' "$1"; }
+for s in 'plain' 'a "quoted" word' 'C:\path\to' "$(printf 'tab\there')" "$(printf 'two\nlines')" \
+         "$(printf 'bell\001here')"; do
+  want="$s"; case "$s" in *$'\001'*) want="${s//$'\001'/}" ;; esac
+  check "json_str survives a parser: $(printf '%s' "$s" | tr '\n\t\001' '   ')" \
+    "$(json_str "$s" | roundtrip "$want")" "True"
+done
+
+JM="$WORK/fx-alpha"
+out="$( ROOT_DIR="$JM" "$REPO_DIR/platform/bin/stack.sh" list --json 2>/dev/null )"
+check "list --json: stdout is JSON and nothing else" \
+  "$(printf '%s' "$out" | python3 -c 'import json, sys; json.load(sys.stdin); print("ok")' 2>&1)" "ok"
+check "list --json: every stack, with the manifest's say on each" \
+  "$(printf '%s' "$out" | python3 -c 'import json, sys
+d = json.load(sys.stdin)
+print(" ".join(s["name"] + ("+" if s["enabled"] else "-") for s in d["stacks"]))')" \
+  "$( ROOT_DIR="$JM" bash -c ". \"$LIB_DIR/lib-stacks.sh\"
+      for s in \$(stacks_available); do stack_is_enabled \$s && printf '%s+ ' \$s || printf '%s- ' \$s; done" | sed 's/ $//')"
+
+out="$( ROOT_DIR="$JM" "$REPO_DIR/platform/bin/stack.sh" --check --json 2>/dev/null )"; rc=$?
+summary="$(printf '%s' "$out" | python3 -c 'import json, sys
+d = json.load(sys.stdin)
+f = d["findings"]
+fails = sum(1 for x in f if x["level"] == "fail")
+warns = sum(1 for x in f if x["level"] == "warn")
+print(d["problems"] == fails, d["warnings"] == warns, d["ok"] == (fails == 0),
+      all(x["level"] in ("ok", "warn", "fail", "info") and x["section"] for x in f),
+      1 if fails else 0)' 2>&1)"
+check "--check --json: counts, levels and sections agree with the findings" \
+  "${summary% *}" "True True True True"
+check "--check --json: the exit code is what it is without the flag" "$rc" "${summary##* }"
+check "--json on a verb without it is refused" \
+  "$( ROOT_DIR="$JM" "$REPO_DIR/platform/bin/stack.sh" sync --json 2>&1 >/dev/null | grep -c 'supported by list and --check')" "1"
+
 echo "== stack init"
 
 # A fixture machine exactly as a fresh clone has it: examples, no .env at all.
