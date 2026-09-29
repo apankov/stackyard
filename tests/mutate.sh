@@ -160,6 +160,14 @@ MUTATIONS=(
   'sync: nginx is left down on a fresh machine@@platform/bin/stack.sh@@  if ! nginx_running; then\n    step "nginx container"@@  if false; then\n    step "nginx container"'
   'manifest-only: the machine is changed too@@platform/bin/stack.sh@@  [ "$MANIFEST_ONLY" -eq 1 ] \&\& { manifest_only_done; return 0; }\n  stacks_bring_up@@  stacks_bring_up'
   'check: a manifest that differs from git goes unreported@@platform/bin/stack.sh@@      elif ! git -C "$ROOT_DIR" diff --quiet HEAD -- "$MANIFEST" 2>/dev/null; then@@      elif false; then'
+  # --- the backup units after a layout change: three silent nights on a real
+  # machine, and every one of these brings that back.
+  'backup: the key default differs between the scripts again@@platform/lib/lib-env.sh@@  p="$(env_get Backup_GPG_Pubkey "gpg/backup-pubkey.asc")"@@  p="$(env_get Backup_GPG_Pubkey "platform/gpg/backup-pubkey.asc")"'
+  'backup: no .env-backup leaves the old units firing@@platform/bin/systemd.sh@@if [ "$INSTALL_BACKUP" -eq 0 ] \&\& [ "$BACKUP_BROKEN" -eq 0 ]; then\n  for name in "${BACKUP_UNITS[@]}"; do@@if false; then\n  for name in "${BACKUP_UNITS[@]}"; do'
+  'backup: a broken .env-backup takes the units away@@platform/bin/systemd.sh@@if [ "$INSTALL_BACKUP" -eq 0 ] \&\& [ "$BACKUP_BROKEN" -eq 0 ]; then\n  for name in "${BACKUP_UNITS[@]}"; do@@if [ "$INSTALL_BACKUP" -eq 0 ]; then\n  for name in "${BACKUP_UNITS[@]}"; do'
+  'backup: a broken .env-backup passes for success@@platform/bin/systemd.sh@@if [ "$BACKUP_BROKEN" -eq 1 ]; then\n  echo >\&2@@if false; then\n  echo >\&2'
+  'units: --check does not look at ExecStart@@platform/bin/systemd.sh@@        /*) [ -e "$cmd" ] || problem@@        /*) true || problem'
+  'units: --check compares by existence only@@platform/bin/systemd.sh@@  elif [ "$(cat "$f")" != "$want" ]; then@@  elif false; then'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

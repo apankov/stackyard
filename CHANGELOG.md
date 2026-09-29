@@ -8,6 +8,26 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.34.2] — 2026-09-29
+
+### Fixed
+- `systemd.sh` looks for the backup GPG key where `backup.sh` does
+  (`gpg/backup-pubkey.asc` unless `Backup_GPG_Pubkey` says otherwise). It used
+  to default to `platform/gpg/`, skip backups "for want of a key" on a machine
+  that had one, and leave the old units in place.
+- No `.env-backup` removes installed backup units, since a timer for a backup
+  nobody configured can only fail. An `.env-backup` that exists but cannot work
+  (no bucket, no key, no aws) is an error: the run exits non-zero after
+  installing everything else, and the installed backup units are left as they
+  are rather than taken away quietly.
+
+### Added
+- `./platform/bin/systemd.sh --check` compares every installed unit with what it
+  would install, flags an `ExecStart` that runs a missing file, and warns about
+  a `devbox-*` or `getssl-*` unit this version does not install. It needs
+  neither root nor systemd, and `host-setup --check` runs it: an enabled timer
+  pointing at a script an update removed no longer passes as healthy.
+
 ## [0.34.1] — 2026-09-29
 
 ### Fixed
@@ -115,6 +135,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.34.2]: https://github.com/apankov/stackyard/compare/v0.34.1...v0.34.2
 [0.34.1]: https://github.com/apankov/stackyard/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/apankov/stackyard/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/apankov/stackyard/compare/v0.32.0...v0.33.0

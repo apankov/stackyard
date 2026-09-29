@@ -549,6 +549,17 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
       || bad "$t is not installed — sudo ./platform/bin/systemd.sh"
   done
 
+  # Enabled is not the same as right. The units systemd.sh would install are
+  # compared with the installed ones, and every ExecStart with the file it
+  # runs: an enabled timer whose service points at a script an update removed
+  # passes the check above and fails every night.
+  if units_out=$("$DIR0/systemd.sh" --check 2>&1); then
+    ok "installed units match what systemd.sh installs"
+  else
+    printf '%s\n' "$units_out" | grep -E '\[FAIL\]|\[!\]|Error' | sed 's/^ *//; s/^/         /'
+    bad "installed units differ from what systemd.sh installs — sudo ./platform/bin/systemd.sh"
+  fi
+
   # The old scheduler. A leftover cron line means getssl runs twice — from cron
   # and from the timer — and two parallel renewals fight over one ACME account
   # and one directory.
@@ -577,7 +588,9 @@ else
   sudo -u "$DEPLOY_OWNER" env ROOT_DIR="$ROOT_DIR" "$DIR0/certs.sh" | sed 's/^/      /'
 
   echo "  ... systemd timers"
-  "$DIR0/systemd.sh" | sed 's/^/      /'
+  # A failed systemd.sh (a broken .env-backup, say) is a problem of this run,
+  # not the end of it: the summary below still has to say so.
+  "$DIR0/systemd.sh" | sed 's/^/      /' || bad "systemd.sh did not complete — see above"
 fi
 
 # ------------------------------------------------------------------ 9. summary

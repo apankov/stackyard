@@ -10,8 +10,24 @@
 #
 # The script is idempotent: running it again reinstalls the units and reloads
 # the configuration without breaking anything.
+#
+#   sudo ./platform/bin/systemd.sh           install the units, enable the timers
+#   ./platform/bin/systemd.sh --check        compare what is installed with what
+#                                            this would install; change nothing
+#
+# --check exists because an installed unit is invisible until it fires. After
+# the move to stackyard one machine kept units running scripts/backup.sh, a
+# path the new layout no longer had: enabled, so every "is it enabled" check
+# passed, and failing with 203/EXEC every night for three days.
 
 set -euo pipefail
+
+CHECK=0
+case "${1-}" in
+  --check) CHECK=1 ;;
+  '') ;;
+  *) echo "Usage: sudo $0 [--check]" >&2; exit 2 ;;
+esac
 
 DIR0="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # The MACHINE's directory, not the platform's. Normally set by a wrapper in the
@@ -35,7 +51,9 @@ fi
 LIB_DIR="$( cd "$DIR0/../lib" && pwd )"
 ENV_FILE="$ROOT_DIR/.env"
 UNIT_SRC="$ROOT_DIR/platform/systemd"
-UNIT_DST="/etc/systemd/system"
+# Overridable so the selftest can install into and check a scratch directory;
+# a machine always uses the system one.
+UNIT_DST="${STACKYARD_UNIT_DIR:-/etc/systemd/system}"
 
 BACKUP_ENV_FILE="$ROOT_DIR/.env-backup"
 NOTIFY_ENV_FILE="$ROOT_DIR/.env-notify"
@@ -45,6 +63,22 @@ NOTIFY_ENV_FILE="$ROOT_DIR/.env-notify"
 # block 3 writes them out.
 # shellcheck source=platform/lib/lib-stacks.sh
 . "$LIB_DIR/lib-stacks.sh"
+# shellcheck source=platform/lib/lib-env.sh
+. "$LIB_DIR/lib-env.sh"
+
+# A finding. Installing, it stops the run; checking, it is counted and the
+# check goes on, so one run names every problem rather than the first.
+PROBLEMS=0
+WARNINGS=0
+problem() {
+  if [ "$CHECK" -eq 1 ]; then
+    printf '  [FAIL] %s\n' "$1"
+    PROBLEMS=$((PROBLEMS + 1))
+  else
+    echo "Error: $1" >&2
+    exit 1
+  fi
+}
 
 # The backup and notification units are appended below when the machine has
 # those parts configured.
@@ -88,12 +122,14 @@ fi
 
 # 2. Preflight checks. Each of them is a failure that would otherwise surface
 #    only a day later, in the middle of the night, and silently.
-if ! command -v systemctl >/dev/null 2>&1; then
+# Checking reads the unit files and changes nothing, so it needs neither
+# systemctl nor root; installing into the system directory needs both.
+if [ "$CHECK" -eq 0 ] && ! command -v systemctl >/dev/null 2>&1; then
   echo "Error: systemd not found. This machine needs a different scheduler." >&2
   exit 1
 fi
 
-if [ "$(id -u)" -ne 0 ]; then
+if [ "$CHECK" -eq 0 ] && [ "$UNIT_DST" = /etc/systemd/system ] && [ "$(id -u)" -ne 0 ]; then
   echo "Error: root privileges are required. Run: sudo $0" >&2
   exit 1
 fi
@@ -105,9 +141,7 @@ fi
 if [ "$INSTALL_GETSSL" -eq 1 ]; then
   # Platform_Deploy_Dir is a path ON the machine, and this runs on that machine.
   if [ ! -d "$Platform_Deploy_Dir/state/getssl-config" ]; then
-    echo "Error: no $Platform_Deploy_Dir/state/getssl-config" >&2
-    echo "  Platform_Deploy_Dir in .env does not point at the repository." >&2
-    exit 1
+    problem "no $Platform_Deploy_Dir/state/getssl-config — Platform_Deploy_Dir in .env does not point at the repository"
   fi
 
   # getssl is a machine artifact under state/, not a platform file: it is
@@ -116,9 +150,7 @@ if [ "$INSTALL_GETSSL" -eq 1 ]; then
   # renewals, which looks exactly like "getssl is quiet because there is nothing
   # to renew".
   if [ ! -x "$Platform_Deploy_Dir/state/bin/getssl" ]; then
-    echo "Error: no $Platform_Deploy_Dir/state/bin/getssl" >&2
-    echo "  Download it with: ./platform/bin/getssl-fetch.sh" >&2
-    exit 1
+    problem "no $Platform_Deploy_Dir/state/bin/getssl — download it with ./platform/bin/getssl-fetch.sh"
   fi
 fi
 
@@ -148,43 +180,50 @@ user_in_docker_group() {
   done
   return 1
 }
-if ! user_in_docker_group; then
-  echo "Error: user '$SERVICE_USER' is not in the docker group." >&2
-  echo "  RELOAD_CMD ('docker exec nginx nginx -s reload') will not work," >&2
-  echo "  and nginx will keep serving the old certificate after a renewal." >&2
-  echo "  Fix: sudo usermod -aG docker $SERVICE_USER" >&2
-  exit 1
+# Only where getssl runs: the reload after a renewal is the one thing in these
+# units that needs docker as $SERVICE_USER (the rest run as root).
+if [ "$INSTALL_GETSSL" -eq 1 ] && ! user_in_docker_group; then
+  problem "user '$SERVICE_USER' is not in the docker group: RELOAD_CMD ('docker exec nginx nginx -s reload') will not work, and nginx will keep serving the old certificate after a renewal (sudo usermod -aG docker $SERVICE_USER)"
 fi
 
-# 2c. Backups. A skip rather than a refusal: a machine with no S3 configured is
-#     a normal state for a fresh install, and it is no reason to leave
-#     certificates unrenewed. The skip is loud, on stderr.
+# 2c. Backups. Two different states, told apart on purpose.
 #
-#     The preconditions are checked, not merely the file's existence: a config
-#     with an empty bucket or without a public key produces a timer that fails
-#     silently every night — exactly the failure being guarded against.
+#     No .env-backup at all is a decision: a fresh install, or a machine that
+#     is backed up some other way. That is no reason to leave certificates
+#     unrenewed, so it is a skip, said on stderr — and any backup units still
+#     installed are removed (block 4d), because a timer for a backup nobody
+#     configured only fails.
+#
+#     An .env-backup that exists but cannot work (no bucket, no key, no aws) is
+#     a mistake, not a decision. It fails the run, and the installed units are
+#     LEFT: taking a machine's backup timers away because its config broke
+#     would trade a loud nightly failure for silence.
+#
+#     The values are read through lib-env.sh, the way backup.sh reads them, so
+#     both see one .env-backup the same way, ${VAR} references included.
+BACKUP_UNITS=(devbox-backup.service devbox-backup.timer devbox-backup-check.service devbox-backup-check.timer)
 INSTALL_BACKUP=1
+BACKUP_BROKEN=0
 BACKUP_SKIP=""
 BACKUP_BUCKET=""
 BACKUP_PUBKEY=""
+env_load_files "$ENV_FILE" "$BACKUP_ENV_FILE"
 
 if [ ! -f "$BACKUP_ENV_FILE" ]; then
   INSTALL_BACKUP=0
   BACKUP_SKIP="no $BACKUP_ENV_FILE (cp .env-backup.example .env-backup && chmod 600)"
 else
-  BACKUP_BUCKET=$(grep -E '^Backup_S3_Bucket=' "$BACKUP_ENV_FILE" | head -n 1 | cut -d '=' -f2- | tr -d '"'\' || true)
-  BACKUP_PUBKEY=$(grep -E '^Backup_GPG_Pubkey=' "$BACKUP_ENV_FILE" | head -n 1 | cut -d '=' -f2- | tr -d '"'\' || true)
-  [ -z "$BACKUP_PUBKEY" ] && BACKUP_PUBKEY="platform/gpg/backup-pubkey.asc"
-  case "$BACKUP_PUBKEY" in /*) ;; *) BACKUP_PUBKEY="$ROOT_DIR/$BACKUP_PUBKEY" ;; esac
+  BACKUP_BUCKET=$(env_get Backup_S3_Bucket)
+  BACKUP_PUBKEY=$(backup_pubkey_path)
 
   if [ -z "$BACKUP_BUCKET" ]; then
-    INSTALL_BACKUP=0
+    INSTALL_BACKUP=0; BACKUP_BROKEN=1
     BACKUP_SKIP="Backup_S3_Bucket is not set in $BACKUP_ENV_FILE"
   elif [ ! -f "$BACKUP_PUBKEY" ]; then
-    INSTALL_BACKUP=0
-    BACKUP_SKIP="no GPG public key at $BACKUP_PUBKEY (generated OFF this machine, see the README)"
+    INSTALL_BACKUP=0; BACKUP_BROKEN=1
+    BACKUP_SKIP="no GPG public key at $BACKUP_PUBKEY (Backup_GPG_Pubkey; generated OFF this machine, see the README)"
   elif ! command -v aws >/dev/null 2>&1; then
-    INSTALL_BACKUP=0
+    INSTALL_BACKUP=0; BACKUP_BROKEN=1
     BACKUP_SKIP="no aws command — install awscli from your distribution"
   fi
 fi
@@ -197,11 +236,7 @@ fi
 # run goes unnoticed. So the period is MEASURED here, from the schedule itself,
 # with systemd's own calendar parser — and a threshold shorter than the period
 # is reported rather than left to be discovered at three in the morning.
-BACKUP_SCHEDULE=""
-if [ -f "$BACKUP_ENV_FILE" ]; then
-  BACKUP_SCHEDULE=$(grep -E '^Backup_Schedule=' "$BACKUP_ENV_FILE" | head -n 1 | cut -d= -f2- | tr -d '"'\' || true)
-fi
-[ -n "$BACKUP_SCHEDULE" ] || BACKUP_SCHEDULE='*-*-* 03:40:00'
+BACKUP_SCHEDULE=$(env_get Backup_Schedule '*-*-* 03:40:00')
 
 # The distance between two consecutive firings IS the period, and systemd is
 # what parses the expression — we do not reimplement calendar syntax here.
@@ -227,8 +262,7 @@ backup_period_hours() {
 }
 
 if [ "$INSTALL_BACKUP" -eq 1 ]; then
-  MAX_AGE=$(grep -E '^Backup_Max_Age_Hours=' "$BACKUP_ENV_FILE" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '"'\' || true)
-  [ -n "$MAX_AGE" ] || MAX_AGE=26
+  MAX_AGE=$(env_get Backup_Max_Age_Hours 26)
   if PERIOD=$(backup_period_hours); then
     echo "  backups: every ${PERIOD}h ($BACKUP_SCHEDULE), stale after ${MAX_AGE}h"
     if [ "$MAX_AGE" -le "$PERIOD" ]; then
@@ -243,8 +277,17 @@ if [ "$INSTALL_BACKUP" -eq 1 ]; then
     echo "NOTE: could not measure the period of Backup_Schedule='$BACKUP_SCHEDULE'." >&2
     echo "  Check by hand that Backup_Max_Age_Hours (${MAX_AGE}) exceeds it." >&2
   fi
-  UNITS+=(devbox-backup.service devbox-backup.timer devbox-backup-check.service devbox-backup-check.timer)
+  UNITS+=("${BACKUP_UNITS[@]}")
   TIMERS+=(devbox-backup.timer devbox-backup-check.timer)
+elif [ "$BACKUP_BROKEN" -eq 1 ]; then
+  if [ "$CHECK" -eq 1 ]; then
+    problem "backups are configured in .env-backup but cannot be installed — $BACKUP_SKIP"
+  else
+    echo "ERROR: backups are configured in .env-backup but cannot be installed —" >&2
+    echo "  $BACKUP_SKIP" >&2
+    echo "  Installed backup units are left as they are. The rest is installed, and" >&2
+    echo "  this run exits non-zero until the backup config is fixed." >&2
+  fi
 else
   echo "NOTE: backups skipped — $BACKUP_SKIP" >&2
 fi
@@ -287,7 +330,11 @@ else
   echo "      failures will be visible only in \`systemctl --failed\`." >&2
 fi
 
-echo "** Installing timers into $UNIT_DST"
+if [ "$CHECK" -eq 1 ]; then
+  echo "** Checking the units in $UNIT_DST against what would be installed"
+else
+  echo "** Installing timers into $UNIT_DST"
+fi
 echo "   repository: $Platform_Deploy_Dir"
 echo "   user:       $SERVICE_USER"
 if [ "$INSTALL_GETSSL" -eq 1 ]; then
@@ -304,16 +351,43 @@ fi
 
 # 3. Path substitution. systemd units support no variables and require absolute
 #    paths, so in the repository they are templates carrying @DEPLOY_DIR@.
+platform_unit_render() {
+  sed -e "s#@DEPLOY_DIR@#${Platform_Deploy_Dir}#g" \
+      -e "s#@SERVICE_USER@#${SERVICE_USER}#g" \
+      -e "s#@ONFAILURE@#${ONFAILURE_LINE}#g" \
+      -e "s#@BACKUP_SCHEDULE@#${BACKUP_SCHEDULE}#g" \
+      "$UNIT_SRC/$1"
+}
+
+# --check: the installed file against the text this run would write. Compared
+# whole, because any difference means the machine runs something other than
+# its platform version says — an old path, an old schedule, a missing
+# OnFailure.
+unit_compare() {
+  local name="$1" want="$2" f="$UNIT_DST/$1"
+  if [ ! -f "$f" ]; then
+    problem "$name is not installed — sudo $0"
+  elif [ "$(cat "$f")" != "$want" ]; then
+    problem "$name differs from its template — sudo $0 reinstalls it"
+  else
+    printf '  [ok]   %s\n' "$name"
+  fi
+}
+
+# The units this run owns, whatever it does with them: installed, checked, or
+# neither. Block 6 uses it to tell a leftover from a unit of ours.
+EXPECTED_UNITS=" ${UNITS[*]+${UNITS[*]}} "
+
 for unit in ${UNITS[@]+"${UNITS[@]}"}; do
   if [ ! -f "$UNIT_SRC/$unit" ]; then
     echo "Error: template $UNIT_SRC/$unit is missing" >&2
     exit 1
   fi
-  sed -e "s#@DEPLOY_DIR@#${Platform_Deploy_Dir}#g" \
-      -e "s#@SERVICE_USER@#${SERVICE_USER}#g" \
-      -e "s#@ONFAILURE@#${ONFAILURE_LINE}#g" \
-      -e "s#@BACKUP_SCHEDULE@#${BACKUP_SCHEDULE}#g" \
-      "$UNIT_SRC/$unit" > "$UNIT_DST/$unit"
+  if [ "$CHECK" -eq 1 ]; then
+    unit_compare "$unit" "$(platform_unit_render "$unit")"
+    continue
+  fi
+  platform_unit_render "$unit" > "$UNIT_DST/$unit"
   chmod 644 "$UNIT_DST/$unit"
   echo "    -> $unit"
 done
@@ -363,6 +437,11 @@ while IFS= read -r stack; do
       *) echo "NOTE: $name skipped — a stack unit's name must start with devbox-$stack-" >&2
          continue ;;
     esac
+    EXPECTED_UNITS="$EXPECTED_UNITS$name "
+    if [ "$CHECK" -eq 1 ]; then
+      unit_compare "$name" "$(unit_render "$unit" "$stack")"
+      continue
+    fi
     unit_render "$unit" "$stack" > "$UNIT_DST/$name"
     chmod 644 "$UNIT_DST/$name"
     case "$name" in *.timer) STACK_TIMERS+=("$name") ;; esac
@@ -390,6 +469,10 @@ while IFS= read -r stack; do
     [ -n "$unit" ] || continue
     name=$(basename "$unit")
     [ -f "$UNIT_DST/$name" ] || continue
+    if [ "$CHECK" -eq 1 ]; then
+      problem "$name is installed, but stack $stack is disabled — sudo $0 removes it"
+      continue
+    fi
     systemctl disable --now "$name" >/dev/null 2>&1 || true
     rm -f "$UNIT_DST/$name"
     echo "    removed $name (stack $stack is disabled)"
@@ -405,10 +488,65 @@ done < <(stacks_available)
 if [ "$INSTALL_GETSSL" -eq 0 ]; then
   for name in "${GETSSL_UNITS[@]}"; do
     [ -f "$UNIT_DST/$name" ] || continue
+    if [ "$CHECK" -eq 1 ]; then
+      problem "$name is installed, but no enabled stack has Certs=getssl — sudo $0 removes it"
+      continue
+    fi
     systemctl disable --now "$name" >/dev/null 2>&1 || true
     rm -f "$UNIT_DST/$name"
     echo "    removed $name (no enabled stack has Certs=getssl)"
   done
+fi
+
+# 4d. Removing the backup units when the machine has no .env-backup.
+#
+# The same reason as 4c, and only for a missing file: a timer for a backup
+# nobody configured can do nothing but fail. A broken .env-backup is the other
+# case (block 2c) — its units stay, and the run fails instead.
+if [ "$INSTALL_BACKUP" -eq 0 ] && [ "$BACKUP_BROKEN" -eq 0 ]; then
+  for name in "${BACKUP_UNITS[@]}"; do
+    [ -f "$UNIT_DST/$name" ] || continue
+    if [ "$CHECK" -eq 1 ]; then
+      problem "$name is installed, but there is no .env-backup — sudo $0 removes it"
+      continue
+    fi
+    systemctl disable --now "$name" >/dev/null 2>&1 || true
+    rm -f "$UNIT_DST/$name"
+    echo "    removed $name (no .env-backup)"
+  done
+fi
+[ "$BACKUP_BROKEN" -eq 1 ] && EXPECTED_UNITS="$EXPECTED_UNITS${BACKUP_UNITS[*]} "
+
+# 6. --check only: what the installed units would actually run. A unit whose
+# ExecStart names a file that is not there fails with 203/EXEC the moment it
+# fires, and nothing before that moment shows it. And a devbox-* or getssl-*
+# unit that no part of this run accounts for is a leftover — of an older
+# layout, or of a stack that no longer exists.
+if [ "$CHECK" -eq 1 ]; then
+  for f in "$UNIT_DST"/getssl-* "$UNIT_DST"/devbox-*; do
+    [ -f "$f" ] || continue
+    name="${f##*/}"
+    while IFS= read -r line; do
+      cmd="${line#ExecStart=}"
+      # systemd's prefixes (-, @, +, !, :) say how to run it, not what.
+      # The dash last in the set: anywhere else it makes a range.
+      cmd="${cmd#"${cmd%%[!@+:!-]*}"}"
+      cmd="${cmd%% *}"
+      case "$cmd" in
+        /*) [ -e "$cmd" ] || problem "$name runs $cmd, which does not exist" ;;
+      esac
+    done < <(grep -E '^[[:space:]]*ExecStart=' "$f" || true)
+    case "$EXPECTED_UNITS" in
+      *" $name "*) ;;
+      *) printf '  [!]    %s\n' "$name is installed but not one this platform version installs — a leftover?"
+         WARNINGS=$((WARNINGS + 1)) ;;
+    esac
+  done
+
+  echo
+  echo "  problems: $PROBLEMS, warnings: $WARNINGS"
+  [ "$PROBLEMS" -eq 0 ] || exit 1
+  exit 0
 fi
 
 # 5. Reload and enable
@@ -435,4 +573,12 @@ if [ "$INSTALL_BACKUP" -eq 1 ]; then
   echo "  sudo $Platform_Deploy_Dir/platform/bin/backup.sh --dry-run   # the backup plan, no changes"
   echo "  sudo systemctl start devbox-backup.service && journalctl -u devbox-backup -n 50"
   echo "  $Platform_Deploy_Dir/platform/bin/check-backups.sh"
+fi
+
+# Last, after everything else was installed: a broken backup config must not
+# cost the machine its certificate renewals, and must not pass for success.
+if [ "$BACKUP_BROKEN" -eq 1 ]; then
+  echo >&2
+  echo "FAILED: backups — $BACKUP_SKIP" >&2
+  exit 1
 fi

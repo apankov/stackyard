@@ -2291,6 +2291,70 @@ check "--check warns when machine.conf differs from the last commit" \
        | grep -c 'differs from the last commit' )" "1"
 rm -rf "$IM"
 
+echo "== systemd.sh: installing, removing and checking units"
+
+# A machine nothing here needs root, systemd or docker for: one stack, its
+# domain terminated in front (so no getssl and no docker-group requirement), a
+# timer of its own. systemctl and aws are stubs, and the units go into a
+# scratch directory.
+SM="$WORK/units-machine"; SU="$SM/units"
+mkdir -p "$SM/stacks/ext/systemd" "$SM/stacks/ext/scripts" "$SM/gpg" "$SU" "$WORK/sysstub"
+ln -sfn "$REPO_DIR/platform" "$SM/platform"; ln -sfn "$REPO_DIR/profiles" "$SM/profile"
+printf 'Platform_Deploy_Dir=%s\nPlatform_Network=units-net\n' "$SM" > "$SM/.env"
+printf 'Enabled_Stacks="ext"\n' > "$SM/machine.conf"
+printf 'Domains="ext.example.com"\nCerts="external"\nContainers="no"\n' > "$SM/stacks/ext/stack.conf"
+printf '#!/bin/sh\n' > "$SM/stacks/ext/scripts/job.sh"; chmod +x "$SM/stacks/ext/scripts/job.sh"
+printf '[Unit]\nDescription=ext job\n@ONFAILURE@\n[Service]\nType=oneshot\nUser=@SERVICE_USER@\nExecStart=@STACK_DIR@/scripts/job.sh\n' \
+  > "$SM/stacks/ext/systemd/devbox-ext-job.service"
+printf '[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n' > "$SM/stacks/ext/systemd/devbox-ext-job.timer"
+for c in systemctl aws; do printf '#!/bin/sh\nexit 0\n' > "$WORK/sysstub/$c"; chmod +x "$WORK/sysstub/$c"; done
+sysd() { ( PATH="$WORK/sysstub:$PATH" ROOT_DIR="$SM" STACKYARD_UNIT_DIR="$SU" "$REPO_DIR/platform/bin/systemd.sh" "$@" ) 2>&1; }
+# What the previous layout left behind on a real machine: an installed backup
+# unit running a script that no longer exists.
+printf '[Service]\nExecStart=%s/scripts/backup.sh\n' "$SM" > "$SU/devbox-backup.service"
+
+# No .env-backup: a decision, so the leftover backup unit goes.
+out="$(sysd)"; rc=$?
+check "systemd.sh installs a stack's units" "$([ -f "$SU/devbox-ext-job.timer" ] && echo yes || echo no)" "yes"
+check "without .env-backup, installed backup units are removed" "$([ -e "$SU/devbox-backup.service" ] && echo kept || echo removed)" "removed"
+check "and the run succeeds" "$rc" "0"
+out="$(sysd --check)"; rc=$?
+check "--check passes on what was just installed" "$rc" "0"
+
+# The key where backup.sh looks by default, Backup_GPG_Pubkey left empty: the
+# two defaults used to differ, and the timers were skipped "for want of a key".
+printf 'KEY\n' > "$SM/gpg/backup-pubkey.asc"
+printf 'Backup_S3_Bucket=b\nBackup_GPG_Pubkey=\n' > "$SM/.env-backup"
+sysd >/dev/null
+check "with the key at backup.sh's default, backups are installed" \
+  "$([ -f "$SU/devbox-backup.service" ] && echo yes || echo no)" "yes"
+
+# A broken .env-backup: a mistake, not a decision. The run fails, loudly, and
+# the installed units stay rather than going quiet.
+printf 'Backup_S3_Bucket=\n' > "$SM/.env-backup"
+out="$(sysd)"; rc=$?
+check "a broken .env-backup fails the run" "$rc" "1"
+check "and says why" "$(printf '%s\n' "$out" | grep -c 'FAILED: backups — Backup_S3_Bucket is not set')" "1"
+check "and leaves the installed backup units in place" "$([ -f "$SU/devbox-backup.service" ] && echo kept || echo removed)" "kept"
+out="$(sysd --check)"; rc=$?
+check "--check fails on a broken .env-backup" "$rc" "1"
+
+# --check against units that drifted.
+printf 'Backup_S3_Bucket=b\n' > "$SM/.env-backup"
+sysd >/dev/null
+printf '# edited by hand\n' >> "$SU/devbox-ext-job.timer"
+sed "s#^ExecStart=.*#ExecStart=$SM/scripts/check-backups.sh#" "$SU/devbox-backup-check.service" > "$SU/x" && mv "$SU/x" "$SU/devbox-backup-check.service"
+printf '[Service]\nExecStart=/bin/true\n' > "$SU/devbox-old-thing.service"
+out="$(sysd --check)"; rc=$?
+check "--check fails on drift" "$rc" "1"
+check "--check names a unit edited by hand" "$(printf '%s\n' "$out" | grep -c 'devbox-ext-job.timer differs from its template')" "1"
+check "--check names an ExecStart that runs a missing file" \
+  "$(printf '%s\n' "$out" | grep -c "devbox-backup-check.service runs $SM/scripts/check-backups.sh, which does not exist")" "1"
+check "--check warns about a unit this platform does not install" \
+  "$(printf '%s\n' "$out" | grep -c 'devbox-old-thing.service is installed but not one this platform version installs')" "1"
+check "--check changes nothing" "$(tail -n 1 "$SU/devbox-ext-job.timer")" "# edited by hand"
+rm -rf "$SM" "$WORK/sysstub"
+
 echo "== .gitignore"
 
 # An `.env*` rule without an exception silently eats every new example: files
