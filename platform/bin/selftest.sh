@@ -2485,6 +2485,48 @@ out="$(cb)"; rc=$?
 check "check-backups: nothing expected at all is not a green result" "$rc" "2"
 rm -rf "$BM" "$WORK/awsstub"
 
+echo "== check-certs: the right certificate, not only a fresh one"
+
+# Expiry alone passed someone else's valid certificate, one issued before an
+# alias was added, and a certificate beside a key that is not its own. A test
+# CA stands in for the system's trust store.
+CM="$WORK/certs-machine"; CC="$CM/state/certs"; CA="$WORK/ca"
+mkdir -p "$CM/stacks/web" "$CC" "$CA"
+ln -sfn "$REPO_DIR/platform" "$CM/platform"; ln -sfn "$REPO_DIR/profiles" "$CM/profile"
+printf 'Platform_Deploy_Dir=%s\n' "$CM" > "$CM/.env"
+printf 'Enabled_Stacks="web"\n' > "$CM/machine.conf"
+printf 'Domains="a.test+www.a.test"\nContainers="no"\n' > "$CM/stacks/web/stack.conf"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$CA/ca.key" -out "$CA/ca.pem" -subj '/CN=Selftest CA' -days 30 >/dev/null 2>&1
+# issue <file stem> <names, comma-separated> [<CA pem> <CA key>]
+issue() {
+  local stem="$1" names="$2" ca="${3:-$CA/ca.pem}" cakey="${4:-$CA/ca.key}" san=""
+  for n in $(printf '%s' "$names" | tr ',' ' '); do san="$san${san:+,}DNS:$n"; done
+  openssl req -newkey rsa:2048 -nodes -keyout "$CA/$stem.key" -out "$CA/$stem.csr" -subj "/CN=${names%%,*}" >/dev/null 2>&1
+  printf 'subjectAltName=%s\n' "$san" > "$CA/$stem.ext"
+  openssl x509 -req -in "$CA/$stem.csr" -CA "$ca" -CAkey "$cakey" -CAcreateserial -days 90 \
+    -extfile "$CA/$stem.ext" -out "$CA/$stem.crt" >/dev/null 2>&1
+}
+place() { cp "$CA/$1.crt" "$CC/a.test-fullchain.crt"; cp "$CA/$2.key" "$CC/a.test.key"; }
+cc() { ( ROOT_DIR="$CM" STACKYARD_CA_FILE="$CA/ca.pem" "$REPO_DIR/platform/bin/check-certs.sh" ) 2>&1; }
+
+issue good a.test,www.a.test; place good good
+out="$(cc)"; rc=$?
+check "check-certs: the right certificate passes" "$rc" "0"
+issue other other.test; place other other
+out="$(cc)"
+check "check-certs: a valid certificate for another name fails" "$(printf '%s\n' "$out" | grep -c 'WRONG: does not cover a.test')" "1"
+issue noalias a.test; place noalias noalias
+out="$(cc)"
+check "check-certs: one missing a declared alias fails" "$(printf '%s\n' "$out" | grep -c 'does not cover www.a.test')" "1"
+issue good a.test,www.a.test; issue spare a.test; place good spare
+out="$(cc)"
+check "check-certs: a key that is not the certificate's fails" "$(printf '%s\n' "$out" | grep -c 'a.test.key is not the key of this certificate')" "1"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$CA/rogue.key" -out "$CA/rogue.pem" -subj '/CN=Rogue CA' -days 30 >/dev/null 2>&1
+issue untrusted a.test,www.a.test "$CA/rogue.pem" "$CA/rogue.key"; place untrusted untrusted
+out="$(cc)"
+check "check-certs: a chain that does not reach a trusted root fails" "$(printf '%s\n' "$out" | grep -c 'the chain does not verify')" "1"
+rm -rf "$CM" "$CA"
+
 echo "== notify: a recovery is not lost to a failed send"
 
 # The alert's state file is what says a recovery is owed. It used to be removed

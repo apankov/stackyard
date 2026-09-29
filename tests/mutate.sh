@@ -181,6 +181,8 @@ MUTATIONS=(
   'notify: a failed recovery clears the alert anyway@@platform/bin/notify.sh@@      || die "could not send the recovery message — the alert state is kept, the next run retries"@@      || { rm -f "$sf"; die "could not send the recovery message"; }'
   'ports: php-fpm is published on every interface again@@profiles/stacks/php-fpm/compose.yaml@@      - "127.0.0.1:9000:9000"@@      - "0.0.0.0:9000:9000"'
   'manifest: a name that is not a stack is let through@@platform/bin/stack.sh@@  [ -z "$unknown" ] || die "machine.conf lists what is not a stack here@@  true || die "machine.conf lists what is not a stack here'
+  'certs: the names a certificate covers are not looked at@@platform/bin/check-certs.sh@@    case "$out" in *"does match"*) ;;@@    case "$out" in *) ;;'
+  'certs: the key beside a certificate is not compared@@platform/bin/check-certs.sh@@  elif [ "$(openssl x509 -noout -pubkey@@  elif false \&\& [ "$(openssl x509 -noout -pubkey'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

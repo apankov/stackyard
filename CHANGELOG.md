@@ -8,6 +8,15 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.35.1] — 2026-09-29
+
+### Fixed
+- `check-certs.sh` checks that a certificate is the right one, not only that it
+  is fresh: it covers its domain and every alias declared with it, the key
+  beside it is its key, and its chain verifies up to a trusted root. Someone
+  else's valid certificate, one issued before an alias was added, or a renewal
+  that left the old key in place used to read as ok.
+
 ## [0.35.0] — 2026-09-29
 
 ### Changed
@@ -196,6 +205,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.35.1]: https://github.com/apankov/stackyard/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/apankov/stackyard/compare/v0.34.6...v0.35.0
 [0.34.6]: https://github.com/apankov/stackyard/compare/v0.34.5...v0.34.6
 [0.34.5]: https://github.com/apankov/stackyard/compare/v0.34.4...v0.34.5

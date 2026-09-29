@@ -86,6 +86,51 @@ problems=0
 external=" $(stacks_domains_external | tr '\n' ' ') "
 skipped=0
 
+# The names each certificate must cover: its domain and the aliases declared
+# with it (Domains="a+www.a" is one certificate for both). Expiry alone said
+# nothing about whether the file is the right certificate at all: someone
+# else's valid one, or one issued before an alias was added, read as ok.
+declare -A COVERS=()
+while IFS= read -r s; do
+  [ -n "$s" ] || continue
+  for d in $(stack_conf_get "$s" Domains); do
+    COVERS["$(domain_primary "$d")"]="$(domain_primary "$d") $(domain_sans "$d")"
+  done
+done <<< "$(stacks_enabled 2>/dev/null)"
+
+# What is wrong with a real certificate besides its age: a name it does not
+# cover, a key beside it that is not its key, a chain that does not verify.
+# Empty output means none of these.
+cert_faults() {
+  local host="$1" cert="$2" name out key tmp args=() vout faults=""
+  for name in ${COVERS[$host]:-$host}; do
+    out="$(openssl x509 -noout -checkhost "$name" -in "$cert" 2>/dev/null)"
+    case "$out" in *"does match"*) ;; *) faults="$faults; does not cover $name" ;; esac
+  done
+  # The key nginx is given with it (ssl_certificate_key): a certificate
+  # renewed with a new key while the old key file stayed is a handshake nginx
+  # refuses to load.
+  key="$CERTS_DIR/$host.key"
+  if [ ! -f "$key" ]; then
+    faults="$faults; no key file $host.key"
+  elif [ "$(openssl x509 -noout -pubkey -in "$cert" 2>/dev/null)" != "$(openssl pkey -pubout -in "$key" 2>/dev/null)" ]; then
+    faults="$faults; $host.key is not the key of this certificate"
+  fi
+  # The chain as a client builds it: the leaf, the intermediates after it in
+  # the file, up to a root the system trusts. STACKYARD_CA_FILE stands in for
+  # that store in the selftest.
+  tmp="$(mktemp -d)"
+  awk -v leaf="$tmp/leaf" -v rest="$tmp/rest" \
+    '/BEGIN CERTIFICATE/ { n++ } { if (n <= 1) print > leaf; else print > rest }' "$cert"
+  [ -s "$tmp/rest" ] && args+=(-untrusted "$tmp/rest")
+  [ -n "${STACKYARD_CA_FILE:-}" ] && args+=(-CAfile "$STACKYARD_CA_FILE")
+  if ! vout="$(openssl verify ${args[@]+"${args[@]}"} "$tmp/leaf" 2>&1)"; then
+    faults="$faults; the chain does not verify ($(printf '%s' "$vout" | grep -m 1 'error' | sed 's/^.*error [0-9]* at [0-9]* depth lookup: //'))"
+  fi
+  rm -rf "$tmp"
+  printf '%s' "${faults#; }"
+}
+
 for cert in "${certs[@]}"; do
   host=$(basename "$cert" -fullchain.crt)
 
@@ -117,6 +162,9 @@ for cert in "${certs[@]}"; do
 
   if [[ "$issuer" == *"$PLACEHOLDER_CN"* ]]; then
     printf '%-40s PLACEHOLDER: a real certificate was never issued\n' "$host"
+    problems=$((problems + 1))
+  elif faults="$(cert_faults "$host" "$cert")" && [ -n "$faults" ]; then
+    printf '%-40s WRONG: %s\n' "$host" "$faults"
     problems=$((problems + 1))
   elif [ "$days" -lt "$THRESHOLD_DAYS" ]; then
     printf '%-40s EXPIRES in %s days — the renewal did not work\n' "$host" "$days"

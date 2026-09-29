@@ -2,7 +2,7 @@
 #
 # Install the stackyard operator CLI on a laptop.
 #
-#   curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.35.0/install.sh | bash
+#   curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.35.1/install.sh | bash
 #   curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
 #
 # The second is the newest release: `latest` is a branch that
@@ -10,7 +10,7 @@
 #
 # or, to read it before it runs (a pipe into bash cannot be inspected first):
 #
-#   curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.35.0/install.sh
+#   curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.35.1/install.sh
 #   less install.sh && bash install.sh
 #
 # This is for the operator's tools only. A machine never runs it: a machine
@@ -46,7 +46,7 @@ set -euo pipefail
 # The release this script belongs to. Fetched by its tag, the script installs
 # that tag and nothing newer. selftest holds this equal to platform/VERSION, so
 # the release commit bumps both.
-STACKYARD_RELEASE=v0.35.0
+STACKYARD_RELEASE=v0.35.1
 
 VERSION="${STACKYARD_VERSION:-$STACKYARD_RELEASE}"
 DIR="${STACKYARD_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/stackyard}"
