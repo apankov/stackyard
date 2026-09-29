@@ -1,415 +1,174 @@
 # stackyard
 
-A yard where stacks stand: a platform for a single host on which several
-independent projects live side by side, each in its own docker stack.
+[![selftest](https://github.com/apankov/stackyard/actions/workflows/selftest.yml/badge.svg)](https://github.com/apankov/stackyard/actions/workflows/selftest.yml)
 
-Extracted from two working devboxes. There are no real machines here and there
-cannot be: the repository is public, and a client's domains and stack list in a
-public repository are exactly the leak the split was made for. Every machine
-lives in its own private repository.
+Run several independent docker-compose projects on one host — one nginx in
+front, TLS for every domain, a shared database, backups, alerts and systemd
+timers — and keep a fleet of such hosts on known, pinned versions. Plain bash;
+the server needs nothing but docker.
 
-`tests/machines/` holds two **synthetic** fixtures — `alpha` (shared MySQL +
-PHP) and `beta` (shared Postgres). The platform counts as shared exactly when
-both run on it without a single edit: different DBMSes, different stack shapes,
-one engine.
+- **One list decides.** `Enabled_Stacks` in a machine's `.env-stacks` is the only
+  place that says what runs. Compose files, vhost includes, certificate domains,
+  systemd units and database grants are derived from it.
+- **Nothing half-enabled.** `./stack enable` starts the containers before the
+  vhost and `disable` removes the vhost first, so nginx never points at a dead
+  upstream and takes every site down with it.
+- **Pinned, one machine at a time.** A machine records the commit it runs in
+  `stackyard.lock`. Updating a client is a two-line diff in its repository, and
+  there is deliberately no "update everyone".
+- **Clients share nothing.** The platform is public and holds no secrets; each
+  machine is a private repository, and `stackyard audit` catches a key, bucket
+  or network that two of them share.
+- **Checked, not assumed.** `./stack --check` asks the running host: upstreams,
+  certificates, mounts, units, databases. The engine's own tests include a
+  mutation run and a real `nginx -t` on every commit.
 
-## Three layers
+It is not a cluster scheduler and not a PaaS with a web UI or git-push deploys:
+one host, several projects, and an operator who wants to know exactly what is
+on it.
 
-| Layer | What it knows | Who gets it |
+## How it fits together
+
+```
+laptop                               GitHub                      server
+stackyard CLI                        apankov/stackyard  ──────▶  /mnt/data/acme/
+  new · pin · fleet · audit          (public: the platform)        stackyard.lock   the pinned commit
+~/.local/share/stackyard/            you/machine-acme   ──────▶    .stackyard/versions/<commit>/
+  versions/  repo.git  fleet         (private, one per host)       platform/ profile/ -> current
+~/dev/machines/acme/ ────── push ──▶                                stacks/  .env*  state/
+```
+
+| Layer | What it is | Where it lives |
 |---|---|---|
-| `platform/` | the engine: stacks, dependencies, nginx, TLS, systemd. No machine, no DBMS, no secret | distributed |
-| `profiles/` | reusable stacks: `mysql`, `pg`, `redis`, `php-fpm` | yours |
-| machine | sites, `.env`, state — **its own repository**, not here | private, per client |
+| `platform/` | the engine: stacks, dependencies, nginx, TLS, backups, systemd. Knows no machine, no DBMS, no secret | this repository |
+| `profiles/` | reusable stacks: `mysql`, `pg`, `redis`, `php-fpm` | this repository |
+| machine | its own stacks, `.env` files, generated state | a private repository per host |
 
-The split is not cosmetic. The platform contains no secrets **at all** —
-otherwise it cannot be distributed, and an ACME key or a backup bucket shared
-across clients means the rate limits, the access and the dumps are shared too.
+## Quick start
+
+On the laptop, once:
+
+```sh
+curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
+stackyard fleet add-dir ~/dev/machines     # every machine created there is in the fleet
+```
+
+`latest` is the newest release; `…/stackyard/v0.30.2/install.sh` pins one. The
+script prints the tag and commit it installed and keeps everything in
+`~/.local/share/stackyard/`. A pipe into bash cannot be read first; to read it:
+`curl -o install.sh <url> && less install.sh && bash install.sh`.
+
+A new machine:
+
+```sh
+stackyard new ~/dev/machines/acme          # skeleton, pinned to the CLI's commit
+cd ~/dev/machines/acme && git init
+$EDITOR .env.example .env-stacks.example   # paths, network; Enabled_Stacks
+# describe your own stacks in stacks/, commit, push to a private repository
+```
+
+On the server:
+
+```sh
+git clone <the machine's repository> /mnt/data/acme && cd /mnt/data/acme
+./bootstrap                        # the platform, at the commit in stackyard.lock
+./stack init mysql php-fpm site    # .env files from their examples; rerun until it passes
+$EDITOR .env stacks/*/.env
+sudo ./host-setup                  # packages, placeholder certificates, timers
+./stack enable mysql php-fpm site
+./stack --check
+```
+
+Updating a machine:
+
+```sh
+stackyard install latest                   # the CLI itself; older versions stay installed
+stackyard pin ~/dev/machines/acme          # shows the platform diff, rewrites the lock
+git -C ~/dev/machines/acme commit -am "platform v0.31.0" && git -C ~/dev/machines/acme push
+# on the server: git pull && ./bootstrap && ./stack sync && ./stack --check
+stackyard fleet                            # who runs what, and how far behind
+```
+
+Rolling back is `stackyard pin <machine> --version <tag>`; to the version the
+machine ran just before, `./bootstrap` switches back without a download.
 
 ## A stack is a directory
 
-Everything runs through the machine's `./dc`; the composition is one
-`Enabled_Stacks` line in its `.env-stacks`. From that line follow the compose
-files, the vhost includes, the certificate domains, the systemd units and the
-database orders.
-
-**A stack is declared by a directory containing `stack.conf`.** The presence of
-a subdirectory is a declaration too: `nginx/` means an include will be made,
-`systemd/` means units will be installed, `scripts/health.sh` means `--check`
-will ask the stack whether it is alive, `scripts/host-setup.sh` means the stack
-has a host-side part.
-
-## Whose certificate it is
-
-By default this machine issues and renews the certificate for every domain a
-stack declares. A stack whose TLS is terminated **in front of** the
-machine — behind a load balancer or a CDN — says so:
-
 ```
-# stacks/shop/stack.conf
-Domains="ledger.staging.example.com"
-Certs="external"
+stacks/site/
+  stack.conf                  what the stack is and needs
+  .env.example                its variables; ./stack init makes .env from it
+  compose.yaml                its containers (none here: Containers="no")
+  nginx/01-app.example.com.conf
 ```
-
-Then no getssl config is written for those names, `check-certs.sh` reports
-them as external instead of counting a placeholder as a problem, and if no
-enabled stack is left wanting getssl, `host-setup` removes the renewal timers
-rather than installing them.
-
-The placeholder certificate stays either way: `listen 443 ssl` with no
-certificate file is a refusal to start, not a warning.
-
-Explicit, rather than inferred from a failing challenge, for the same reason
-`Containers="no"` is explicit. A domain nobody issues a certificate for looks
-exactly like a domain whose renewal has broken, and the first machine to need
-this had spent two weeks failing a renewal every night for a domain an ALB had
-been terminating all along — with a green timer, because getssl exits zero
-when there is nothing it can do.
-
-## Whose containers they are
-
-`watch-host` alerts about the machine's own containers — those in its compose
-project — and about a foreign one only while an enabled stack's vhost points
-at it. A stack whose application lives in a compose project of its own,
-started from another repository and reached through `host.docker.internal`,
-is pointed at by no vhost. It says whose containers those are:
-
-```
-# stacks/shop/stack.conf
-Containers="no"
-Watch_Project="shop-main"
-```
-
-Then those containers are watched while the stack is enabled, and
-`./stack --check` fails when not one of them is running. Without the line, a
-machine whose whole point is that application would raise no alert when it
-crash-loops: every one of its containers looks like somebody else's.
-
-## Copy or link
-
-Stacks are looked up in two roots, the machine one first:
-
-```
-machines/<name>/stacks/         its own. Edited freely
-machines/<name>/profile/stacks/ the library that came with the profile
-```
-
-**Linked** — the stack exists only in the profile; updating the profile brings
-the changes with it. **Copied** — `stack.conf` sits in the machine's `stacks/`,
-and the machine copy shadows the profile one; profile updates no longer touch
-it. Detaching means copying the whole directory; half a copy is not a stack,
-and you can see which it is from a single `ls stacks/`, not from an entry in a
-config file.
-
-A stack's `.env` is **always** the machine's, even for a profile stack: the
-secret belongs to the machine, and the profile is updated wholesale and would
-overwrite it.
-
-## The DB provider is a role, not a name
-
-The engine does not know the words "MySQL" and "Postgres". It knows that some
-enabled stack declared itself a provider:
 
 ```sh
-# profiles/stacks/mysql/stack.conf
-Provides_DB="Mysql"
-DB_Init_Service="mysql-initializer"
-```
-
-A consumer orders a database with keys carrying that prefix:
-
-```sh
-# machines/client-acme/stacks/timesheets/stack.conf
+# stacks/site/stack.conf
 Requires="mysql php-fpm"
-Mysql_DB="${Timesheets_DB_Name}"
-Mysql_User="${Timesheets_DB_User}"
-Mysql_Password="${Timesheets_DB_Password}"
+Domains="app.example.com"
+Containers="no"
+Mysql_DB="${Site_DB_Name}"
+Mysql_User="${Site_DB_User}"
+Mysql_Password="${Site_DB_Password}"
 Mysql_Grants="SELECT,INSERT,UPDATE,DELETE"
 ```
 
-The values are **references** into the stack's `.env`, not copies. A machine on
-Postgres enables `pg` with `Provides_DB="Postgres"`, and not one line of the
-platform changes. What the keys beyond the mandatory `DB`/`User`/`Password`
-mean is the provider's business: `Grants` is validated by
-`profiles/stacks/mysql/scripts/check-decl.sh`, because the list of MySQL
-privileges is knowledge about MySQL, not about the platform.
+This site runs on the shared nginx and php-fpm, and its database is created in
+the shared MySQL by the provider. The engine knows the provider only as a
+role: a Postgres machine enables `pg` instead, and nothing in the platform
+changes. Subdirectories are declarations too — `systemd/` installs units,
+`scripts/health.sh` answers `--check`. Every key and why each one is explicit:
+[docs/guides/stacks.md](docs/guides/stacks.md).
 
-## Working with a machine
+## On a machine
 
 ```sh
-cd machines/client-acme
-./stack init           # create missing .env files from their examples, name what is still CHANGE_ME
 ./stack list           # what is enabled and what is actually alive
 ./stack --check        # declarations, domains, databases, upstreams, vhosts, units
-./stack enable <stack> # containers first, then the vhost — the order matters
-./stack sync           # bring nginx in line with the manifest
-./dc up -d
+./stack enable <stack> # containers first, then the vhost
+./stack disable <stack> # the vhost first, then the containers; data stays
+./stack sync           # bring nginx in line with the manifest (nginx -t, then reload)
+./stack init           # missing .env files from their examples; names what is still CHANGE_ME
+./dc <compose args>    # the only path to docker compose
 sudo ./host-setup      # packages, certificate placeholders, timers, stack host parts
 ./memory               # where the memory went: by container, by stack, by role
 ```
 
-## Machine state
+Also on board: `backup.sh` (databases and declared files → GPG → S3, with
+`check-backups.sh` watching freshness), `watch-host.sh` and `notify.sh` (disk,
+containers and failed units → Telegram), `registry.sh` (logins, and moving
+tags pinned to digests), getssl renewals on a timer.
 
-`machines/<name>/state/` is everything that describes this particular machine
-and is generated: certificates, `getssl-config`, `databases.yaml` (with
-passwords), `10-enabled.conf`, `nginx-static.generated.yaml`, `bin/getssl`.
-Not a line of it is in git.
+## Requirements
 
-`getssl` lives there for the same reason: it is not vendored into the
-repository but downloaded per `platform/getssl.lock` — a pinned version plus a
-sha256. A copy of someone else's GPL-3 script inside a public MIT repository is
-awkward both legally and in substance: it gets edited in place, and it drifts
-from upstream silently. The checksum is also there because getssl can update
-itself (`getssl -u` downloads a fresh version and overwrites itself); the units
-pass `-U`, which disables even the version check, and the checksum catches the
-case where someone ran `-u` by hand anyway.
+- **Server:** Linux with systemd, docker with the compose plugin, bash ≥ 4.2.
+  `host-setup` installs the rest (openssl, gnupg, sqlite, logrotate, …) with
+  apt, dnf, yum, apk or zypper.
+- **Laptop:** macOS or Linux, git, tar, python3, and bash ≥ 4.2 — on macOS that
+  means a Homebrew bash; `/bin/bash` 3.2 is refused.
 
-    ./platform/bin/getssl-fetch.sh           # download the pinned version
-    ./platform/bin/getssl-fetch.sh --check   # verify the checksum, change nothing
-    ./platform/bin/getssl-fetch.sh --force   # put the pinned version back
+## Documentation
 
-The separate directory exists because `platform/` and `profile/` are shared: in
-the workspace they are symlinks, on a machine they are vendored copies. Writing
-there either breaks a neighbouring machine or disappears at the next update.
+- [docs/guides/stacks.md](docs/guides/stacks.md) — writing stacks: every
+  `stack.conf` key, copy or link, database providers, external certificates.
+- [docs/architecture/platform-delivery.md](docs/architecture/platform-delivery.md)
+  — the lock, `bootstrap`, versions side by side, rollback, offline and
+  vendored installs.
+- [docs/guides/isolation.md](docs/guides/isolation.md) — what keeps clients
+  apart, `audit`, machine state, pinned getssl.
+- [docs/NAVIGATOR.md](docs/NAVIGATOR.md) — everything else: decisions, plans.
 
-## Machine isolation
-
-The platform and the profile ship to **every** machine, so a secret cannot live
-in them at all: it would be copied to every client, and there would be nothing
-to detect it with after the fact. `certs.sh` refuses to run if
-`platform/getssl-config/account.key` exists.
-
-Isolation is checked by `./bin/audit-isolation.sh`, and it lives **in the
-workspace, not on a machine**: a machine by definition cannot see its
-neighbours, and a bucket shared by everyone looks to it exactly like a properly
-configured one of its own. It looks for:
-
-- secrets in `platform/` and `profiles/`;
-- the same `Platform_Network`, `Platform_Deploy_Dir`, backup bucket and prefix,
-  GPG recipient, notification token or chat on two machines;
-- the same password under **different** keys on different machines — leak it on
-  one and it opens both;
-- one ACME account key on two machines: that means shared Let's Encrypt limits
-  and the ability to revoke the other's certificates.
-
-An honest caveat: domains are public anyway through Certificate Transparency at
-issue time. What is achieved is "client A's machine holds no inventory of
-client B", not "domains are secret".
-
-## The operator's tools
-
-The tools that act across machines (`new-machine`, `pin`, `fleet`,
-`audit-isolation`, `vendor`) run on the operator's laptop. They work from a
-checkout as `./bin/<tool>.sh`, or installed as one command:
+## Development
 
 ```sh
-curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.30.2/install.sh | bash
+./platform/bin/selftest.sh   # the whole suite; the nginx -t block needs docker
+./tests/mutate.sh            # breaks the engine one mutation at a time; each must be caught
 ```
 
-or, for whatever the newest release is (the `latest` branch, moved onto each
-release by `.github/workflows/latest.yml`):
+Releases follow semver: every change to the platform is a tagged release, and
+the `latest` branch follows the newest tag. The fixtures in `tests/machines/`
+are synthetic, `alpha` on MySQL and `beta` on Postgres: the platform counts as
+shared only while both run on it unchanged. See [CLAUDE.md](CLAUDE.md) for the
+conventions.
 
-```sh
-curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
-```
-
-Either way the script prints the tag and commit it installed. Only the CLI
-floats like this: a machine always runs the commit in its `stackyard.lock`.
-
-A pipe into bash cannot be read before it runs. To read it first:
-
-```sh
-curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.30.2/install.sh
-less install.sh && bash install.sh
-```
-
-The script installs the release its URL names and prints the commit that tag
-resolved to. Everything it keeps is in one directory,
-`~/.local/share/stackyard/` (under `$XDG_DATA_HOME` when set), and nothing
-lands in the home directory itself: `versions/<commit>/` side by side in the
-layout a machine's `.stackyard/` has, `current` pointing at one, a mirror of
-the repository (`repo.git`) for the history `pin` and `fleet` read, and
-`fleet`, the list of your machines. `~/.local/bin/stackyard` links to
-`current`. It needs git and tar, and
-`STACKYARD_VERSION`, `STACKYARD_DIR` and `--no-modify-path` change its
-defaults.
-
-```sh
-stackyard new ~/dev/machines/client-acme    # = ./bin/new-machine.sh
-stackyard pin ~/dev/machines/client-acme    # = ./bin/pin.sh
-stackyard fleet ~/dev/machines/*            # = ./bin/fleet.sh
-stackyard audit ~/dev/machines/*            # = ./bin/audit-isolation.sh
-stackyard version                           # which one this is, and its commit
-stackyard install <tag>                     # or `latest`; the old one stays installed
-```
-
-`new` and `pin` write a **commit** into a lock (the running version's, or the
-one `--version` names), never the tag. A machine is never touched by this installer: it gets the platform
-from its own lock through `./bootstrap`.
-
-## How a machine gets the platform
-
-The platform is **not** in the machine's git. The machine's repository holds
-only `bootstrap` (one file, plain bash) and `stackyard.lock` with the pinned
-version:
-
-```
-repo=https://github.com/apankov/stackyard.git
-version=v0.3.0
-commit=019829962cd0be920ebfd59fa675da820652c51a
-```
-
-`./bootstrap` fetches it into `.stackyard/` (not in git) and links it in as
-`platform/` and `profile/`.
-
-Every version gets a directory of its own, and the machine runs whichever one
-`current` points at:
-
-```
-.stackyard/versions/<commit>/
-.stackyard/current  -> versions/<commit>    what the machine runs
-.stackyard/previous -> versions/<commit>    the one before, kept for a rollback
-platform -> .stackyard/current/platform
-profile  -> .stackyard/current/profiles
-```
-
-An update downloads the new version next to the old one and swaps `current`
-with a rename; `.stackyard` itself is never replaced. That matters for nginx: a
-bind mount pins the directory it was started on, not its path, so an nginx
-that mounted `platform/nginx-snippets` was left looking at a deleted directory
-after every `./bootstrap` and served no domains until it was recreated. nginx
-now mounts `.stackyard` and reaches `/etc/nginx/snippets`, `/etc/nginx/conf.d`
-and `/etc/nginx/profile-stacks` through links that follow `current`
-(`platform/compose/nginx-entrypoint.sh`), so after an update it needs a
-reload — `./stack sync`, which runs `nginx -t` first — and not a restart.
-
-A machine on the older flat `.stackyard/` is moved into `versions/` on its
-first `./bootstrap` of this version, by rename, so the running nginx keeps its
-files. It still needs one `./dc up -d --force-recreate nginx` to get the new
-mounts; `./bootstrap` says so, and no update after that needs one. This is the same mechanic as `terraform init`,
-`helm dependency update`, `ansible-galaxy install -r` and `npm ci`: the
-repository declares a version rather than carrying a copy of the code.
-
-The pin is by **commit**, not by an archive hash: GitHub's automatic archives
-are not guaranteed byte-stable, while a commit is immutable by definition. If a
-tag was moved, `bootstrap` refuses to run rather than handing over unapproved
-code.
-
-When the platform is in place, `bootstrap` runs `./bootstrap.local` if the
-machine has one. That is where a machine puts what only it needs fetched — a
-toolkit pulled from its own repository, a checkout of an application. It is a
-separate file because `bootstrap` itself is a platform file that `./bin/pin.sh`
-overwrites from the template: machine-specific code inside it would disappear
-at the next update without a word. A failure there is reported and does not
-fail the install — the platform is already installed by that point.
-
-### Deploy a machine
-
-```sh
-# on the laptop
-cd ~/dev/stackyard
-./bin/new-machine.sh ~/dev/machines/client-acme
-cd ~/dev/machines/client-acme && git init
-$EDITOR .env.example .env-stacks.example   # Enabled_Stacks lists what the machine runs
-# describe the sites in stacks/, commit, push
-
-# on the server
-git clone <the machine's repository> /mnt/data/client-acme
-cd /mnt/data/client-acme
-./bootstrap
-./stack init mysql php-fpm site   # their .env files from the examples; rerun until it passes
-$EDITOR .env stacks/*/.env
-sudo ./host-setup
-./stack enable mysql php-fpm site
-```
-
-### Update the platform on a machine
-
-```sh
-cd ~/dev/stackyard && git pull
-./bin/pin.sh ~/dev/machines/client-acme   # shows the platform diff, rewrites the lock
-cd ~/dev/machines/client-acme && git commit -am "platform 0.3.0" && git push
-# on the server: git pull && ./bootstrap && ./stack sync && ./stack --check
-```
-
-**Two lines** change in the machine's repository, not sixty files. Rolling back
-is `./bin/pin.sh <machine> --version v0.2.0`; to the version the machine ran
-just before, `./bootstrap` switches back to the kept copy without a download.
-
-There is deliberately no "update everyone" command: a client nobody touched
-keeps running its own version for as long as it likes.
-
-### Who is on which version
-
-```sh
-./bin/fleet.sh ~/dev/machines/*
-./bin/audit-isolation.sh ~/dev/machines/*
-```
-
-```
-MACHINE       VERSION  BEHIND  COMMIT
-client-acme   v0.3.0   no      019829962cd0
-client-beta   v0.2.0   1       a6dbe464c8bd
-```
-
-Both commands take paths; with no arguments they read the fleet list,
-`~/.local/share/stackyard/fleet`. Keep it with the CLI rather than by hand:
-
-```sh
-stackyard fleet add-dir ~/dev/machines   # every machine under it, found afresh on each run
-stackyard fleet add ~/work/odd-one       # one machine that lives elsewhere
-stackyard fleet list                     # what the list resolves to
-```
-
-A `machines_dir=` line means a machine created under that directory is in
-the fleet without anyone adding it. A `~/.stackyard-fleet` from before the
-store is still read, with a note, and the first `add` carries it over.
-
-They exist for one question that otherwise has no quick answer: did the fix
-reach everyone. Lag is counted in commits that **touch the platform** — a
-machine twenty README commits behind is behind on nothing.
-
-### Offline mode
-
-`STACKYARD_SOURCE=/path/to/stackyard ./bootstrap` takes a local directory
-instead of the network — for developing the platform and for installing without
-internet. A divergence from the `lock` is not a refusal in that mode, but it is
-said out loud: otherwise the machine would be running something other than what
-is written down, and the `lock` would not show it.
-
-`bin/vendor.sh` (a copy of the platform straight into the machine's repository)
-remains as an emergency mode for a client who needs a fully self-contained
-repository. `check-vendor.sh` only makes sense there.
-
-## Vendoring: two modes
-
-```sh
-./bin/vendor.sh <machine>            # replace the symlinks with copies, write .vendor.lock
-./bin/vendor.sh <machine> --unlink   # restore the symlinks (development mode)
-```
-
-**Symlink** is the workspace: both machines run byte-for-byte the same files,
-so divergence is impossible by construction. That is how the platform is proven
-to be shared.
-
-**Copy** is what ships to a machine. A machine's repository must be
-self-contained: one `clone`, with no access to a second repository, no
-`--recursive`, no forgotten pointer commit. The machine runs the version it was
-vendored with — a platform edit in the workspace does not reach it until
-`vendor.sh` is run again.
-
-The price of a copy is that you cannot tell at a glance whether someone edited
-the platform in place. So `.vendor.lock` sits next to it with the versions and
-file checksums, and `platform/bin/check-vendor.sh` verifies them and catches
-all three kinds of divergence: a file changed, a file gone, a file present
-beyond the manifest. That check comes first in `host-setup --check`: if the
-platform is not the right one, everything else is being checked by the wrong
-code.
-
-In THIS repository the vendored copies are not in git — here they are a
-duplicate. In a client machine's repository it is the other way round: the copy
-is the whole point of vendoring, and it is committed together with
-`.vendor.lock`.
-
-## What is not done yet
-
-`docs/devel/plans/extraction-backlog.md`.
+MIT licensed.

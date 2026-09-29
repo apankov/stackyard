@@ -12,7 +12,10 @@ and pulls the platform by a pinned commit (`stackyard.lock` + `bootstrap`). Neve
 add real domains, client names or secrets. Fixture names stay under
 `example.com`.
 
-`README.md` is the design document. Read it before changing behavior.
+`README.md` is the front page: what this is and the quick start. The design
+lives in `docs/guides/stacks.md` (what a stack declares),
+`docs/architecture/platform-delivery.md` (lock, bootstrap, versions) and
+`docs/guides/isolation.md`; read the relevant one before changing behavior.
 `docs/NAVIGATOR.md` indexes the rest (ADRs, plans, the post-migration handoff).
 
 ## Commands

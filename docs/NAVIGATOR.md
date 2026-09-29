@@ -1,14 +1,26 @@
 # Documentation navigator
 
-Reading order for someone new: [README.md](../README.md) — what this is, how to
-deploy a machine and how to update the platform. The rest as needed.
+Reading order for someone new: [README.md](../README.md) — what this is, the
+quick start, the commands. Then the guide for whatever you are about to do.
 
 ## Root
 
-- [README.md](../README.md) — the three layers, a stack as a directory, copy or
-  link, machine isolation, platform delivery, working with a machine.
+- [README.md](../README.md) — what stackyard is, how the pieces fit, installing
+  the CLI, deploying and updating a machine, requirements.
+
+## Guides
+
+- [guides/stacks.md](guides/stacks.md) — writing stacks: what a directory
+  declares, every `stack.conf` key, copy or link, the database provider role,
+  external certificates, foreign containers.
+- [guides/isolation.md](guides/isolation.md) — what keeps clients apart,
+  `stackyard audit`, machine state, pinned getssl.
 
 ## Architecture
+
+- [platform-delivery.md](architecture/platform-delivery.md) — how a machine gets
+  the platform: the lock, `bootstrap`, versions side by side, updating and
+  rolling back, `bootstrap.local`, offline installs, emergency vendoring.
 
 - [decisions/0001-delivery-mechanism.md](architecture/decisions/0001-delivery-mechanism.md)
   — why the platform is downloaded by version and `lock` rather than vendored,
