@@ -5,7 +5,10 @@ services:
     container_name: mysqld
     restart: always
     ports:
-      - "3306:3306"  # public-port-debt: bound to every interface, see selftest
+      # Loopback only: Docker's port rules sit ahead of the host firewall, so a
+      # port published on every interface is open to the internet whatever the
+      # security group says. tools on the host itself (a dump, a client) still reach it; the containers use the docker network.
+      - "127.0.0.1:3306:3306"
     networks:
       - shared_network
     volumes:

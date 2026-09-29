@@ -1949,10 +1949,10 @@ check "profile stacks declare a stack.conf" \
 # group as the only thing between the internet and a database superuser or an
 # unauthenticated FastCGI socket — and every machine gets the profile.
 #
-# The ports still published on every interface are marked # public-port-debt:
-# a debt that is greppable and counted, not an exception that looks settled.
-public=$(grep -rnE '^[[:space:]]*- "?[0-9]+:[0-9]+' "$REPO_DIR"/profiles/stacks/*/compose.yaml 2>/dev/null \
-         | grep -v 'public-port-debt' || true)
+# No exceptions: the mysql, php-fpm and redis ports were once allowed through
+# with a "public-port-debt" marker, and a debt nobody is forced to pay is a
+# setting. Written out as 0.0.0.0 or [::] is the same thing, and fails too.
+public=$(grep -rnE '^[[:space:]]*- "?(0\.0\.0\.0:|\[::\]:)?[0-9]+:[0-9]+' "$REPO_DIR"/profiles/stacks/*/compose.yaml 2>/dev/null || true)
 check "profile stacks publish ports on loopback only" "$public" ""
 
 # Exactly one DB provider per prefix. Two stacks with the same Provides_DB in

@@ -8,7 +8,10 @@ services:
     container_name: php-fpm
     restart: always
     ports:
-      - "9000:9000"  # public-port-debt: bound to every interface, see selftest
+      # Loopback only: Docker's port rules sit ahead of the host firewall, so a
+      # port published on every interface is open to the internet whatever the
+      # security group says. nginx reaches FastCGI over the docker network; open to the world, FastCGI runs any PHP file it is told to, past nginx.
+      - "127.0.0.1:9000:9000"
     volumes:
       # The only volume is the shared docroot directory, the same one nginx
       # gets. Nothing per-stack is mixed in here, so the spec is constant and

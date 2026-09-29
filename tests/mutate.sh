@@ -179,6 +179,7 @@ MUTATIONS=(
   'pg init: a failed seed leaves its database behind@@profiles/stacks/pg/db-init/initializer.sh@@                sql -d postgres -v d="$DB_NAME" <<< "DROP DATABASE :\"d\";" || true@@                true'
   'audit: a prefix of the shared secret is printed again@@bin/audit-isolation.sh@@    bad "$key is identical on machines $m1 and $m2"@@    bad "$key is identical on machines $m1 and $m2 (value: ${val:0:24}...)"'
   'notify: a failed recovery clears the alert anyway@@platform/bin/notify.sh@@      || die "could not send the recovery message — the alert state is kept, the next run retries"@@      || { rm -f "$sf"; die "could not send the recovery message"; }'
+  'ports: php-fpm is published on every interface again@@profiles/stacks/php-fpm/compose.yaml@@      - "127.0.0.1:9000:9000"@@      - "0.0.0.0:9000:9000"'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

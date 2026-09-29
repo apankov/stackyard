@@ -8,6 +8,21 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.34.6] — 2026-09-29
+
+### Security
+- The `mysql`, `php-fpm` and `redis` profiles (profiles 0.1.2) publish their
+  ports on `127.0.0.1` only. They were bound to every interface, and Docker's
+  rules sit ahead of the host firewall: a database superuser, an
+  unauthenticated FastCGI socket and a password-less redis were open to the
+  internet wherever a security group allowed it. The selftest no longer lets
+  any profile port through with a `public-port-debt` marker.
+
+  **Check before pinning:** anything that reached these ports through the
+  host's public address, or from another compose project through
+  `host.docker.internal`, stops reaching them. Containers on the machine's
+  docker network are unaffected; move such clients onto it.
+
 ## [0.34.5] — 2026-09-29
 
 ### Fixed
@@ -173,6 +188,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.34.6]: https://github.com/apankov/stackyard/compare/v0.34.5...v0.34.6
 [0.34.5]: https://github.com/apankov/stackyard/compare/v0.34.4...v0.34.5
 [0.34.4]: https://github.com/apankov/stackyard/compare/v0.34.3...v0.34.4
 [0.34.3]: https://github.com/apankov/stackyard/compare/v0.34.2...v0.34.3
