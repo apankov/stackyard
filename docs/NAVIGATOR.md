@@ -47,6 +47,10 @@ quick start, the commands. Then the guide for whatever you are about to do.
   (the operator's tools), which part it must not touch (the platform onto a
   machine), and the `./stack init` command that removes the remembered steps.
 
+- [devel/plans/promotion.md](devel/plans/promotion.md) — how to put stackyard
+  in front of the people it is for: the readiness checklist before any launch,
+  positioning, channels in order, the questions to have answers ready for.
+
 ## Assets
 
 - [assets/logo/](assets/logo/) — the mark (`stackyard-mark.svg`, and
