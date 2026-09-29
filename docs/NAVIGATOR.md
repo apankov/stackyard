@@ -8,6 +8,9 @@ quick start, the commands. Then the guide for whatever you are about to do.
 - [README.md](../README.md) — what stackyard is, how the pieces fit, installing
   the CLI, deploying and updating a machine, requirements.
 
+- [CHANGELOG.md](../CHANGELOG.md) — what changed in each release, and what to
+  do when a release breaks something.
+
 ## Guides
 
 - [guides/stacks.md](guides/stacks.md) — writing stacks: what a directory
