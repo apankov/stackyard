@@ -171,12 +171,14 @@ KIND="$(backup_file_kind "$FILE")"
 [ "$KIND" = unknown ] && KIND="db:$(db_hook detect "$FILE" 2>/dev/null || echo unknown)"
 
 human_kind() {
+  # db:unknown before db:*: after it, it could never match, and an
+  # unrecognised file was described as "a dump, format: unknown".
   case "$KIND" in
+    db:unknown)   echo "the format was recognised neither by the platform nor by the provider" ;;
     db:*)         echo "a dump from DBMS '$DB_PROVIDER', format: ${KIND#db:}" ;;
     sqlite_gz)    echo "a SQLite database, gzip-compressed" ;;
     sqlite_plain) echo "a SQLite database" ;;
     tar_gz)       echo "an archive of a directory or volume (tar.gz)" ;;
-    db:unknown)   echo "the format was recognised neither by the platform nor by the provider" ;;
   esac
 }
 

@@ -8,6 +8,13 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.36.1] — 2026-09-30
+
+### Fixed
+- `backup-restore.sh --check` says a file's format was recognised by neither
+  the platform nor the provider, instead of calling it "a dump, format:
+  unknown": the branch for it came after `db:*` and never matched.
+
 ## [0.36.0] — 2026-09-30
 
 ### Changed
@@ -221,6 +228,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.36.1]: https://github.com/apankov/stackyard/compare/v0.36.0...v0.36.1
 [0.36.0]: https://github.com/apankov/stackyard/compare/v0.35.1...v0.36.0
 [0.35.1]: https://github.com/apankov/stackyard/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/apankov/stackyard/compare/v0.34.6...v0.35.0
