@@ -202,7 +202,7 @@ The tools that act across machines (`new-machine`, `pin`, `fleet`,
 checkout as `./bin/<tool>.sh`, or installed as one command:
 
 ```sh
-curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.30.1/install.sh | bash
+curl -o- https://raw.githubusercontent.com/apankov/stackyard/v0.30.2/install.sh | bash
 ```
 
 or, for whatever the newest release is (the `latest` branch, moved onto each
@@ -218,7 +218,7 @@ floats like this: a machine always runs the commit in its `stackyard.lock`.
 A pipe into bash cannot be read before it runs. To read it first:
 
 ```sh
-curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.30.1/install.sh
+curl -o install.sh https://raw.githubusercontent.com/apankov/stackyard/v0.30.2/install.sh
 less install.sh && bash install.sh
 ```
 

@@ -67,10 +67,16 @@ stack_roots() {
 # stack.conf. Copying a stack out of the profile means copying it whole,
 # declaration included; half a copy is not a stack.
 stack_dir() {
-  local r
+  local r roots
+  # Read in full before the first return. Returning from a loop over
+  # `< <(stack_roots)` closes the pipe while the second root is still being
+  # written, and where SIGPIPE is ignored — every systemd unit, and CI — that
+  # write prints "Broken pipe" into whatever captures stderr. The same holds
+  # for every lookup below that stops at its first match.
+  roots="$(stack_roots)"
   while IFS= read -r r; do
     [ -f "$r/$1/stack.conf" ] && { printf '%s/%s' "$r" "$1"; return 0; }
-  done < <(stack_roots)
+  done <<< "$roots"
   printf '%s/stacks/%s' "$(stacks_root)" "$1"   # stack-path-ok: path used only in the error message
 }
 
@@ -238,10 +244,11 @@ ensure_state_dirs() {
 # quietly intercept declarations meant for the first. Enforced by
 # check_db_providers_unique.
 stacks_db_provider() {
-  local s
+  local s enabled
+  enabled="$(stacks_enabled 2>/dev/null)"   # in full first: see stack_dir
   while IFS= read -r s; do
-    [ -n "$(stack_conf_get "$s" Provides_DB)" ] && { printf '%s' "$s"; return 0; }
-  done < <(stacks_enabled 2>/dev/null)
+    [ -n "$s" ] && [ -n "$(stack_conf_get "$s" Provides_DB)" ] && { printf '%s' "$s"; return 0; }
+  done <<< "$enabled"
   return 0
 }
 
@@ -335,9 +342,7 @@ stacks_available() {
 }
 
 stack_exists() {
-  local s
-  while IFS= read -r s; do [ "$s" = "$1" ] && return 0; done < <(stacks_available)
-  return 1
+  list_has "$(stacks_available)" "$1"   # in full first: see stack_dir
 }
 
 # The enabled stacks come from Enabled_Stacks in .env-stacks, in file order.
@@ -377,9 +382,7 @@ stacks_enabled() {
 }
 
 stack_is_enabled() {
-  local s
-  while IFS= read -r s; do [ "$s" = "$1" ] && return 0; done < <(stacks_enabled 2>/dev/null)
-  return 1
+  list_has "$(stacks_enabled 2>/dev/null)" "$1"   # in full first: see stack_dir
 }
 
 # The enabled stacks that require the given stack.
