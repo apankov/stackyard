@@ -110,11 +110,31 @@ Platform_Data_Mount=/mnt/data
 EOF
 
 cat > "$DEST/machine.conf" <<'EOF'
-# The machine's manifest: which stacks run here, in order. The single source
-# of truth about its composition, committed with the machine. Stacks come from
-# profile/stacks (shared) and stacks/ (its own). Change it here or with
-# ./stack enable|disable <stack> --manifest-only, then on the server:
-# git pull && ./stack sync.
+# This machine's manifest: which stacks run on it. The single source of truth
+# about its composition, and committed with it, so a change to what runs is a
+# commit that can be reviewed rather than an edit on the server.
+#
+# Derived from it: the compose files and env files ./dc passes, the vhost
+# includes (state/nginx-vhosts/10-enabled.conf, generated, not in git), the
+# systemd units, the certificate domains and the database orders.
+#
+# To change it, on the laptop: `./stack enable|disable <stack> --manifest-only`
+# (after ./bootstrap there, so dependencies are resolved by the platform version
+# this machine is pinned to), or edit the line below. Commit and push. Then on
+# the server:
+#
+#   git pull && ./stack sync --dry-run && ./stack sync
+#
+# sync starts what is listed and not running, rebuilds the vhost includes and
+# reloads nginx. A stack removed from here is reported, not stopped: stop it
+# with `./stack disable <stack>` (data and images stay). `./stack enable` on
+# the server works too, but leaves this file differing from git, which
+# `./stack --check` warns about until it is committed.
+#
+# The order of names does not matter: nginx reads the includes in the order of
+# the vhost files' numeric prefixes (01-, 02-, ...). Stacks are looked up in
+# stacks/ (this machine's) and then profile/stacks/ (shared, arriving with the
+# platform); `./stack list` shows every stack and whether it runs.
 Enabled_Stacks=""
 EOF
 
