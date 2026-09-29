@@ -8,6 +8,22 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.34.3] — 2026-09-29
+
+### Fixed
+- `backup.sh` refuses to run when a stack's backup sources cannot all be read.
+  The sources were read through a process substitution, whose failure bash
+  does not pass on: a stack whose second source had an undefined variable was
+  backed up with its first source only, and the run reported nothing.
+  `check-backups.sh` had the same blind spot and now reports such a stack.
+- `check-backups.sh` expects the objects of `Backup_DB` sources, which
+  `backup.sh` stores and the check never looked for.
+- A failing `globals` hook of the database provider is a failure in both
+  scripts; it used to read as "no roles to save", and roles and grants went
+  unsaved without a word.
+- `check-backups.sh` exits 2 when not one source is expected, instead of
+  reporting every (none) source fresh.
+
 ## [0.34.2] — 2026-09-29
 
 ### Fixed
@@ -135,6 +151,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.34.3]: https://github.com/apankov/stackyard/compare/v0.34.2...v0.34.3
 [0.34.2]: https://github.com/apankov/stackyard/compare/v0.34.1...v0.34.2
 [0.34.1]: https://github.com/apankov/stackyard/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/apankov/stackyard/compare/v0.33.0...v0.34.0

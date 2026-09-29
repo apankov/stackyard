@@ -168,6 +168,12 @@ MUTATIONS=(
   'backup: a broken .env-backup passes for success@@platform/bin/systemd.sh@@if [ "$BACKUP_BROKEN" -eq 1 ]; then\n  echo >\&2@@if false; then\n  echo >\&2'
   'units: --check does not look at ExecStart@@platform/bin/systemd.sh@@        /*) [ -e "$cmd" ] || problem@@        /*) true || problem'
   'units: --check compares by existence only@@platform/bin/systemd.sh@@  elif [ "$(cat "$f")" != "$want" ]; then@@  elif false; then'
+  # --- the backup list: each of these is a backup that goes quiet, or a check
+  # that calls it fine.
+  'sources: a stack that cannot be read is forgotten@@platform/lib/lib-env.sh@@      rc=1\n      continue@@      continue'
+  'check-backups: a Backup_DB source is not expected@@platform/bin/check-backups.sh@@    db)     case " ${EXPECTED@@    NEVER)  case " ${EXPECTED'
+  'check-backups: a failed globals hook reads as empty@@platform/bin/check-backups.sh@@"$hook" globals 2>/dev/null); then@@"$hook" globals 2>/dev/null || true); then'
+  'check-backups: nothing expected passes as fresh@@platform/bin/check-backups.sh@@if [ ${#EXPECTED[@]} -eq 0 ] \&\& [ "$problems" -eq 0 ]; then@@if false; then'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

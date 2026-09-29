@@ -337,6 +337,37 @@ stack_backup_sources() {
   done
 }
 
+# backup_sources_enabled — every enabled stack's backup sources, one
+# "stack|kind:value" per line.
+#
+# Each stack's list is read whole, with its status, before anything is done
+# with it. Both scripts used to read it through `done < <(stack_backup_sources
+# …)`, and bash does not pass a process substitution's exit status on: a stack
+# whose second source had an undefined variable printed its first one, failed,
+# and backup.sh carried on with half a list — the `|| die` after the loop
+# belonged to the loop, not to the function. One copy here, for backup.sh and
+# check-backups.sh alike.
+#
+# It carries on past a stack that cannot be read, so the caller sees the rest,
+# and returns 1 at the end if any could not: backup.sh refuses to run on a
+# partial list, check-backups.sh reports it. Each stack's call runs in a
+# subshell, so its reset of ENV_VARS stays there.
+backup_sources_enabled() {
+  local stack srcs src rc=0
+  while IFS= read -r stack; do
+    [ -n "$stack" ] || continue
+    if ! srcs="$(stack_backup_sources "$stack")"; then
+      echo "Error: could not read the backup sources of stack '$stack'" >&2
+      rc=1
+      continue
+    fi
+    while IFS= read -r src; do
+      [ -n "$src" ] && printf '%s|%s\n' "$stack" "$src"
+    done <<< "$srcs"
+  done <<< "$(stacks_enabled 2>/dev/null)"
+  return "$rc"
+}
+
 # ------------------------------------------------- recognising a dump
 #
 # backup_file_kind <file> -> sqlite_plain | sqlite_gz | tar_gz | unknown

@@ -382,20 +382,14 @@ docker info >/dev/null 2>&1 || die "the docker daemon is not responding"
 
 # Stack sources are collected HERE, before any dump: an unexpanded
 # substitution or a missing file must abort the run before half the copies have
-# been taken, not in the middle of it.
+# been taken, not in the middle of it — and on the whole list, which is why it
+# comes from backup_sources_enabled (see there) rather than a loop of our own.
 STACK_SOURCES=()
-while IFS= read -r stack; do
-  [ -n "$stack" ] || continue
-  while IFS= read -r src; do
-    [ -n "$src" ] || continue
-    STACK_SOURCES+=("$stack|$src")
-  done < <(stack_backup_sources "$stack") \
-    || die "could not read the backup sources of stack '$stack'"
-  # stack_backup_sources has overwritten ENV_VARS — restore the machine-level
-  # environment, or the next iteration and the whole rest of the script would
-  # see that stack's variables.
-  ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
-done < <(stacks_enabled)
+all_sources="$(backup_sources_enabled)" \
+  || die "the backup sources of the enabled stacks cannot all be read — nothing was backed up"
+while IFS= read -r entry; do
+  [ -n "$entry" ] && STACK_SOURCES+=("$entry")
+done <<< "$all_sources"
 
 for entry in "${STACK_SOURCES[@]}"; do
   src="${entry#*|}"
@@ -540,10 +534,16 @@ if [ -n "$DB_PROVIDER" ]; then
   # Cluster-level objects: roles, passwords, grants. Without them a restored
   # database exists but nobody can connect to it. Empty output is legitimate:
   # some engines have no such objects at all, and then the step simply does not
-  # happen.
-  if [ -n "$(db_hook globals 2>/dev/null | head -c 1)" ]; then
-    run_job "$DB_PREFIX/_globals" "$DB_PREFIX/_globals" "$TS.sql.gpg" dump_globals || true
+  # happen. A hook that FAILED is not that: its empty output used to read as
+  # "nothing to back up", and the roles went unsaved without a word.
+  if globals_probe="$(db_hook globals 2>/dev/null)"; then
+    if [ -n "$globals_probe" ]; then
+      run_job "$DB_PREFIX/_globals" "$DB_PREFIX/_globals" "$TS.sql.gpg" dump_globals || true
+    fi
+  else
+    fail_source "$DB_PREFIX/_globals" "the provider's globals hook failed — roles and grants were not saved"
   fi
+  unset globals_probe
 fi
 
 if [ -n "$DATABASES" ]; then

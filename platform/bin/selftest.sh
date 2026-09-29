@@ -387,6 +387,25 @@ printf 'Foxtrot_DB_Dir=/mnt/data/fox\nFoxtrot_DB_File=f.db\n' > "$WORK/stacks/fo
 stack_backup_sources foxtrot >/dev/null
 check "a stack's environment does not leak into the next one" "$(stack_backup_sources bravo)" ""
 
+# The whole list, as backup.sh and check-backups.sh take it. The case that got
+# through: a first source that is fine, then one that is not. Read through a
+# process substitution, the failure never arrived and the run carried on with
+# the first source alone.
+fixture golf stack.conf 'Backup_DB="${Golf_Db}"
+Backup_Sqlite="${Golf_Dir}/${Golf_File}"'
+printf 'Golf_Db=golfdb\nGolf_Dir=/mnt/data/golf\n' > "$WORK/stacks/golf/.env"
+printf 'Enabled_Stacks="foxtrot golf"\n' > "$WORK/machine.conf"
+backup_sources_enabled >/dev/null 2>&1
+check "a stack failing after its first source fails the whole list" "$?" "1"
+check "and names that stack" \
+  "$(backup_sources_enabled 2>&1 >/dev/null | grep -c "could not read the backup sources of stack 'golf'")" "1"
+check "the other stacks are still listed" \
+  "$(backup_sources_enabled 2>/dev/null | grep -c '^foxtrot|')" "3"
+printf 'Golf_Db=golfdb\nGolf_Dir=/mnt/data/golf\nGolf_File=g.db\n' > "$WORK/stacks/golf/.env"
+check "a readable list succeeds, stack by stack" \
+  "$(backup_sources_enabled | grep '^golf|' | tr '\n' ' ')" "golf|db:golfdb golf|sqlite:/mnt/data/golf/g.db "
+printf 'Enabled_Stacks="foxtrot bravo"\n' > "$WORK/machine.conf"
+
 echo "== unfilled values"
 
 # host-setup and stack init both decide by this what is left to fill in. A
@@ -2354,6 +2373,49 @@ check "--check warns about a unit this platform does not install" \
   "$(printf '%s\n' "$out" | grep -c 'devbox-old-thing.service is installed but not one this platform version installs')" "1"
 check "--check changes nothing" "$(tail -n 1 "$SU/devbox-ext-job.timer")" "# edited by hand"
 rm -rf "$SM" "$WORK/sysstub"
+
+echo "== check-backups.sh: what it expects"
+
+# The freshness check against a stub S3 where every object is fresh: what is
+# under test is the LIST of expected objects, the part that went quiet.
+BM="$WORK/backup-machine"
+mkdir -p "$BM/stacks/prov/scripts" "$BM/stacks/app" "$BM/state" "$WORK/awsstub"
+ln -sfn "$REPO_DIR/platform" "$BM/platform"; ln -sfn "$REPO_DIR/profiles" "$BM/profile"
+printf 'Platform_Deploy_Dir=%s\n' "$BM" > "$BM/.env"
+printf 'Backup_S3_Bucket=b\n' > "$BM/.env-backup"
+printf 'Enabled_Stacks="prov app"\n' > "$BM/machine.conf"
+printf 'Provides_DB="Prov"\nContainers="no"\n' > "$BM/stacks/prov/stack.conf"
+printf '#!/bin/sh\ncase "$1" in\n  list) echo appdb ;;\n  globals) [ -f "$ROOT_DIR/globals-fail" ] && exit 1; echo GRANT ;;\n  ext) echo .sql ;;\nesac\n' \
+  > "$BM/stacks/prov/scripts/backup-dump.sh"
+chmod +x "$BM/stacks/prov/scripts/backup-dump.sh"
+printf 'Containers="no"\nBackup_DB="${App_Extra_Db}"\nBackup_Sqlite="${App_Dir}/a.db"\n' > "$BM/stacks/app/stack.conf"
+printf 'App_Extra_Db=extradb\nApp_Dir=/data\n' > "$BM/stacks/app/.env"
+printf '#!/bin/sh\nwhile [ "$1" = --region ]; do shift 2; done\ncase "$1 $2" in\n  "s3api list-objects-v2") printf "4096\\t%%s\\n" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S+00:00)" ;;\nesac\nexit 0\n' \
+  > "$WORK/awsstub/aws"
+chmod +x "$WORK/awsstub/aws"
+cb() { ( PATH="$WORK/awsstub:$PATH" ROOT_DIR="$BM" "$REPO_DIR/platform/bin/check-backups.sh" ) 2>&1; }
+
+out="$(cb)"; rc=$?
+check "check-backups: a machine whose every object is fresh passes" "$rc" "0"
+check "check-backups: a Backup_DB source is expected too" "$(printf '%s\n' "$out" | grep -c '^prov/extradb .*ok')" "1"
+check "check-backups: the provider's databases and roles are expected" \
+  "$(printf '%s\n' "$out" | grep -cE '^prov/(appdb|_globals) .*ok')" "2"
+
+touch "$BM/globals-fail"
+out="$(cb)"; rc=$?
+check "check-backups: a failed globals hook is a problem, not an empty list" "$rc" "1"
+check "and says so" "$(printf '%s\n' "$out" | grep -c 'could not list roles and grants')" "1"
+rm -f "$BM/globals-fail"
+
+printf 'Containers="no"\nBackup_DB="${App_Extra_Db}"\nBackup_Sqlite="${App_Dir}/${App_Missing}"\n' > "$BM/stacks/app/stack.conf"
+out="$(cb)"; rc=$?
+check "check-backups: a stack whose sources cannot be read fails the check" "$rc" "1"
+check "and names it once" "$(printf '%s\n' "$out" | grep -c "ERROR: could not read the backup sources of stack 'app'")" "1"
+
+printf 'Enabled_Stacks=""\n' > "$BM/machine.conf"
+out="$(cb)"; rc=$?
+check "check-backups: nothing expected at all is not a green result" "$rc" "2"
+rm -rf "$BM" "$WORK/awsstub"
 
 echo "== .gitignore"
 

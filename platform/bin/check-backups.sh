@@ -77,6 +77,7 @@ aws_cli s3api head-bucket --bucket "$S3_BUCKET" >/dev/null 2>&1 \
 
 EXPECTED=()
 DEGRADED=0
+problems=0
 
 # The database list is rebuilt from the DBMS itself rather than taken from
 # backup.sh: a check that asks the thing being checked only confirms its own
@@ -89,8 +90,14 @@ if [ -n "$DB_PROVIDER" ]; then
   if [ -x "$hook" ]; then
     databases=$(ROOT_DIR="$ROOT_DIR" STACK_DIR="$(stack_dir "$DB_PROVIDER")" "$hook" list 2>/dev/null \
                 | tr -d '\r' | sed '/^[[:space:]]*$/d')
-    [ -n "$(ROOT_DIR="$ROOT_DIR" STACK_DIR="$(stack_dir "$DB_PROVIDER")" "$hook" globals 2>/dev/null | head -c 1)" ] \
-      && EXPECTED+=("$DB_PREFIX/_globals")
+    # A failed hook is not "no cluster objects": backup.sh fails that source
+    # too, and here it would otherwise quietly drop out of the expected list.
+    if globals=$(ROOT_DIR="$ROOT_DIR" STACK_DIR="$(stack_dir "$DB_PROVIDER")" "$hook" globals 2>/dev/null); then
+      [ -n "$globals" ] && EXPECTED+=("$DB_PREFIX/_globals")
+    else
+      printf '%-34s ERROR: the provider could not list roles and grants\n' "$DB_PREFIX/_globals"
+      problems=$((problems + 1))
+    fi
   fi
 
   if [ -z "$databases" ]; then
@@ -115,25 +122,56 @@ fi
 # actual one from, using the same prefix formula out of the shared lib-env.sh.
 # Two copies of one formula drift easily, and the symptom is "no backups at
 # all" while backups are healthy.
-while IFS= read -r stack; do
-  [ -n "$stack" ] || continue
-  while IFS= read -r src; do
-    [ -n "$src" ] || continue
-    case "${src%%:*}" in
-      sqlite) EXPECTED+=("$(sqlite_s3_subpath "${src#*:}")") ;;
-      files)  EXPECTED+=("files/$stack") ;;
-      volume) EXPECTED+=("volume/${src#*:}") ;;
+#
+# From backup_sources_enabled, the list backup.sh works from too. A stack whose
+# sources cannot be read is a problem, not a stack with fewer sources: that is
+# how a failure here used to look.
+#
+# db: is what backup.sh stores under the provider's prefix, the same path as a
+# database the provider lists — expected once, whichever way it is declared.
+src_err="$(mktemp)"
+if ! all_sources="$(backup_sources_enabled 2>"$src_err")"; then
+  # One problem per stack that could not be read; the lines before its verdict
+  # say why, and are shown as they are.
+  while IFS= read -r line; do
+    case "$line" in
+      "Error: could not read the backup sources of stack "*)
+        printf '%-34s ERROR: %s\n' "sources" "${line#Error: }"
+        problems=$((problems + 1)) ;;
+      *) printf '%-34s   %s\n' "" "$line" ;;
     esac
-  done < <(stack_backup_sources "$stack")
-  ENV_VARS=(); env_load_files "$ROOT_DIR/.env" "$ENV_BACKUP"
-done < <(stacks_enabled 2>/dev/null)
+  done < "$src_err"
+fi
+rm -f "$src_err"
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  stack="${entry%%|*}"; src="${entry#*|}"
+  case "${src%%:*}" in
+    db)     case " ${EXPECTED[*]+${EXPECTED[*]}} " in
+              *" $DB_PREFIX/${src#*:} "*) ;;
+              *) EXPECTED+=("$DB_PREFIX/${src#*:}") ;;
+            esac ;;
+    sqlite) EXPECTED+=("$(sqlite_s3_subpath "${src#*:}")") ;;
+    files)  EXPECTED+=("files/$stack") ;;
+    volume) EXPECTED+=("volume/${src#*:}") ;;
+  esac
+done <<< "$all_sources"
+
+# Nothing expected is not "everything is fresh". A machine with backups
+# configured and not one source to check is either misconfigured or checked by
+# the wrong code; either way it is not a green result.
+if [ ${#EXPECTED[@]} -eq 0 ] && [ "$problems" -eq 0 ]; then
+  echo "Error: not one backup source is expected on this machine — nothing was verified." >&2
+  echo "  Either the machine needs no backups (remove .env-backup), or the sources are not declared." >&2
+  exit 2
+fi
 
 # --------------------------------------------------------------- the check
 
 now=$(date -u +%s)
-problems=0
 
-for src in "${EXPECTED[@]}"; do
+# ${…+…}: under set -u, bash before 4.4 calls an empty array unbound.
+for src in ${EXPECTED[@]+"${EXPECTED[@]}"}; do
   newest=$(aws_cli s3api list-objects-v2 \
              --bucket "$S3_BUCKET" --prefix "$S3_PREFIX/$src/" \
              --query 'sort_by(Contents, &LastModified)[-1].[Size,LastModified]' \
