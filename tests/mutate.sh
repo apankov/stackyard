@@ -174,6 +174,9 @@ MUTATIONS=(
   'check-backups: a Backup_DB source is not expected@@platform/bin/check-backups.sh@@    db)     case " ${EXPECTED@@    NEVER)  case " ${EXPECTED'
   'check-backups: a failed globals hook reads as empty@@platform/bin/check-backups.sh@@"$hook" globals 2>/dev/null); then@@"$hook" globals 2>/dev/null || true); then'
   'check-backups: nothing expected passes as fresh@@platform/bin/check-backups.sh@@if [ ${#EXPECTED[@]} -eq 0 ] \&\& [ "$problems" -eq 0 ]; then@@if false; then'
+  # --- the Postgres initializer (run with the live-database block).
+  'pg init: a failed statement does not stop it@@profiles/stacks/pg/db-init/initializer.sh@@-v ON_ERROR_STOP=1 "$@"@@-v ON_ERROR_STOP=0 "$@"'
+  'pg init: a failed seed leaves its database behind@@profiles/stacks/pg/db-init/initializer.sh@@                sql -d postgres -v d="$DB_NAME" <<< "DROP DATABASE :\"d\";" || true@@                true'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 
@@ -182,8 +185,18 @@ MUTATIONS=(
 # selftest for a reason of its own making and is reported as caught. That is
 # not hypothetical: from v0.28.0 the CLI block failed in any copy without .git,
 # and two full runs reported everything caught while proving nothing.
+#
+# The live-database block of the selftest is slow and off by default; it runs
+# for the mutations of an initializer, the only ones it can catch, and then for
+# the baseline too.
+live_for() { case "$1" in */db-init/*) printf 1 ;; esac; }
+BASE_LIVE=""
+for m in "${MUTATIONS[@]}"; do
+  IFS=$'\034' read -r name file old new <<< "${m//@@/$'\034'}"
+  case "$name" in *"$FILTER"*) [ -n "$(live_for "$file")" ] && BASE_LIVE=1 ;; esac
+done
 W=$(mktemp -d); cp -R "$ROOT"/. "$W"/ 2>/dev/null; rm -rf "$W/.git"
-if ! ( cd "$W" && ./platform/bin/selftest.sh ) > "$W.baseline.log" 2>&1; then
+if ! ( cd "$W" && STACKYARD_LIVE_DB="$BASE_LIVE" ./platform/bin/selftest.sh ) > "$W.baseline.log" 2>&1; then
   echo "REFUSING: the selftest fails on an unmutated copy, so every mutation would look caught." >&2
   grep -E '✗|expected|got:' "$W.baseline.log" | head -n 20 >&2
   rm -rf "$W" "$W.baseline.log"; exit 1
@@ -220,7 +233,7 @@ PY
     rm -rf "$W"; miss=$((miss + 1)); continue
   fi
 
-  if ( cd "$W" && ./platform/bin/selftest.sh ) >/dev/null 2>&1; then
+  if ( cd "$W" && STACKYARD_LIVE_DB="$(live_for "$file")" ./platform/bin/selftest.sh ) >/dev/null 2>&1; then
     printf '%-58s \033[31mNOT CAUGHT\033[0m\n' "$name"; miss=$((miss + 1))
   else
     printf '%-58s caught\n' "$name"; pass=$((pass + 1))

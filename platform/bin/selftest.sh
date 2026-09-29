@@ -2158,6 +2158,62 @@ else
   docker network rm "$nt_net" >/dev/null 2>&1 || true
 fi
 
+echo "== the Postgres initializer against a live Postgres"
+
+# The initializer is SQL, and only a server says whether it is right. The cases
+# that got through: a password with an apostrophe broke CREATE USER, and with
+# nothing stopping on an error the run still ended "All databases are in
+# sync"; a seed that failed half way left a database every later run skipped.
+#
+# Slow (a Postgres to start, packages to add), so only with
+# STACKYARD_LIVE_DB=1: CI sets it, and mutate.sh sets it for the mutations of
+# the initializers.
+if [ -z "${STACKYARD_LIVE_DB:-}" ]; then
+  echo "  . STACKYARD_LIVE_DB is not set -- block skipped"
+elif ! docker info >/dev/null 2>&1; then
+  check "docker is available (STACKYARD_LIVE_DB is set)" "no" "yes"
+else
+  PG="$WORK/pg-init"; mkdir -p "$PG/config" "$PG/dumps"
+  pg_net="stackyard-selftest-pg-$$"; pg_srv="stackyard-selftest-pg-$$"
+  docker network create "$pg_net" >/dev/null
+  docker run -d --name "$pg_srv" --network "$pg_net" --network-alias postgres \
+    -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=adminpw postgres:16-alpine >/dev/null
+  # The file exactly as stacks_databases_content writes it: single-quoted YAML.
+  cat > "$PG/config/databases.yaml" <<'YAML'
+- db: 'appdb'
+  user: 'appuser'
+  password: 'it''s a "pass"word'
+- db: 'seeded'
+  user: 'seeduser'
+  password: 'seedpw'
+  dump: 'seed.sql'
+YAML
+  printf 'CREATE TABLE t (a int);\nSELECT no_such_function();\n' > "$PG/dumps/seed.sql"
+  pg_init() {
+    docker run --rm --network "$pg_net" -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=adminpw \
+      -v "$REPO_DIR/profiles/stacks/pg/db-init/initializer.sh:/initializer.sh:ro" \
+      -v "$PG/config:/config:ro" -v "$PG/dumps:/dumps:ro" \
+      --entrypoint sh postgres:16-alpine -c "apk add --no-cache yq bash >/dev/null 2>&1 && bash /initializer.sh" 2>&1  # pkg-mgr-ok: inside the image, as the profile's own entrypoint does
+  }
+  pg_q() { docker exec -e PGPASSWORD="$2" "$pg_srv" psql -h localhost -U "$1" -d "$3" -tAc "$4" 2>/dev/null; }
+
+  out="$(pg_init)"; rc=$?
+  check "pg initializer: a failed seed fails the run" "$rc" "1"
+  check "pg initializer: a password with quotes in it works" \
+    "$(pg_q appuser "it's a \"pass\"word" appdb 'SELECT 1')" "1"
+  check "pg initializer: the database a failed seed was loaded into is dropped" \
+    "$(pg_q admin adminpw postgres "SELECT count(*) FROM pg_database WHERE datname = 'seeded'")" "0"
+
+  printf 'CREATE TABLE t (a int);\n' > "$PG/dumps/seed.sql"
+  out="$(pg_init)"; rc=$?
+  check "pg initializer: the next run loads the fixed seed" "$rc" "0"
+  check "and the seed is there" "$(pg_q admin adminpw seeded "SELECT count(*) FROM t")" "0"
+  check "and it says so only when everything is" "$(printf '%s\n' "$out" | grep -c 'All databases are in sync')" "1"
+
+  docker rm -f "$pg_srv" >/dev/null 2>&1 || true
+  docker network rm "$pg_net" >/dev/null 2>&1 || true
+fi
+
 echo "== --json"
 
 # JSON is a contract with a program, so it is checked as one: parsed by a real

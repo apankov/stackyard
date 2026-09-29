@@ -26,6 +26,21 @@ fi
 export PGPASSWORD="$POSTGRES_PASSWORD"
 problems=0
 
+# Every statement goes through here: ON_ERROR_STOP so a failed statement is a
+# failed command, and the declared values passed as psql variables, quoted by
+# psql itself — :'x' as a literal, :"x" as an identifier. They used to be
+# pasted into the SQL: a password with an apostrophe broke the statement, and
+# since nothing stopped on an error, a failed CREATE USER still ended in "All
+# databases are in sync". Variables are interpolated only in SQL read from
+# stdin, hence the here-strings.
+sql() { psql -h postgres -U "$POSTGRES_USER" -X -q -v ON_ERROR_STOP=1 "$@"; }
+
+# A name that is not an identifier Postgres would take unquoted is refused
+# rather than quoted into existence: an application connecting to "My-DB"
+# needs the exact spelling everywhere, and that is a mistake to report, not a
+# database to create.
+valid_name() { [[ "$1" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; }
+
 # yq turns every array element into compact one-line JSON, and it can also read
 # dotted values back out of those mini-JSON lines.
 #
@@ -43,13 +58,27 @@ while read -r row; do
     # runtime.
     DUMP_FILE=$(echo "$row" | yq e '.dump // ""' -)
 
+    for n in "$DB_NAME" "$DB_USER"; do
+        if ! valid_name "$n"; then
+            echo "--> [ERROR] '$n' is not a plain Postgres name (lower case letters, digits, _; not starting with a digit)." >&2
+            problems=$((problems + 1))
+            continue 2
+        fi
+    done
+
     # 1. The user.
-    USER_EXISTS=$(psql -h postgres -U "$POSTGRES_USER" -d postgres -tAc \
-      "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'")
+    if ! USER_EXISTS=$(sql -d postgres -tA -v u="$DB_USER" <<< "SELECT 1 FROM pg_roles WHERE rolname = :'u';"); then
+        echo "--> [ERROR] could not look up user '$DB_USER'." >&2
+        problems=$((problems + 1))
+        continue
+    fi
     if [ "$USER_EXISTS" != "1" ]; then
         echo "--> Creating user: $DB_USER"
-        psql -h postgres -U "$POSTGRES_USER" -d postgres \
-          -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASS';"
+        if ! sql -d postgres -v u="$DB_USER" -v p="$DB_PASS" <<< "CREATE USER :\"u\" WITH PASSWORD :'p';"; then
+            echo "--> [ERROR] could not create user '$DB_USER'." >&2
+            problems=$((problems + 1))
+            continue
+        fi
     else
         # The user already exists, so the password in the database was not set
         # by us and we do not know whether it matches the declared one. We test
@@ -81,21 +110,39 @@ while read -r row; do
     fi
 
     # 2. The database.
-    DB_EXISTS=$(psql -h postgres -U "$POSTGRES_USER" -d postgres -tAc \
-      "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'")
+    if ! DB_EXISTS=$(sql -d postgres -tA -v d="$DB_NAME" <<< "SELECT 1 FROM pg_database WHERE datname = :'d';"); then
+        echo "--> [ERROR] could not look up database '$DB_NAME'." >&2
+        problems=$((problems + 1))
+        continue
+    fi
     if [ "$DB_EXISTS" != "1" ]; then
         echo "--> Creating database: $DB_NAME"
-        psql -h postgres -U "$POSTGRES_USER" -d postgres \
-          -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
-        psql -h postgres -U "$POSTGRES_USER" -d postgres \
-          -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
+        # CREATE DATABASE cannot run inside a transaction block, so the two
+        # statements are two calls.
+        if ! sql -d postgres -v d="$DB_NAME" -v u="$DB_USER" <<< "CREATE DATABASE :\"d\" OWNER :\"u\";" \
+           || ! sql -d postgres -v d="$DB_NAME" -v u="$DB_USER" <<< "GRANT ALL PRIVILEGES ON DATABASE :\"d\" TO :\"u\";"; then
+            echo "--> [ERROR] could not create database '$DB_NAME' for '$DB_USER'." >&2
+            problems=$((problems + 1))
+            continue
+        fi
 
         # The dump is loaded ONLY when the database is created. Otherwise every
         # `up -d` would pour the seed over live data.
+        #
+        # A seed that fails half way drops the database it was loaded into: it
+        # was created a moment ago, by this run, and left behind it would look
+        # "already exists" to every later run, which then never loads the seed
+        # again.
         if [ -n "$DUMP_FILE" ] && [ "$DUMP_FILE" != "null" ] && [ -f "/dumps/$DUMP_FILE" ]; then
             echo "--> [!] Loading dump $DUMP_FILE into database $DB_NAME..."
-            psql -h postgres -U "$POSTGRES_USER" -d "$DB_NAME" -f "/dumps/$DUMP_FILE"
-            echo "--> Dump restored."
+            if sql -d "$DB_NAME" -f "/dumps/$DUMP_FILE"; then
+                echo "--> Dump restored."
+            else
+                echo "--> [ERROR] the dump $DUMP_FILE failed to load; dropping $DB_NAME so the next run starts over." >&2
+                sql -d postgres -v d="$DB_NAME" <<< "DROP DATABASE :\"d\";" || true
+                problems=$((problems + 1))
+                continue
+            fi
         fi
     else
         echo " Database $DB_NAME already exists. Skipping."
@@ -104,7 +151,7 @@ done < <(yq e '.[] | @json' /config/databases.yaml)
 
 if [ "$problems" -gt 0 ]; then
   echo >&2
-  echo "Password divergences: $problems. The databases concerned were left untouched." >&2
+  echo "Problems: $problems (see the [ERROR] lines above). The databases concerned were left untouched." >&2
   exit 1
 fi
 

@@ -8,6 +8,17 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.34.4] — 2026-09-29
+
+### Fixed
+- The `pg` profile's initializer (profiles 0.1.1) passes names and passwords to
+  `psql` as variables instead of pasting them into SQL, stops on the first
+  failed statement, and counts every failure. A password with an apostrophe
+  broke `CREATE USER`, and a failed statement still ended in "All databases
+  are in sync". A seed that fails half way drops the database it was loaded
+  into, so the next run loads it again instead of skipping an empty database.
+  Names that are not plain Postgres identifiers are refused.
+
 ## [0.34.3] — 2026-09-29
 
 ### Fixed
@@ -151,6 +162,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.34.4]: https://github.com/apankov/stackyard/compare/v0.34.3...v0.34.4
 [0.34.3]: https://github.com/apankov/stackyard/compare/v0.34.2...v0.34.3
 [0.34.2]: https://github.com/apankov/stackyard/compare/v0.34.1...v0.34.2
 [0.34.1]: https://github.com/apankov/stackyard/compare/v0.34.0...v0.34.1

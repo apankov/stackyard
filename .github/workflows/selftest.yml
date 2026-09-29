@@ -28,4 +28,6 @@ jobs:
         # like a pass. Here it must run.
         env:
           STACKYARD_REQUIRE_DOCKER: "1"
+          # The initializers against a live Postgres: slow, so off by default.
+          STACKYARD_LIVE_DB: "1"
         run: ./platform/bin/selftest.sh
