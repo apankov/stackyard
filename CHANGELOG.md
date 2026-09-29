@@ -8,6 +8,22 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.36.0] — 2026-09-30
+
+### Changed
+- `.env`, `.env-backup`, `.env-notify` and `stack.conf` are read the way docker
+  compose reads them, so the platform's scripts see the values its containers
+  get. Before, quotes were stripped and nothing else: a comment after an
+  unquoted value became part of it, blanks around it stayed, `\"` and `\n` in
+  double quotes stayed backslashes, `${…}` was expanded inside single quotes,
+  and `$VAR`, `${VAR:-default}` and `${VAR-default}` were not expanded at all.
+  An `&` in a substituted value is no longer mangled under bash 5.2. The
+  selftest compares the two parsers on 29 cases on every run.
+
+  **If a machine's scripts relied on the old reading** (a backup using a
+  password written as `Pass=ab$cd`, say), they now get what the container
+  always got: quote such values in single quotes.
+
 ## [0.35.1] — 2026-09-29
 
 ### Fixed
@@ -205,6 +221,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.36.0]: https://github.com/apankov/stackyard/compare/v0.35.1...v0.36.0
 [0.35.1]: https://github.com/apankov/stackyard/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/apankov/stackyard/compare/v0.34.6...v0.35.0
 [0.34.6]: https://github.com/apankov/stackyard/compare/v0.34.5...v0.34.6

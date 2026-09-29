@@ -2158,6 +2158,67 @@ else
   docker network rm "$nt_net" >/dev/null 2>&1 || true
 fi
 
+echo "== .env read the way docker compose reads it"
+
+# A container gets what compose makes of .env; the platform's scripts get what
+# lib-env.sh makes of it, and a password that differs between the two is a
+# database the application cannot log in to. They differed on comments, on
+# blanks, on escapes in double quotes, on ${…} inside single quotes, and on
+# $VAR: so the two are compared, value by value, on every run.
+if ! docker compose version >/dev/null 2>&1; then
+  if [ -n "${STACKYARD_REQUIRE_DOCKER:-}" ]; then
+    check "docker compose is available (STACKYARD_REQUIRE_DOCKER is set)" "no" "yes"
+  else
+    echo "  . no docker compose -- block skipped"
+  fi
+else
+  EC="$WORK/envcmp"; mkdir -p "$EC"
+  cat > "$EC/.env" <<'ENV'
+A=plain
+B="double quoted with spaces"
+C='single $A not expanded'
+D="has ${A} inside"
+E=${A}_suffix
+F="quote ' inside"
+G='hash # inside'
+H=value # comment
+I="escaped \"quote\""
+J=p@ss:w0rd!&amp
+K=  spaced
+L='${A}'
+M="a\nb"
+N=trailing
+O=$A
+P="t\tab"
+Q="back\\slash"
+R="dollar \$A"
+S="cost $$5"
+T=${UNSET:-dflt}
+U=${A:-dflt}
+V=${UNSET-dflt2}
+W="quoted" # trailing comment
+X='single' # c
+Y=un#hash
+Z="a\'b"
+AA=x\ny
+BB="${A}x$A"
+CC="amp&${A}"
+ENV
+  keys="A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA BB CC"
+  { echo "services:"; echo "  x:"; echo "    image: alpine"; echo "    environment:"
+    for k in $keys; do echo "      $k: \"\${$k}\""; done; } > "$EC/compose.yaml"
+  ( cd "$EC" && docker compose --env-file .env config --format json ) > "$EC/c.json" 2>/dev/null
+  differ=""
+  for k in $keys; do
+    ours="$( cd "$EC" && bash -c ". \"$LIB_DIR/lib-env.sh\"; env_load_files .env; env_get $k" )"
+    # compose writes a literal '$' back out as '$$' in `config`.
+    theirs="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["services"]["x"]["environment"][sys.argv[2]].replace("$$", "$"), end="")' "$EC/c.json" "$k" 2>/dev/null)"
+    [ "$ours" = "$theirs" ] || differ="$differ $k"
+  done
+  check "lib-env.sh reads every value as docker compose does" "$differ" ""
+  rm -rf "$EC"
+fi
+
 echo "== the Postgres initializer against a live Postgres"
 
 # The initializer is SQL, and only a server says whether it is right. The cases

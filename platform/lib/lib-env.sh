@@ -34,7 +34,7 @@ declare -gA ENV_VARS=()
 # Loads files in order; a later file overrides an earlier one.
 # A missing file is skipped silently — the caller decides whether it is required.
 env_load_files() {
-  local file line key val
+  local file line key
   for file in "$@"; do
     [ -f "$file" ] || continue
     while IFS= read -r line || [ -n "$line" ]; do
@@ -46,33 +46,94 @@ env_load_files() {
       key="${key#"${key%%[![:space:]]*}"}"       # trim leading whitespace
       key="${key%"${key##*[![:space:]]}"}"       # and trailing
       [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-      val="${line#*=}"
-      # Quotes around a value are stripped: docker compose does not keep them either.
-      if [[ "$val" == \"*\" && ${#val} -ge 2 ]]; then val="${val:1:${#val}-2}"
-      elif [[ "$val" == \'*\' && ${#val} -ge 2 ]]; then val="${val:1:${#val}-2}"
-      fi
-      ENV_VARS["$key"]="$val"
+      _env_value "${line#*=}"
+      ENV_VARS["$key"]="$_ENV_VALUE"
     done < "$file"
   done
   env_expand
 }
 
-# Expands ${VAR} inside values. Iteratively, because a reference may point at a
-# value that itself contains a reference. The ceiling of 10 passes guards
-# against `A=${A}`: such a file must not hang the backup script forever.
+# A literal dollar sign, kept out of the way of env_expand until env_get hands
+# the value out. A value can be expanded more than once (every env_load_files
+# call expands everything loaded so far), so a '$' that is meant literally
+# must not look like one in between.
+_ENV_DOLLAR=$'\001'
+
+# _env_value <everything after '='> — sets _ENV_VALUE to the value docker
+# compose would give a container, which is what every script here must see
+# too. They parsed it differently once: quotes stripped and nothing else, so a
+# comment after an unquoted value became part of it, \" and \n in double
+# quotes stayed backslashes, and ${…} was expanded even inside single quotes.
+# The generator of databases.yaml and the container would then hold two
+# different passwords. The rules, as compose applies them (measured, not
+# assumed — the selftest compares the two on every run):
+#   unquoted   surrounding blanks trimmed; " #…" is a comment; $$ is a '$'
+#   '…'        literal, nothing expanded, nothing escaped
+#   "…"        expanded; \n \t \r \\ \" \$ are escapes, any other backslash
+#              stays; $$ is a '$'; anything after the closing quote is ignored
+_env_value() {
+  local v="$1" out="" c i n
+  v="${v#"${v%%[![:space:]]*}"}"
+  case "$v" in
+    \'*)
+      v="${v:1}"; v="${v%%\'*}"
+      _ENV_VALUE="${v//\$/$_ENV_DOLLAR}" ;;
+    \"*)
+      v="${v:1}"; n=${#v}; i=0
+      while [ "$i" -lt "$n" ]; do
+        c="${v:i:1}"
+        if [ "$c" = '\' ] && [ $((i + 1)) -lt "$n" ]; then
+          case "${v:i+1:1}" in
+            n) out+=$'\n' ;;
+            t) out+=$'\t' ;;
+            r) out+=$'\r' ;;
+            '\') out+='\' ;;
+            '"') out+='"' ;;
+            '$') out+="$_ENV_DOLLAR" ;;
+            *) out+="\\${v:i+1:1}" ;;
+          esac
+          i=$((i + 2))
+          continue
+        fi
+        [ "$c" = '"' ] && break
+        out+="$c"
+        i=$((i + 1))
+      done
+      _ENV_VALUE="${out//\$\$/$_ENV_DOLLAR}" ;;
+    *)
+      v="${v%%[[:space:]]#*}"
+      v="${v%"${v##*[![:space:]]}"}"
+      _ENV_VALUE="${v//\$\$/$_ENV_DOLLAR}" ;;
+  esac
+}
+
+# Expands references inside values: ${VAR}, $VAR, ${VAR:-default} (unset or
+# empty) and ${VAR-default} (unset), as compose does. Iteratively, because a
+# reference may point at a value that itself contains a reference. The ceiling
+# of 10 passes guards against `A=${A}`: such a file must not hang the backup
+# script forever. An unset variable expands to nothing, as in compose.
 env_expand() {
-  local pass key val ref sub changed
+  local pass key val ref sub op dflt whole changed
   for (( pass = 0; pass < 10; pass++ )); do
     changed=0
     for key in "${!ENV_VARS[@]}"; do
       val="${ENV_VARS[$key]}"
-      while [[ "$val" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
-        ref="${BASH_REMATCH[1]}"
-        sub="${ENV_VARS[$ref]-}"
+      while :; do
+        if [[ "$val" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)(:?-)([^}]*)\} ]]; then
+          whole="${BASH_REMATCH[0]}"; ref="${BASH_REMATCH[1]}"; op="${BASH_REMATCH[2]}"; dflt="${BASH_REMATCH[3]}"
+          if [ "$op" = ":-" ]; then sub="${ENV_VARS[$ref]:-$dflt}"; else sub="${ENV_VARS[$ref]-$dflt}"; fi
+        elif [[ "$val" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]] || [[ "$val" =~ \$([A-Za-z_][A-Za-z0-9_]*) ]]; then
+          whole="${BASH_REMATCH[0]}"; ref="${BASH_REMATCH[1]}"
+          sub="${ENV_VARS[$ref]-}"
+        else
+          break
+        fi
         # A self-reference never resolves — stop and leave it as written.
         [ "$ref" = "$key" ] && break
-        [[ "$sub" == *"\${$ref}"* ]] && break
-        val="${val//\$\{$ref\}/$sub}"
+        [[ "$sub" == *"$whole"* ]] && break
+        # The replacement in quotes: unquoted, bash 5.2 reads an '&' in it as
+        # the matched text, and a password with one in it came out mangled.
+        val="${val//"$whole"/"$sub"}"
         changed=1
       done
       ENV_VARS["$key"]="$val"
@@ -85,7 +146,7 @@ env_expand() {
 env_get() {
   local key="$1" default="${2-}"
   local val="${ENV_VARS[$key]-}"
-  if [ -z "$val" ]; then printf '%s' "$default"; else printf '%s' "$val"; fi
+  if [ -z "$val" ]; then printf '%s' "$default"; else printf '%s' "${val//$_ENV_DOLLAR/\$}"; fi
 }
 
 # env_require <key> <human-readable hint>
@@ -98,7 +159,7 @@ env_require() {
     echo "Error: $key is not set in .env-backup${hint:+ — $hint}" >&2
     return 1
   fi
-  printf '%s' "$val"
+  printf '%s' "${val//$_ENV_DOLLAR/\$}"
 }
 
 # env_unfilled <file>

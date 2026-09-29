@@ -183,6 +183,11 @@ MUTATIONS=(
   'manifest: a name that is not a stack is let through@@platform/bin/stack.sh@@  [ -z "$unknown" ] || die "machine.conf lists what is not a stack here@@  true || die "machine.conf lists what is not a stack here'
   'certs: the names a certificate covers are not looked at@@platform/bin/check-certs.sh@@    case "$out" in *"does match"*) ;;@@    case "$out" in *) ;;'
   'certs: the key beside a certificate is not compared@@platform/bin/check-certs.sh@@  elif [ "$(openssl x509 -noout -pubkey@@  elif false \&\& [ "$(openssl x509 -noout -pubkey'
+  # --- .env as compose reads it: each one is a password the container and the
+  # platform would disagree on.
+  'env: a comment after an unquoted value becomes part of it@@platform/lib/lib-env.sh@@      v="${v%%[[:space:]]#*}"@@      :'
+  'env: ${…} is expanded inside single quotes@@platform/lib/lib-env.sh@@      _ENV_VALUE="${v//\$/$_ENV_DOLLAR}" ;;@@      _ENV_VALUE="$v" ;;'
+  'env: an & in a substituted value is read as the match@@platform/lib/lib-env.sh@@        val="${val//"$whole"/"$sub"}"@@        val="${val//"$whole"/$sub}"'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 
