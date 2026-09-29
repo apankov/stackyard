@@ -8,7 +8,12 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
-## [Unreleased]
+## [0.34.5] — 2026-09-29
+
+### Fixed
+- `notify.sh --resolve` clears an alert's state only after the recovery message
+  went out. It cleared it first, so a failed send (Telegram or the network
+  down) left no trace that a recovery was owed, and the incident never closed.
 
 ### Security
 - `stackyard audit` names the key and the machines of a shared secret and no
@@ -168,7 +173,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
-[Unreleased]: https://github.com/apankov/stackyard/compare/v0.34.4...HEAD
+[0.34.5]: https://github.com/apankov/stackyard/compare/v0.34.4...v0.34.5
 [0.34.4]: https://github.com/apankov/stackyard/compare/v0.34.3...v0.34.4
 [0.34.3]: https://github.com/apankov/stackyard/compare/v0.34.2...v0.34.3
 [0.34.2]: https://github.com/apankov/stackyard/compare/v0.34.1...v0.34.2

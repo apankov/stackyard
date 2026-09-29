@@ -178,6 +178,7 @@ MUTATIONS=(
   'pg init: a failed statement does not stop it@@profiles/stacks/pg/db-init/initializer.sh@@-v ON_ERROR_STOP=1 "$@"@@-v ON_ERROR_STOP=0 "$@"'
   'pg init: a failed seed leaves its database behind@@profiles/stacks/pg/db-init/initializer.sh@@                sql -d postgres -v d="$DB_NAME" <<< "DROP DATABASE :\"d\";" || true@@                true'
   'audit: a prefix of the shared secret is printed again@@bin/audit-isolation.sh@@    bad "$key is identical on machines $m1 and $m2"@@    bad "$key is identical on machines $m1 and $m2 (value: ${val:0:24}...)"'
+  'notify: a failed recovery clears the alert anyway@@platform/bin/notify.sh@@      || die "could not send the recovery message — the alert state is kept, the next run retries"@@      || { rm -f "$sf"; die "could not send the recovery message"; }'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

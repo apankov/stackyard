@@ -2473,6 +2473,29 @@ out="$(cb)"; rc=$?
 check "check-backups: nothing expected at all is not a green result" "$rc" "2"
 rm -rf "$BM" "$WORK/awsstub"
 
+echo "== notify: a recovery is not lost to a failed send"
+
+# The alert's state file is what says a recovery is owed. It used to be removed
+# before the message went out, so a failed send closed the incident silently.
+NM="$WORK/notify"; mkdir -p "$NM/state" "$NM/stub"
+printf 'Notify_Telegram_Token=t\nNotify_Telegram_Chat_Id=1\n' > "$NM/.env-notify"
+: > "$NM/.env"
+# curl: -o names the response file; the -w output is the HTTP code. 400 fails
+# at once, with no retries to wait out.
+printf '#!/bin/sh\nout=""\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done\nif [ -f "%s/up" ]; then printf "{\\"ok\\":true}" > "$out"; printf 200; else : > "$out"; printf 400; fi\n' "$NM" > "$NM/stub/curl"
+chmod +x "$NM/stub/curl"
+nt() { ( PATH="$NM/stub:$PATH" ROOT_DIR="$NM" DEVBOX_NOTIFY_STATE_DIR="$NM/state" \
+         "$REPO_DIR/platform/bin/notify.sh" --resolve --key disk ) >/dev/null 2>&1; }
+touch "$NM/state/disk.state"
+nt
+check "notify: a recovery that could not be sent fails" "$?" "2"
+check "and keeps the alert's state for the next run" "$([ -f "$NM/state/disk.state" ] && echo kept || echo lost)" "kept"
+touch "$NM/up"
+nt
+check "notify: a recovery that went out succeeds" "$?" "0"
+check "and only then clears the state" "$([ -f "$NM/state/disk.state" ] && echo kept || echo cleared)" "cleared"
+rm -rf "$NM"
+
 echo "== audit-isolation: findings without the secrets"
 
 # The report names the key and the machines, never the value: it ends up in

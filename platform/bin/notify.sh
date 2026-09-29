@@ -316,9 +316,13 @@ case "$MODE" in
       # "all is well" for every key.
       exit 0
     fi
-    rm -f "$sf"
+    # The state goes only once the message is out. Removed first, a failed
+    # send (Telegram down, the network gone) left no trace that a recovery was
+    # owed: the next run found no alert for the key and, correctly for what it
+    # could see, said nothing, and the incident never closed.
     tg_send ok "${TITLE:-$KEY recovered}" '' "$KEY" \
-      || die "could not send the recovery message"
+      || die "could not send the recovery message — the alert state is kept, the next run retries"
+    rm -f "$sf"
     log "Recovery for key '$KEY' sent."
     exit 0
     ;;
