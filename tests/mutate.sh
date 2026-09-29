@@ -149,8 +149,24 @@ MUTATIONS=(
   'store: installed back into the home directory@@install.sh@@DIR="${STACKYARD_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/stackyard}"@@DIR="${STACKYARD_DIR:-$HOME/.stackyard}"'
   'fleet: a machines_dir line is taken for a path@@bin/lib-workspace.sh@@      machines_dir=*)@@      NEVER=*)'
   'fleet: the first add starts an empty list next to the old one@@bin/fleet.sh@@    if [ -f "$HOME/.stackyard-fleet" ]; then@@    if false; then'
+  # --- --json: a program reads it, so a broken one is broken silently.
+  'json: the human report lands on stdout@@platform/bin/stack.sh@@  exec 3>&1 1>&2@@  exec 3>&1'
+  'json: a double quote is not escaped@@platform/lib/lib-env.sh@@  s="${s//\"/\\\"}"@@  :'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
+
+# The baseline first: the selftest must pass on an UNMUTATED copy made the way
+# every mutation's copy is. If it does not, each mutation below fails the
+# selftest for a reason of its own making and is reported as caught. That is
+# not hypothetical: from v0.28.0 the CLI block failed in any copy without .git,
+# and two full runs reported everything caught while proving nothing.
+W=$(mktemp -d); cp -R "$ROOT"/. "$W"/ 2>/dev/null; rm -rf "$W/.git"
+if ! ( cd "$W" && ./platform/bin/selftest.sh ) > "$W.baseline.log" 2>&1; then
+  echo "REFUSING: the selftest fails on an unmutated copy, so every mutation would look caught." >&2
+  grep -E '✗|expected|got:' "$W.baseline.log" | head -n 20 >&2
+  rm -rf "$W" "$W.baseline.log"; exit 1
+fi
+rm -rf "$W" "$W.baseline.log"
 
 pass=0; miss=0
 printf '%-58s %s\n' MUTATION RESULT

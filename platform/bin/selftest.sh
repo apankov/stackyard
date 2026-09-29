@@ -1698,12 +1698,15 @@ check "install.sh installs the release it belongs to" \
 
 # A repository of THIS working tree, uncommitted edits included — the subject
 # is the code as it stands, and a mutation run edits files it never commits.
+# Copied whole rather than listed by `git ls-files`: mutate.sh runs this in a
+# copy with no .git, where that list came out empty, this block failed before
+# any mutation was applied, and every mutation of the run counted as caught.
 # Three releases: one from before the CLI existed, and two with it, the second
 # ahead of the first, so the mirror's HEAD is never the installed version.
 CL="$WORK/cli"; SRC="$CL/src"
 mkdir -p "$SRC"
-( cd "$REPO_DIR" && git ls-files -z --cached --others --exclude-standard | xargs -0 tar -cf - 2>/dev/null ) \
-  | tar -xf - -C "$SRC" 2>/dev/null
+cp -R "$REPO_DIR"/. "$SRC"/ 2>/dev/null
+rm -rf "$SRC/.git"
 cl_commit() {
   ( cd "$SRC" && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm "$1" \
       && git tag "$1" && git rev-parse HEAD )
