@@ -2346,6 +2346,18 @@ check "sync refuses a manifest without a dependency" "$rc" "1"
 check "and names what is missing" "$(printf '%s\n' "$out" | grep -c 'site requires mysql, which machine.conf does not list')" "1"
 check "and does not edit machine.conf" "$(words "$IM/machine.conf")" "redirect site "
 
+# A name the machine has no stack for: a typo used to drop that site from
+# nginx on the next sync, with nothing but a warning on a silenced stderr.
+printf 'Enabled_Stacks="mysql php-fpm sitee"\n' > "$IM/machine.conf"
+out="$(st sync --dry-run)"; rc=$?
+check "sync refuses a manifest naming what is not a stack" "$rc" "1"
+check "and names the typo" "$(printf '%s\n' "$out" | grep -c 'not a stack here: sitee')" "1"
+st enable redirect --manifest-only >/dev/null
+check "enable refuses too, before writing" "$?" "1"
+check "--check fails on it" \
+  "$( cd "$IM" && PATH="$WORK/nodocker:$PATH" ROOT_DIR="$IM" ./platform/bin/stack.sh --check --json 2>/dev/null \
+       | grep -c "machine.conf lists 'sitee', which is not a stack here" )" "1"
+
 # --manifest-only, as on a laptop: no .env files, no docker, only the list.
 printf 'Enabled_Stacks=""\n' > "$IM/machine.conf"
 rm -f "$IM"/stacks/*/.env

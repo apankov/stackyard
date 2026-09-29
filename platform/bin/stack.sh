@@ -65,8 +65,15 @@ MANIFEST="$(stacks_manifest)"
 # The verbs that change the machine act on the manifest, so without one they
 # refuse: guessing what a machine should run is how it ends up running what
 # nobody asked for. The file is committed with the machine.
+#
+# A name in it that is not a stack here is refused too, rather than skipped: a
+# typo in a site's name would otherwise drop that site from nginx and read as
+# a successful sync.
 manifest_required() {
   [ -f "$MANIFEST" ] || die "no machine.conf in $ROOT_DIR — it lists the machine's stacks (Enabled_Stacks=\"...\") and belongs in its repository"
+  local unknown
+  unknown="$(stacks_manifest_unknown | tr '\n' ' ' | sed 's/ *$//')"
+  [ -z "$unknown" ] || die "machine.conf lists what is not a stack here: $unknown (a typo, or a stack whose directory is gone; see ./stack list)"
 }
 
 # State directories, before any command that writes into them. On a fresh
@@ -1027,6 +1034,9 @@ verb_check() {
   if [ -f "$MANIFEST" ]; then
     ok "machine.conf is present"
     ok "enabled: $(stacks_enabled 2>/dev/null | tr '\n' ' ')"
+    while IFS= read -r s; do
+      [ -n "$s" ] && bad "machine.conf lists '$s', which is not a stack here — a typo, or a stack whose directory is gone"
+    done <<< "$(stacks_manifest_unknown)"
     # What the machine runs and what its repository says it runs are meant to
     # be one thing. An enable on the server makes them two until somebody
     # commits, and the next git pull of a laptop-side change then conflicts.

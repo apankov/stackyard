@@ -371,7 +371,7 @@ stacks_enabled() {
   fi
 
   if [ -f "$manifest" ]; then
-    raw=$(grep -E '^[[:space:]]*Enabled_Stacks=' "$manifest" | tail -n 1 | cut -d '=' -f2- | tr -d '"'"'" || true)
+    raw=$(stacks_manifest_names)
     for s in $raw; do
       if stack_exists "$s"; then
         printf '%s\n' "$s"
@@ -383,6 +383,29 @@ stacks_enabled() {
   fi
 
   echo "Warning: no machine.conf — no stack counts as enabled." >&2
+  return 0
+}
+
+# The names Enabled_Stacks lists, as written, one per line: nothing checked.
+stacks_manifest_names() {
+  local manifest; manifest="$(stacks_manifest)"
+  [ -f "$manifest" ] || return 0
+  grep -E '^[[:space:]]*Enabled_Stacks=' "$manifest" | tail -n 1 | cut -d '=' -f2- \
+    | tr -d '"'"'" | tr ' ' '\n' | sed '/^$/d' || true
+}
+
+# The names machine.conf lists that are not a stack here: a typo, or a stack
+# whose directory is gone. stacks_enabled leaves them out with a warning on
+# stderr, and most callers silence stderr — so a site misspelled in the
+# manifest simply dropped out of nginx. The verbs that change the machine
+# refuse on any of these instead (manifest_required in stack.sh).
+stacks_manifest_unknown() {
+  local s names
+  names="$(stacks_manifest_names)"   # in full first: see stack_dir
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    stack_exists "$s" || printf '%s\n' "$s"
+  done <<< "$names"
   return 0
 }
 

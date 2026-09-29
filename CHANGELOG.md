@@ -8,6 +8,14 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.35.0] — 2026-09-29
+
+### Changed
+- A name in `machine.conf` that is not a stack on the machine (a typo, or a
+  stack whose directory is gone) makes `sync`, `enable`, `disable` and `purge`
+  refuse, and `--check` fail. It used to be skipped with a warning most callers
+  silenced, so a misspelled site simply dropped out of nginx on the next sync.
+
 ## [0.34.6] — 2026-09-29
 
 ### Security
@@ -188,6 +196,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.35.0]: https://github.com/apankov/stackyard/compare/v0.34.6...v0.35.0
 [0.34.6]: https://github.com/apankov/stackyard/compare/v0.34.5...v0.34.6
 [0.34.5]: https://github.com/apankov/stackyard/compare/v0.34.4...v0.34.5
 [0.34.4]: https://github.com/apankov/stackyard/compare/v0.34.3...v0.34.4
