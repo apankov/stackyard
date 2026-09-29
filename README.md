@@ -100,7 +100,7 @@ curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh |
 stackyard fleet add-dir ~/dev/machines     # every machine created there is in the fleet
 ```
 
-`latest` is the newest release; `…/stackyard/v0.33.0/install.sh` pins one. The
+`latest` is the newest release; `…/stackyard/v0.34.0/install.sh` pins one. The
 script prints the tag and commit it installed and keeps everything in
 `~/.local/share/stackyard/`. A pipe into bash cannot be read first; to read it:
 `curl -o install.sh <url> && less install.sh && bash install.sh`.
@@ -131,7 +131,7 @@ Updating a machine:
 ```sh
 stackyard install latest                   # the CLI itself; older versions stay installed
 stackyard pin ~/dev/machines/acme          # shows the platform diff, rewrites the lock
-git -C ~/dev/machines/acme commit -am "platform v0.33.0" && git -C ~/dev/machines/acme push
+git -C ~/dev/machines/acme commit -am "platform v0.34.0" && git -C ~/dev/machines/acme push
 # on the server: git pull && ./bootstrap && ./stack sync && ./stack --check
 stackyard fleet                            # who runs what, and how far behind
 ```

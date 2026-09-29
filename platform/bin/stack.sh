@@ -18,7 +18,7 @@
 #   ./stack enable  <stack>...  # enable and bring up
 #   ./stack disable <stack>...  # stop; data and images are left intact
 #   ./stack purge   <stack>     # also volumes and images; asks for confirmation
-#   ./stack sync                # bring nginx in line with the manifest
+#   ./stack sync                # bring the machine in line with machine.conf
 #   ./stack --check             # check only, non-zero exit on problems
 #
 # Flags: --dry-run (print the commands, change nothing),
@@ -76,6 +76,7 @@ ensure_state_dirs
 DRY_RUN=0
 NO_START=0
 NO_UNITS=0
+MANIFEST_ONLY=0
 PROBLEMS=0
 WARNINGS=0
 
@@ -164,11 +165,16 @@ machine.conf; this script brings both docker compose and nginx in line with it.
   stack purge   <stack>       also remove volumes and images; irreversible,
                               asks for the stack name (data in bind mounts and
                               databases in the shared DBMS are left alone)
-  stack sync                  bring the nginx vhosts in line with the manifest
+  stack sync                  bring the machine in line with machine.conf: start
+                              what it lists, rebuild the vhosts, install units;
+                              a stack it no longer lists is reported, not stopped
   stack --check               check only, exit code 1 on problems
 
   --dry-run     print what would be done and change nothing
   --no-start    for enable: configuration only, do not start containers
+  --manifest-only  for enable/disable: edit machine.conf, with dependencies
+                resolved, and touch nothing else (on the laptop, after
+                ./bootstrap there; the server follows with sync)
   --no-units    leave the systemd units alone (otherwise enable/disable call
                 sudo ./platform/bin/systemd.sh themselves; --check reports drift)
 USAGE
@@ -562,7 +568,7 @@ verb_init() {
 }
 
 verb_enable() {
-  local want=() s req add enabled_now new_list svc_args=()
+  local want=() s req i enabled_now new_list missing
   want=("$@")
 
   for s in "${want[@]}"; do
@@ -571,8 +577,10 @@ verb_enable() {
 
   # Dependencies are added automatically: enabling an application without the
   # database it requires is not a choice but a forgotten step, and it surfaces
-  # as a container that will not start.
-  for s in "${want[@]}"; do
+  # as a container that will not start. An index loop over a growing list, so
+  # a dependency's own Requires are followed too.
+  for ((i = 0; i < ${#want[@]}; i++)); do
+    s="${want[$i]}"
     for req in $(stack_requires "$s"); do
       case " ${want[*]} " in *" $req "*) continue ;; esac
       if ! stack_is_enabled "$req"; then
@@ -583,8 +591,12 @@ verb_enable() {
   done
 
   for s in "${want[@]}"; do
-    missing="$(stack_missing_files "$s" | tr '\n' ' ')"
-    [ -n "$(echo $missing)" ] && die "stack '$s' is missing files: $missing(./stack init $s creates the .env ones)"
+    missing="$(stack_missing_files "$s")"
+    # --manifest-only runs where the secrets are not: on the laptop there is
+    # no .env to miss, only a declaration that is incomplete.
+    [ "$MANIFEST_ONLY" -eq 1 ] && missing="$(printf '%s\n' "$missing" | grep -v '/\.env$' || true)"
+    missing="$(echo $missing)"
+    [ -n "$missing" ] && die "stack '$s' is missing files: $missing (./stack init $s creates the .env ones)"
   done
 
   enabled_now="$(stacks_enabled 2>/dev/null | tr '\n' ' ')"
@@ -595,6 +607,25 @@ verb_enable() {
 
   step "Manifest"
   manifest_write $(echo $new_list)
+
+  [ "$MANIFEST_ONLY" -eq 1 ] && { manifest_only_done; return 0; }
+  stacks_bring_up "${want[@]}"
+}
+
+# --manifest-only: the manifest is the whole of the change. Run on the laptop,
+# after ./bootstrap there, so the dependencies are resolved by the very
+# platform version the machine is pinned to; the machine follows on sync.
+manifest_only_done() {
+  ok "machine.conf updated; nothing else was touched"
+  echo "  Commit and push it; on the server: git pull && ./stack sync --dry-run && ./stack sync"
+}
+
+# Bring the given stacks up to what the manifest (already written) says:
+# databases, containers, nginx, units, in that order. Shared by enable, which
+# has just added them to the manifest, and sync, which found them there and
+# not running.
+stacks_bring_up() {
+  local want=("$@") s svc svc_args=()
 
   # Database declarations BEFORE the containers: the initializer reads
   # databases.yaml at startup, so generating the file later (in nginx_apply, as
@@ -687,6 +718,7 @@ verb_disable() {
 
   step "Manifest"
   manifest_write $(echo $new_list)
+  [ "$MANIFEST_ONLY" -eq 1 ] && { manifest_only_done; return 0; }
 
   # Units are removed BEFORE the containers: a timer firing between the
   # container's death and the unit's removal would run a script against a dead
@@ -875,27 +907,116 @@ verb_purge() {
   echo "Stack '$s' has been purged. To restore: ./stack enable $s (the image must be rebuilt)"
 }
 
+# Whether a stack has to be started for the manifest to hold: one of its
+# services has no container at all, or a container meant to stay up is not
+# running. A one-shot container (an initializer, a migrator: restart "no" or
+# on-failure) that ran and exited is done, not down — the same rule watch-host
+# alerts by — so sync does not rerun it on every call.
+stack_needs_start() {
+  local s="$1" svc ids id policy
+  while IFS= read -r svc; do
+    [ -n "$svc" ] || continue
+    ids="$(service_containers "$svc")"
+    [ -n "$ids" ] || return 0
+    for id in $ids; do
+      policy="$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$id" 2>/dev/null || true)"
+      case "$policy" in always|unless-stopped) ;; *) continue ;; esac
+      [ "$(docker inspect -f '{{.State.Status}}' "$id" 2>/dev/null)" = running ] || return 0
+    done
+  done <<< "$(stack_services "$s" 2>/dev/null)"
+  return 1
+}
+
+# Bring the machine in line with machine.conf, which usually just arrived by
+# git pull: start what it lists and is not running, rebuild the vhost includes
+# and reload nginx, install missing units.
+#
+# The manifest is the authority, so sync never edits it. A dependency it
+# lacks, or a file a stack still misses, stops the run before anything changes,
+# named: the fix belongs in the repository (or in ./stack init), not in a quiet
+# edit on the server.
+#
+# Stopping is not done here yet: a stack that left the manifest but still has
+# containers is reported with the command that stops it. A line lost from the
+# manifest by accident should cost a warning, not a client's site.
 verb_sync() {
-  step "nginx"
-  nginx_apply
+  local s req missing blocked=0 to_start=() running db_file need_units=0 u
 
-  step "Drift from the manifest"
-  local s running total
+  step "Manifest"
   while IFS= read -r s; do
-    running="$(stack_running "$s")"
-    total="$(stack_services "$s" 2>/dev/null | grep -c . || true)"
-    if [ "$running" -eq 0 ] && [ "$total" -gt 0 ]; then
-      warn "enabled but not running: $s — ./stack enable $s"
+    [ -n "$s" ] || continue
+    for req in $(stack_requires "$s"); do
+      if ! stack_is_enabled "$req"; then
+        bad "$s requires $req, which machine.conf does not list — add it there"
+        blocked=1
+      fi
+    done
+    missing="$(stack_missing_files "$s" | tr '\n' ' ' | sed 's/ *$//')"
+    if [ -n "$missing" ]; then
+      bad "$s is missing files: $missing (./stack init creates the .env ones)"
+      blocked=1
     fi
-  done < <(stacks_enabled 2>/dev/null)
+  done <<< "$(stacks_enabled 2>/dev/null)"
+  [ "$blocked" -eq 0 ] || die "machine.conf cannot be applied as it stands; nothing was changed"
+  ok "machine.conf: $(stacks_enabled 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')"
 
+  step "Plan"
   while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    stack_needs_start "$s" && to_start+=("$s")
+  done <<< "$(stacks_enabled 2>/dev/null)"
+  # A stack with no containers of its own can still need its database created:
+  # when the declarations changed, every consumer goes through the bring-up,
+  # which runs the provider's initializer.
+  db_file="$(stacks_databases_file)"
+  if [ -n "$db_file" ] && { [ ! -f "$db_file" ] || [ "$(cat "$db_file")" != "$(stacks_databases_content)" ]; }; then
+    while IFS= read -r s; do
+      [ -n "$s" ] && [ -n "$(stack_conf_get "$s" "$(stacks_db_prefix)_DB")" ] || continue
+      case " ${to_start[*]} " in *" $s "*) ;; *) to_start+=("$s") ;; esac
+    done <<< "$(stacks_enabled 2>/dev/null)"
+  fi
+  if [ ${#to_start[@]} -gt 0 ]; then
+    ok "to start: ${to_start[*]}"
+  else
+    ok "every enabled stack is up"
+  fi
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
     stack_is_enabled "$s" && continue
     running="$(stack_containers "$s" | grep -c . || true)"
-    [ "$running" -gt 0 ] && warn "disabled but containers remain ($running): $s — ./stack disable $s"
-  done < <(stacks_available)
+    [ "$running" -gt 0 ] && warn "$s is not in machine.conf but has $running container(s) — ./stack disable $s stops them (data stays)"
+  done <<< "$(stacks_available)"
 
-  [ "$WARNINGS" -eq 0 ] && ok "no drift"
+  if [ ${#to_start[@]} -gt 0 ]; then
+    stacks_bring_up "${to_start[@]}"
+  else
+    step "nginx"
+    nginx_apply
+  fi
+  # On a fresh machine nginx is not running at all. Started last, after the
+  # upstreams and after the include file it reads was written: started first,
+  # it would look for upstreams that are not there yet and refuse to come up.
+  if ! nginx_running; then
+    step "nginx container"
+    run env STACK_SH_APPLYING=1 "$DIR0/docker-compose.sh" up -d nginx
+  fi
+
+  # Units of stacks that are running already but lack them: a stack enabled
+  # with --no-units, or one whose unit files arrived with this pull.
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    while IFS= read -r u; do
+      [ -n "$u" ] || continue
+      list_has "$(stack_units_installed "$s")" "$(basename "$u")" || need_units=1
+    done <<< "$(stack_units "$s")"
+  done <<< "$(stacks_enabled 2>/dev/null)"
+  if [ "$need_units" -eq 1 ]; then
+    step "systemd units"
+    units_apply "installing the units the manifest's stacks declare..."
+  fi
+
+  [ "$WARNINGS" -eq 0 ] && ok "the machine matches machine.conf"
+  return 0
 }
 
 verb_check() {
@@ -906,6 +1027,16 @@ verb_check() {
   if [ -f "$MANIFEST" ]; then
     ok "machine.conf is present"
     ok "enabled: $(stacks_enabled 2>/dev/null | tr '\n' ' ')"
+    # What the machine runs and what its repository says it runs are meant to
+    # be one thing. An enable on the server makes them two until somebody
+    # commits, and the next git pull of a laptop-side change then conflicts.
+    if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      if ! git -C "$ROOT_DIR" ls-files --error-unmatch "$MANIFEST" >/dev/null 2>&1; then
+        warn "machine.conf is not committed — this machine's composition exists only on this host"
+      elif ! git -C "$ROOT_DIR" diff --quiet HEAD -- "$MANIFEST" 2>/dev/null; then
+        warn "machine.conf differs from the last commit — commit it from here, or make the same change on the laptop, before the next git pull"
+      fi
+    fi
   else
     bad "no machine.conf — no stack counts as enabled, and enable, disable and sync refuse to run"
   fi
@@ -1514,6 +1645,7 @@ while [ $# -gt 0 ]; do
     --no-start) NO_START=1 ;;
     --no-units) NO_UNITS=1 ;;
     --json)     JSON=1 ;;
+    --manifest-only) MANIFEST_ONLY=1 ;;
     --check)    VERB="check" ;;
     -h|--help)  usage 0 ;;
     -*)         die "unknown flag: $1" ;;
@@ -1521,6 +1653,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$MANIFEST_ONLY" -eq 1 ]; then
+  case "${VERB:-list}" in
+    enable|disable) ;;
+    *) die "--manifest-only is for enable and disable" ;;
+  esac
+fi
 
 # --json: stdout carries the JSON and nothing else, so a program can read it
 # whole; the human-readable report moves to stderr, where it still helps

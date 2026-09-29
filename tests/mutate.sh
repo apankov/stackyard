@@ -153,6 +153,13 @@ MUTATIONS=(
   'json: the human report lands on stdout@@platform/bin/stack.sh@@  exec 3>&1 1>&2@@  exec 3>&1'
   'json: a double quote is not escaped@@platform/lib/lib-env.sh@@  s="${s//\"/\\\"}"@@  :'
   'new: the machine is left without a repository@@bin/new-machine.sh@@  git -C "$DEST" init -q \&\& echo@@  true \&\& echo'
+  # --- sync applies the manifest and never edits it; --manifest-only edits it
+  # and touches nothing else.
+  'sync: a manifest missing a dependency is applied anyway@@platform/bin/stack.sh@@      if ! stack_is_enabled "$req"; then\n        bad "$s requires@@      if false; then\n        bad "$s requires'
+  'sync: a database consumer without containers is left out@@platform/bin/stack.sh@@      [ -n "$s" ] \&\& [ -n "$(stack_conf_get "$s" "$(stacks_db_prefix)_DB")" ] || continue@@      continue'
+  'sync: nginx is left down on a fresh machine@@platform/bin/stack.sh@@  if ! nginx_running; then\n    step "nginx container"@@  if false; then\n    step "nginx container"'
+  'manifest-only: the machine is changed too@@platform/bin/stack.sh@@  [ "$MANIFEST_ONLY" -eq 1 ] \&\& { manifest_only_done; return 0; }\n  stacks_bring_up@@  stacks_bring_up'
+  'check: a manifest that differs from git goes unreported@@platform/bin/stack.sh@@      elif ! git -C "$ROOT_DIR" diff --quiet HEAD -- "$MANIFEST" 2>/dev/null; then@@      elif false; then'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

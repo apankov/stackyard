@@ -2240,6 +2240,55 @@ for v in sync "enable site" "disable site"; do
 done
 init_run >/dev/null
 check "without machine.conf and without names, init fails" "$?" "1"
+
+echo "== sync and --manifest-only"
+
+# docker out of reach, as in the bootstrap block: compose_project asks a running
+# container called nginx for its project, and on a developer's laptop that
+# could be a real machine, whose containers would then change the plan.
+mkdir -p "$WORK/nodocker"; printf '#!/bin/sh\nexit 1\n' > "$WORK/nodocker/docker"; chmod +x "$WORK/nodocker/docker"
+st() { ( cd "$IM" && PATH="$WORK/nodocker:$PATH" ROOT_DIR="$IM" ./platform/bin/stack.sh "$@" ) 2>&1; }
+words() { grep -E '^Enabled_Stacks=' "$1" | cut -d= -f2- | tr -d '"' | tr ' ' '\n' | grep . | sort | tr '\n' ' '; }
+cp "$FIXTURES/alpha/machine.conf" "$IM/machine.conf"
+init_run >/dev/null
+for f in "$IM"/.env "$IM"/stacks/*/.env; do sed 's/CHANGE_ME/sync-fixture-pw/' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
+
+out="$(st sync --dry-run)"; rc=$?
+check "sync --dry-run: runs" "$rc" "0"
+# mysql and php-fpm have containers and none exist; site has none of its own
+# but orders a database, so it goes through the bring-up for the initializer.
+check "sync plans to start what machine.conf lists and is not up" \
+  "$(printf '%s\n' "$out" | sed -n 's/.*to start: //p')" "mysql php-fpm site"
+check "sync starts nginx last, after the upstreams" \
+  "$(printf '%s\n' "$out" | grep '\[dry\].*docker-compose.sh up -d' | sed 's/.*up -d //' | tr '\n' '|')" \
+  "mysqld mysql-initializer php-fpm|nginx|"
+
+# The manifest is the authority: one missing a dependency is refused, named,
+# and left as it is.
+printf 'Enabled_Stacks="site redirect"\n' > "$IM/machine.conf"
+out="$(st sync --dry-run)"; rc=$?
+check "sync refuses a manifest without a dependency" "$rc" "1"
+check "and names what is missing" "$(printf '%s\n' "$out" | grep -c 'site requires mysql, which machine.conf does not list')" "1"
+check "and does not edit machine.conf" "$(words "$IM/machine.conf")" "redirect site "
+
+# --manifest-only, as on a laptop: no .env files, no docker, only the list.
+printf 'Enabled_Stacks=""\n' > "$IM/machine.conf"
+rm -f "$IM"/stacks/*/.env
+out="$(st enable site --manifest-only)"
+check "enable --manifest-only adds the stack and what it requires" "$(words "$IM/machine.conf")" "mysql php-fpm site "
+check "and goes no further than the manifest" "$(printf '%s\n' "$out" | grep -c '^== Containers\|^== nginx')" "0"
+st disable mysql --manifest-only >/dev/null
+check "disable --manifest-only still refuses to pull a dependency" "$?" "1"
+st sync --manifest-only >/dev/null
+check "--manifest-only on anything but enable and disable is refused" "$?" "1"
+
+# --check says so when the host's manifest is not what the repository has.
+( cd "$IM" && git init -q && git add machine.conf \
+    && git -c user.name=t -c user.email=t@example.com commit -qm m ) >/dev/null 2>&1
+printf 'Enabled_Stacks="mysql"\n' > "$IM/machine.conf"
+check "--check warns when machine.conf differs from the last commit" \
+  "$( cd "$IM" && PATH="$WORK/nodocker:$PATH" ROOT_DIR="$IM" ./platform/bin/stack.sh --check --json 2>/dev/null \
+       | grep -c 'differs from the last commit' )" "1"
 rm -rf "$IM"
 
 echo "== .gitignore"
