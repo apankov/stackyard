@@ -188,6 +188,8 @@ MUTATIONS=(
   'env: a comment after an unquoted value becomes part of it@@platform/lib/lib-env.sh@@      v="${v%%[[:space:]]#*}"@@      :'
   'env: ${…} is expanded inside single quotes@@platform/lib/lib-env.sh@@      _ENV_VALUE="${v//\$/$_ENV_DOLLAR}" ;;@@      _ENV_VALUE="$v" ;;'
   'env: an & in a substituted value is read as the match@@platform/lib/lib-env.sh@@        val="${val//"$whole"/"$sub"}"@@        val="${val//"$whole"/$sub}"'
+  'upstreams: a port open on every interface passes quietly@@platform/lib/lib-stacks.sh@@          0.0.0.0|"[::]"|"::") public="$public $name" ;;@@          0.0.0.0|"[::]"|"::") other="$other $name" ;;'
+  'upstreams: a loopback-only port reads as reachable@@platform/lib/lib-stacks.sh@@          127.0.0.1|"[::1]")   local_only="$local_only $name" ;;@@          127.0.0.1|"[::1]")   other="$other $name" ;;'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
 )
 

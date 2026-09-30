@@ -2160,6 +2160,69 @@ else
   docker network rm "$nt_net" >/dev/null 2>&1 || true
 fi
 
+echo "== host.docker.internal: how the port behind it is published"
+
+# A vhost proxying to an application in its own compose project reaches it
+# through the host. Published on every interface, that port was open to the
+# internet on a live machine; published on 127.0.0.1 only, nginx cannot reach
+# it at all. Three real containers, one per way of publishing, and a port
+# nobody publishes.
+if ! docker info >/dev/null 2>&1; then
+  if [ -n "${STACKYARD_REQUIRE_DOCKER:-}" ]; then
+    check "docker is available (STACKYARD_REQUIRE_DOCKER is set)" "no" "yes"
+  else
+    echo "  . no docker -- block skipped"
+  fi
+else
+  GW="$WORK/gw-machine"; mkdir -p "$GW/stacks/gw/nginx"
+  printf 'Enabled_Stacks="gw"\n' > "$GW/machine.conf"
+  printf 'Containers="no"\n' > "$GW/stacks/gw/stack.conf"
+  base=$(( 40000 + $$ % 20000 )); p_pub=$base; p_loc=$((base + 1)); p_br=$((base + 2)); p_none=$((base + 3))
+  cat > "$GW/stacks/gw/nginx/01-gw.conf" <<VHOST
+server {
+    location /a { proxy_pass http://host.docker.internal:$p_pub; }
+    location /b { proxy_pass http://host.docker.internal:$p_loc/x; }
+    location /c { proxy_pass http://host.docker.internal:$p_br; }
+    location /d { proxy_pass http://host.docker.internal:$p_none; }  # an app on the host itself
+}
+VHOST
+  gw_bridge="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null)"
+  gw_c="stackyard-selftest-gw-$$"
+  docker run -d --name "$gw_c-pub" -p "0.0.0.0:$p_pub:80" nginx:1.30-alpine >/dev/null 2>&1
+  docker run -d --name "$gw_c-loc" -p "127.0.0.1:$p_loc:80" nginx:1.30-alpine >/dev/null 2>&1
+  # Docker Desktop forwards ports to the Mac and cannot bind the bridge address
+  # at all; on a Linux host that address is the host's own, and it can.
+  gw_desktop=""
+  case "$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in *"Docker Desktop"*) gw_desktop=1 ;; esac
+  [ -n "$gw_desktop" ] || docker run -d --name "$gw_c-br" -p "$gw_bridge:$p_br:80" nginx:1.30-alpine >/dev/null 2>&1
+  check "the vhosts' host.docker.internal ports are found" \
+    "$(ROOT_DIR="$GW" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; stacks_host_gateway_ports" | tr '\n' ' ')" \
+    "$p_pub $p_loc $p_br $p_none "
+  out="$(ROOT_DIR="$GW" bash -c ". \"$LIB_DIR/lib-stacks.sh\"; check_host_gateway_ports")"
+  check "a port published on every interface is a warning, naming its container" \
+    "$(printf '%s\n' "$out" | grep -c "^warn.*:$p_pub is published by $gw_c-pub on every interface")" "1"
+  check "a port published on 127.0.0.1 only is a failure: nginx cannot reach it" \
+    "$(printf '%s\n' "$out" | grep -c "^fail.*:$p_loc is published by $gw_c-loc on 127.0.0.1 only")" "1"
+  if [ -n "$gw_desktop" ]; then
+    echo "  . Docker Desktop cannot publish on the bridge address -- that case is checked on Linux (CI)"
+  else
+    check "a port on the bridge address is fine" \
+      "$(printf '%s\n' "$out" | grep -c "^ok.*:$p_br is published on the bridge address")" "1"
+    # And the advice holds: a container on ANOTHER network, as nginx is on the
+    # machine's own, reaches a port published there through the host gateway.
+    gw_net="stackyard-selftest-gwnet-$$"
+    docker network create "$gw_net" >/dev/null 2>&1
+    check "nginx's network reaches a port on the bridge address through host.docker.internal" \
+      "$(docker run --rm --network "$gw_net" --add-host host.docker.internal:host-gateway nginx:1.30-alpine \
+           wget -qO- -T 5 "http://host.docker.internal:$p_br/" 2>/dev/null | grep -om 1 'Welcome to nginx')" "Welcome to nginx"
+    docker network rm "$gw_net" >/dev/null 2>&1 || true
+  fi
+  check "a port no container publishes is left to the host" \
+    "$(printf '%s\n' "$out" | grep -c "^ok.*:$p_none is not published by a container")" "1"
+  docker rm -f "$gw_c-pub" "$gw_c-loc" "$gw_c-br" >/dev/null 2>&1 || true
+  rm -rf "$GW"
+fi
+
 echo "== .env read the way docker compose reads it"
 
 # A container gets what compose makes of .env; the platform's scripts get what

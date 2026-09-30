@@ -1176,6 +1176,14 @@ verb_check() {
       bad "upstream $up is not running — recreating nginx would take down EVERY vhost"
     fi
   done < <(stacks_upstreams)
+  # The ones outside the docker network, reached through the host.
+  while IFS=$'\t' read -r level msg; do
+    case "$level" in
+      ok)   ok "$msg" ;;
+      warn) warn "$msg" ;;
+      fail) bad "$msg" ;;
+    esac
+  done <<< "$(check_host_gateway_ports)"
 
   step "nginx vhosts"
   include_file="$(stacks_include_file)"

@@ -137,6 +137,61 @@ machine to need this had failed a renewal every night for two weeks, for a
 domain a load balancer had been terminating all along, with a green timer,
 because getssl exits zero when there is nothing it can do.
 
+## Proxying to another compose project
+
+A common shape: an application with a `docker-compose.yaml` of its own, in its
+own repository, brought up by its own `make up`; the machine only has to put
+it behind nginx, with a domain and a certificate. The stack is then a vhost
+and nothing else (`Containers="no"`), and its `Watch_Project` names the
+application's project (below). How nginx reaches the application is one of
+three ways.
+
+**1. Through the host, on the bridge address — recommended.** The application
+publishes its port on the docker bridge's address on the host, and the vhost
+proxies to `host.docker.internal`, which the platform's nginx maps to that
+address:
+
+```yaml
+# the application's own docker-compose.yaml
+    ports:
+      - "172.17.0.1:3000:3000"   # the bridge address: `docker network inspect bridge`
+```
+
+```nginx
+# stacks/shop/nginx/10-shop.example.com.conf
+    location / { proxy_pass http://host.docker.internal:3000; }
+```
+
+The two projects stay independent: the application's `down` never touches
+nginx, and nothing joins anyone else's network. Two ways to publish that look
+the same and are not:
+
+- `"3000:3000"` or `"0.0.0.0:3000:3000"` works, and is open to the internet
+  wherever the firewall lets it through: Docker's rules sit ahead of the host
+  firewall. A live machine served a storefront this way for weeks.
+- `"127.0.0.1:3000:3000"` is closed to the outside and to nginx too:
+  `host.docker.internal` is the bridge address, not the host's loopback, and
+  the proxy gets "connection refused".
+
+`./stack --check` looks at every `host.docker.internal` port the enabled vhosts
+use and says which of the three it is: a warning for every interface, a
+failure for loopback only, ok for the bridge address or a port no container
+publishes (a process on the host itself).
+
+**2. The application joins the machine's network.** Its compose file declares
+the machine's `Platform_Network` as an external network, and the vhost proxies
+to its container by name. No port is published at all. The price: the
+application depends on that network's name, and it is now inside the
+machine's trust domain, one hop from the shared database and redis (see
+[SECURITY.md](../../SECURITY.md)). Right for an application you own and
+trust, not for someone else's.
+
+**3. nginx joins the application's network.** Not supported, on purpose:
+nginx would depend on another repository's lifecycle. The network has to exist
+before nginx starts, its re-creation leaves nginx on a network that is gone,
+and attaching to a new one means recreating nginx, which takes every site on
+the machine down with it.
+
 ## Whose containers they are
 
 `watch-host` alerts about the machine's own containers, those in its compose

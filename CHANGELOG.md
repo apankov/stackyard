@@ -8,6 +8,18 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.37.0] — 2026-09-30
+
+### Added
+- `./stack --check` looks at how every port the enabled vhosts reach through
+  `host.docker.internal` is published: on every interface is a warning (open to
+  the internet wherever the firewall allows), on `127.0.0.1` only is a failure
+  (nginx cannot reach it there), on the docker bridge address is ok.
+- `docs/guides/stacks.md` describes proxying to an application in its own
+  compose project: through the host on the bridge address (recommended), by
+  joining the machine's network, and why nginx does not join the
+  application's.
+
 ## [0.36.1] — 2026-09-30
 
 ### Fixed
@@ -228,6 +240,7 @@ Releases before 0.27.0 are recorded only in the tags and the git history.
   examples with mode 600, never overwrites one, follows `Requires`, and exits
   non-zero while any value is still `CHANGE_ME`.
 
+[0.37.0]: https://github.com/apankov/stackyard/compare/v0.36.1...v0.37.0
 [0.36.1]: https://github.com/apankov/stackyard/compare/v0.36.0...v0.36.1
 [0.36.0]: https://github.com/apankov/stackyard/compare/v0.35.1...v0.36.0
 [0.35.1]: https://github.com/apankov/stackyard/compare/v0.35.0...v0.35.1

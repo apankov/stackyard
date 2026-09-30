@@ -735,6 +735,70 @@ container_is_watched() {
 # Whether the thing listening on the host is alive is not visible from here.
 # That is the stack's business: see scripts/health.sh.
 
+# The ports the enabled vhosts reach through host.docker.internal: an
+# application in a compose project of its own, published on the host. One per
+# line. A URL without a port means its scheme's.
+stacks_host_gateway_ports() {
+  local s dir
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    dir="$(stack_vhost_dir "$s")"
+    [ -d "$dir" ] || continue
+    cat "$dir"/*.conf 2>/dev/null || true
+  done <<< "$(stacks_enabled 2>/dev/null)" \
+    | sed 's/#.*//' \
+    | grep -oE '(https?://)?host\.docker\.internal(:[0-9]+)?' \
+    | awk '{ if (match($0, /:[0-9]+$/)) print substr($0, RSTART + 1)
+             else if ($0 ~ /^https:/) print 443
+             else print 80 }' \
+    | sort -un
+  return 0
+}
+
+# How each of those ports is published, one finding per line:
+# "ok|warn|fail<TAB>message".
+#
+# host.docker.internal is the docker bridge's address on the host, not its
+# loopback. So a port published on 127.0.0.1 only is out of nginx's reach —
+# the proxy fails — and one published on every interface is reachable, but
+# from outside too, wherever the firewall lets it: Docker's rules sit ahead of
+# it. The one that is both reachable and closed is the bridge address itself.
+# A live machine proxied a storefront this way on 0.0.0.0:3000 for weeks.
+check_host_gateway_ports() {
+  local port bridge maps name ports m addr public local_only other
+  bridge="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
+  [ -n "$bridge" ] || bridge="172.17.0.1"
+  maps="$(docker ps --format '{{.Names}}{{"\t"}}{{.Ports}}' 2>/dev/null || true)"
+  while IFS= read -r port; do
+    [ -n "$port" ] || continue
+    public=""; local_only=""; other=""
+    while IFS=$'\t' read -r name ports; do
+      [ -n "$name" ] || continue
+      # "0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp, 127.0.0.1:9000->9000/tcp"
+      while IFS= read -r m; do
+        case "$m" in *":$port->"*) ;; *) continue ;; esac
+        addr="${m%:"$port"->*}"
+        case "$addr" in
+          0.0.0.0|"[::]"|"::") public="$public $name" ;;
+          127.0.0.1|"[::1]")   local_only="$local_only $name" ;;
+          *)                   other="$other $name" ;;
+        esac
+      done <<< "$(printf '%s\n' "$ports" | tr ',' '\n' | sed 's/^ *//')"
+    done <<< "$maps"
+    public="$(printf '%s\n' $public | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+    if [ -n "$public" ]; then
+      printf 'warn\thost.docker.internal:%s is published by %s on every interface — reachable from outside wherever the firewall allows; publish it on the bridge address instead: "%s:%s:<container port>"\n' "$port" "$public" "$bridge" "$port"
+    elif [ -n "$other" ]; then
+      printf 'ok\thost.docker.internal:%s is published on the bridge address only\n' "$port"
+    elif [ -n "$local_only" ]; then
+      printf 'fail\thost.docker.internal:%s is published by%s on 127.0.0.1 only — nginx cannot reach it there; publish it on "%s:%s:<container port>"\n' "$port" "$local_only" "$bridge" "$port"
+    else
+      printf 'ok\thost.docker.internal:%s is not published by a container — a process on the host, presumably\n' "$port"
+    fi
+  done <<< "$(stacks_host_gateway_ports)"
+  return 0
+}
+
 # ------------------------------------------------------- image registries
 #
 # The point: a stack runs from a DIGEST, not from a moving tag. With `:master`,
