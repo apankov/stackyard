@@ -8,6 +8,8 @@ quick start, the commands. Then the guide for whatever you are about to do.
 - [README.md](../README.md) — what stackyard is, how the pieces fit, installing
   the CLI, deploying and updating a machine, requirements.
 
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — how to report, suggest and
+  contribute; the tests and conventions a change is expected to pass.
 - [SECURITY.md](../SECURITY.md) — the threat model: isolated between machines,
   not between the stacks of one; what runs as root; what is not pinned yet;
   how to report a vulnerability.

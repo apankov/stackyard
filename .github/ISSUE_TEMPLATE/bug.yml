@@ -1,0 +1,43 @@
+name: Something does not work
+description: A command failed, a check lied, or the docs sent you the wrong way.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. A security problem goes through
+        [SECURITY.md](https://github.com/apankov/stackyard/blob/master/SECURITY.md) instead, not here.
+        Please keep domains, IPs and secrets out of it — this repository is public.
+  - type: input
+    id: version
+    attributes:
+      label: stackyard version
+      description: "`stackyard version` on the laptop, or `cat platform/VERSION` on the machine."
+      placeholder: v0.37.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What you ran, and what happened
+      description: The command and its output. `--json` output is fine too.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: machine
+    attributes:
+      label: The machine
+      description: Distribution, `docker version`, `bash --version`, and what `./stack --check` says, if it runs.
+  - type: textarea
+    id: stack
+    attributes:
+      label: The stack involved, if one is
+      description: Its `stack.conf` and, if it matters, the vhost — with names made up.
+      render: shell

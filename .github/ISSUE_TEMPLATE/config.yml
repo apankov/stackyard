@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A question, or "is stackyard for me?"
+    url: https://github.com/apankov/stackyard/discussions
+    about: Ask in Discussions — questions and early ideas live there.
+  - name: A security problem
+    url: https://github.com/apankov/stackyard/blob/master/SECURITY.md
+    about: Please report it privately, as SECURITY.md describes.

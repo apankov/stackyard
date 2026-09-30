@@ -235,7 +235,7 @@ tags pinned to digests), getssl renewals on a timer.
 Releases follow semver: every change to the platform is a tagged release, and
 the `latest` branch follows the newest tag. The fixtures in `tests/machines/`
 are synthetic, `alpha` on MySQL and `beta` on Postgres: the platform counts as
-shared only while both run on it unchanged. See [CLAUDE.md](CLAUDE.md) for the
-conventions.
+shared only while both run on it unchanged. How to contribute, and what a
+change is expected to carry: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 MIT licensed.

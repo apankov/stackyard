@@ -1,0 +1,27 @@
+name: An idea or a missing piece
+description: Something stackyard should do, or do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful ideas start from what happened, not from the solution:
+        what you were trying to do with your hosts, and where stackyard got in
+        the way or stayed silent. A half-formed idea is welcome — say so.
+  - type: textarea
+    id: situation
+    attributes:
+      label: What you were trying to do
+      description: Your hosts and projects, the task, and where it hurt.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+      description: The workaround, the manual step, the script next to stackyard.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like instead
+      description: A command, a stack.conf key, a check — or just the outcome you want.
