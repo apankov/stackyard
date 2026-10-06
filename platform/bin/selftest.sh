@@ -2811,7 +2811,7 @@ check "certs --issue: an alias that does not reach the machine stops the domain"
   "$(printf '%s\n' "$out" | grep -c 'b.test — not issued: http://www.b.test/')" "1"
 check "and Let's Encrypt is never asked for it" "$(grep -c ' b.test$' "$IM2/getssl.log")" "0"
 check "and the run says something is still on a placeholder" "$rc" "1"
-check "and the probe file does not stay in the webroot" "$(ls "$ACL2" | grep -c .)" "0"
+check "and the probe file does not stay in the webroot" "$(find "$ACL2" -mindepth 1 | grep -c .)" "0"
 rm -f "$IM2/unreachable"
 out="$(ci --issue)"; rc=$?
 check "certs --issue: once it reaches the machine, it is issued too" "$rc" "0"
