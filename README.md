@@ -188,12 +188,15 @@ changes. Subdirectories are declarations too — `systemd/` installs units,
 ```sh
 ./stack list           # what is enabled and what is actually alive
 ./stack --check        # declarations, domains, databases, upstreams, vhosts, units
-./stack sync           # apply machine.conf: start what it lists, rebuild vhosts (nginx -t, then reload)
+./stack sync           # apply machine.conf: start what it lists, rebuild vhosts (nginx -t, then reload),
+                       # issue certificates for domains still on a placeholder (--no-issue skips that)
 ./stack enable <stack> # add to machine.conf and bring up: containers first, then the vhost
 ./stack disable <stack> # remove from machine.conf: the vhost first, then the containers; data stays
 ./stack init           # missing .env files from their examples; names what is still CHANGE_ME
 ./dc <compose args>    # the only path to docker compose
 sudo ./host-setup      # packages, certificate placeholders, timers, stack host parts
+./certs --issue        # the same issuance by hand; Let's Encrypt is asked only once
+                       # http://<name>/.well-known/acme-challenge/ reaches this machine
 ./memory               # where the memory went: by container, by stack, by role
 ```
 

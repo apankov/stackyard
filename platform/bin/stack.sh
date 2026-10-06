@@ -22,7 +22,9 @@
 #   ./stack --check             # check only, non-zero exit on problems
 #
 # Flags: --dry-run (print the commands, change nothing),
-#        --no-start (config only, do not start containers) — for enable.
+#        --no-start (config only, do not start containers) — for enable,
+#        --no-issue (leave placeholder certificates for the nightly getssl
+#        run) — for enable and sync.
 #
 # What this script NEVER does, in any mode: it does not touch data in bind
 # mounts, and it does not drop databases from the shared DBMS. Reclaiming space
@@ -83,6 +85,7 @@ ensure_state_dirs
 DRY_RUN=0
 NO_START=0
 NO_UNITS=0
+NO_ISSUE=0
 MANIFEST_ONLY=0
 PROBLEMS=0
 WARNINGS=0
@@ -173,7 +176,8 @@ machine.conf; this script brings both docker compose and nginx in line with it.
                               asks for the stack name (data in bind mounts and
                               databases in the shared DBMS are left alone)
   stack sync                  bring the machine in line with machine.conf: start
-                              what it lists, rebuild the vhosts, install units;
+                              what it lists, rebuild the vhosts, install units,
+                              issue certificates for domains on a placeholder;
                               a stack it no longer lists is reported, not stopped
   stack --check               check only, exit code 1 on problems
 
@@ -184,6 +188,8 @@ machine.conf; this script brings both docker compose and nginx in line with it.
                 ./bootstrap there; the server follows with sync)
   --no-units    leave the systemd units alone (otherwise enable/disable call
                 sudo ./platform/bin/systemd.sh themselves; --check reports drift)
+  --no-issue    for enable/sync: do not ask Let's Encrypt for the domains still
+                on a placeholder certificate; the nightly getssl run will
 USAGE
   exit "${1:-2}"
 }
@@ -358,6 +364,41 @@ certs_stubs_if_needed() {
   [ "$missing" -eq 0 ] && return 0
   warn "certificate files are missing — running platform/bin/certs.sh (placeholders)"
   run "$DIR0/certs.sh"
+}
+
+# Real certificates for the domains still served with a placeholder, right
+# after the vhost went live — otherwise a new domain waits for the nightly
+# getssl-renew, and until then every visitor gets a self-signed certificate.
+# The work, and the guard against spending Let's Encrypt attempts on a domain
+# that does not reach this machine yet, are certs.sh --issue; here it is only
+# decided whether to call it, and as whom.
+#
+# As the repository's owner: getssl-renew runs as that user, and files left by
+# root would be ones it cannot overwrite. A failure does not fail the
+# operation: the vhosts are live, and the placeholder is what they served
+# anyway.
+certs_issue_pending() {
+  local spec d cert pending=0 owner cmd=()
+  [ "$NO_ISSUE" -eq 0 ] || return 0
+  while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    d="$(domain_primary "$spec")"
+    cert="$ROOT_DIR/state/certs/$d-fullchain.crt"
+    [ -f "$cert" ] && cert_is_placeholder "$cert" && pending=1
+  done < <(stacks_domain_specs)
+  [ "$pending" -eq 1 ] || return 0
+
+  step "Certificates"
+  owner=$(stat -c '%U' "$ROOT_DIR" 2>/dev/null || stat -f '%Su' "$ROOT_DIR")
+  if [ "$(id -un)" != "$owner" ]; then
+    if [ "$(id -u)" -ne 0 ]; then
+      warn "placeholders are served, but certificates are issued as $owner: ./certs --issue as $owner"
+      return 0
+    fi
+    cmd=(sudo -u "$owner" env ROOT_DIR="$ROOT_DIR")
+  fi
+  run ${cmd[@]+"${cmd[@]}"} "$DIR0/certs.sh" --issue \
+    || warn "certs.sh --issue failed — placeholders stay until it succeeds or the nightly getssl-renew runs"
 }
 
 # ------------------------------------------------------------- containers
@@ -698,6 +739,7 @@ stacks_bring_up() {
   else
     ok "units for these stacks are already in place"
   fi
+  certs_issue_pending
 }
 
 verb_disable() {
@@ -1026,6 +1068,8 @@ verb_sync() {
     step "systemd units"
     units_apply "installing the units the manifest's stacks declare..."
   fi
+
+  certs_issue_pending
 
   [ "$WARNINGS" -eq 0 ] && ok "the machine matches machine.conf"
   return 0
@@ -1667,6 +1711,7 @@ while [ $# -gt 0 ]; do
     --dry-run)  DRY_RUN=1 ;;
     --no-start) NO_START=1 ;;
     --no-units) NO_UNITS=1 ;;
+    --no-issue) NO_ISSUE=1 ;;
     --json)     JSON=1 ;;
     --manifest-only) MANIFEST_ONLY=1 ;;
     --check)    VERB="check" ;;
