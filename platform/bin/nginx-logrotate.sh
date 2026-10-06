@@ -79,8 +79,21 @@ chmod 700 "$NGINX_LOGROTATE_DIR"
 # stay in the live file a day longer, and until then there would be no
 # generation at all, which check-nginx-logs.sh cannot tell from a rotation
 # that never runs. systemd.sh starts this once at install for the same reason.
+#
+# Unless something already rotated these logs today — a machine moving off a
+# rotation of its own does it on the day it switches: a forced run would then
+# meet today's -YYYYMMDD name taken, refuse every such file and fail the unit
+# for nothing. The ordinary run tomorrow takes over. The date is local time,
+# the way dateext writes it.
 FORCE=()
-[ -f "$NGINX_LOGROTATE_DIR/state" ] || FORCE=(-f)
+if [ ! -f "$NGINX_LOGROTATE_DIR/state" ]; then
+  today=$(date +%Y%m%d)
+  if [ -z "$(find "$NGINX_LOG_DIR" -maxdepth 1 -type f \( -name "*-$today" -o -name "*-$today.gz" \) 2>/dev/null | head -n 1)" ]; then
+    FORCE=(-f)
+  else
+    echo "  logs were already rotated today ($today) — the first run is not forced"
+  fi
+fi
 
 conf="$NGINX_LOGROTATE_DIR/nginx.conf"
 render > "$conf.tmp"
