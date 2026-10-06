@@ -983,6 +983,17 @@ unit_render() {
 domain_primary() { printf '%s' "${1%%+*}"; }
 domain_sans()    { [ "$1" = "${1#*+}" ] || printf '%s' "${1#*+}" | tr '+' ' '; }
 
+# The placeholder certs.sh puts in place of a certificate not yet issued. Told
+# by its issuer: it is self-signed and valid for a year, so by dates alone it
+# reads as healthy. RFC2253 because the default -issuer format differs between
+# OpenSSL versions ("CN=devbox" and "CN = devbox").
+cert_is_placeholder() {
+  case "$(openssl x509 -noout -issuer -nameopt RFC2253 -in "$1" 2>/dev/null)" in
+    *CN=devbox*) return 0 ;;
+  esac
+  return 1
+}
+
 # Whose certificate it is. The default is getssl: this machine issues it and
 # renews it on a timer.
 #

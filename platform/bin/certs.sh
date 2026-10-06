@@ -20,6 +20,9 @@
 #   ./platform/bin/certs.sh --prune    prepare, and also remove the getssl
 #                                      configs of domains no enabled stack
 #                                      declares (certificates are never removed)
+#   ./platform/bin/certs.sh --issue    prepare, then issue real certificates for
+#                                      the domains still on a placeholder (what
+#                                      ./stack enable and sync call)
 
 set -euo pipefail
 
@@ -50,11 +53,13 @@ ENV_FILE="$ROOT_DIR/.env"
 
 CHECK_ONLY=0
 PRUNE=0
+ISSUE=0
 case "${1:-}" in
   --check) CHECK_ONLY=1 ;;
   --prune) PRUNE=1 ;;
+  --issue) ISSUE=1 ;;
   "")      ;;
-  *)       echo "Unknown argument: $1 (expected --check or --prune)" >&2; exit 2 ;;
+  *)       echo "Unknown argument: $1 (expected --check, --prune or --issue)" >&2; exit 2 ;;
 esac
 
 [ -f "$ENV_FILE" ] || { echo "Error: no $ENV_FILE" >&2; exit 2; }
@@ -284,6 +289,89 @@ if [ "$problems" -gt 0 ]; then
   echo
   echo "Missing: $problems. Run without --check." >&2
   exit 1
+fi
+
+# ------------------------------------------------ 4. issuing (--issue)
+
+# Without this a new domain waits for the nightly getssl-renew, and until then
+# every visitor gets the placeholder: from the outside the site looks broken,
+# though nothing is.
+#
+# Let's Encrypt is asked only after the machine has shown itself that the
+# challenge would pass: a probe file in the ACME webroot, fetched over plain
+# HTTP by every name the certificate is to cover. Called from every
+# ./stack sync, an unguarded run before DNS points here or port 80 is open
+# would spend a failed validation each time, and those are rate-limited per
+# hostname. A failed probe skips the domain; the nightly timer tries again.
+#
+# getssl runs exactly as the getssl-renew unit runs it: from state/ (the shared
+# getssl.cfg names the account key relative to the current directory, and from
+# anywhere else a new ACME account is registered), and as the repository's
+# owner, never as root (the timer must be able to overwrite what is written).
+if [ "$ISSUE" -eq 1 ]; then
+  echo
+  echo "== issuing"
+  owner=$(stat -c '%U' "$ROOT_DIR" 2>/dev/null || stat -f '%Su' "$ROOT_DIR")
+  ACL="$ROOT_DIR/state/acme/.well-known/acme-challenge"
+  pending=0
+  issued=0
+  while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    domain="$(domain_primary "$spec")"
+    cert="$CERTS_DIR/$domain-fullchain.crt"
+    { [ -f "$cert" ] && cert_is_placeholder "$cert"; } || continue
+    pending=$((pending + 1))
+
+    if [ "$(id -un)" != "$owner" ]; then
+      printf '  [!] %s — not issued: run as %s, not %s\n' "$domain" "$owner" "$(id -un)"
+      continue
+    fi
+    if [ ! -x "$ROOT_DIR/state/bin/getssl" ]; then
+      printf '  [!] %s — not issued: no state/bin/getssl (./platform/bin/getssl-fetch.sh)\n' "$domain"
+      continue
+    fi
+    if [ "$(docker inspect -f '{{.State.Status}}' nginx 2>/dev/null || true)" != running ]; then
+      printf '  [!] %s — not issued: nginx is not running, nothing would answer the challenge\n' "$domain"
+      continue
+    fi
+
+    token="stackyard-probe-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+    mkdir -p "$ACL"
+    printf '%s\n' "$token" > "$ACL/$token"
+    unreachable=""
+    for name in $domain $(domain_sans "$spec"); do
+      got=$(curl -fsS --max-time 10 "http://$name/.well-known/acme-challenge/$token" 2>/dev/null || true)
+      [ "$got" = "$token" ] || { unreachable="$name"; break; }
+    done
+    rm -f "$ACL/$token"
+    if [ -n "$unreachable" ]; then
+      printf '  [!] %s — not issued: http://%s/.well-known/acme-challenge/ does not reach this machine (DNS? port 80?); Let'"'"'s Encrypt not asked\n' "$domain" "$unreachable"
+      continue
+    fi
+
+    timeout_cmd=()
+    command -v timeout >/dev/null 2>&1 && timeout_cmd=(timeout 300)
+    if ! ( cd "$ROOT_DIR/state" && ${timeout_cmd[@]+"${timeout_cmd[@]}"} ./bin/getssl -w ./getssl-config/ -U -q "$domain" ); then
+      printf '  [!] %s — getssl failed; by hand: cd state && ./bin/getssl -w ./getssl-config/ -U %s\n' "$domain" "$domain"
+    # getssl decides by its own copy in getssl-config/<domain>/, not by the
+    # file nginx serves. A copy left by an issuance whose install step failed
+    # reads as "nothing to renew" and exits 0 with the placeholder still in
+    # place, so success is judged by the file rather than by the exit code.
+    elif cert_is_placeholder "$cert"; then
+      printf '  [!] %s — getssl had nothing to do, yet the placeholder is still served; force it: cd state && ./bin/getssl -w ./getssl-config/ -U -f %s\n' "$domain" "$domain"
+    else
+      note "$domain — issued"
+      issued=$((issued + 1))
+    fi
+  done < <(stacks_domain_specs)
+
+  if [ "$pending" -eq 0 ]; then
+    note "no domain is on a placeholder"
+  elif [ "$issued" -lt "$pending" ]; then
+    echo
+    echo "Still on a placeholder: $((pending - issued)) of $pending." >&2
+    exit 1
+  fi
 fi
 echo
 echo "Done."

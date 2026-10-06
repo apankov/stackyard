@@ -2670,6 +2670,45 @@ check "certs: a config nothing declares still says so" \
   "$(printf '%s\n' "$out" | grep -c 'ghost.test — a config exists, but no stack declares that domain')" "1"
 rm -rf "$OM"
 
+echo "== certs --issue: Let's Encrypt is asked only for a domain that reaches the machine"
+
+# ./stack sync calls this after every vhost change, so an unguarded getssl
+# would spend a rate-limited failed validation on each run before DNS points
+# here. Stubs: docker says nginx runs, curl serves the ACME webroot for the
+# names not listed as unreachable, getssl records how it was called and
+# installs a certificate that is not the placeholder.
+IM2="$WORK/issue"; ACL2="$IM2/state/acme/.well-known/acme-challenge"
+mkdir -p "$IM2/stacks/web/nginx" "$IM2/state/certs" "$IM2/state/bin" "$IM2/stub"
+ln -sfn "$REPO_DIR/platform" "$IM2/platform"; ln -sfn "$REPO_DIR/profiles" "$IM2/profile"
+printf 'Platform_Deploy_Dir=%s\n' "$IM2" > "$IM2/.env"
+printf 'Enabled_Stacks="web"\n' > "$IM2/machine.conf"
+printf 'Domains="a.test b.test+www.b.test"\nContainers="no"\n' > "$IM2/stacks/web/stack.conf"
+for h in a.test b.test; do
+  printf 'server {\n  listen 443 ssl;\n  server_name %s;\n  ssl_certificate /etc/nginx/certs/%s-fullchain.crt;\n  ssl_certificate_key /etc/nginx/certs/%s.key;\n}\n' "$h" "$h" "$h"
+done > "$IM2/stacks/web/nginx/01-web.conf"
+: > "$IM2/state/certs/dhparam.pem"
+printf '#!/bin/sh\nprintf running\n' > "$IM2/stub/docker"
+printf '#!/bin/sh\nfor a; do url="$a"; done\nhost="${url#http://}"; host="${host%%%%/*}"\ngrep -qx "$host" "%s/unreachable" 2>/dev/null && exit 22\ncat "%s/${url##*/}"\n' "$IM2" "$ACL2" > "$IM2/stub/curl"
+printf '#!/bin/sh\nfor a; do d="$a"; done\necho "$PWD $*" >> "%s/getssl.log"\nopenssl req -x509 -nodes -days 30 -newkey rsa:2048 -subj "/CN=$d" -keyout "%s/state/certs/$d.key" -out "%s/state/certs/$d-fullchain.crt" >/dev/null 2>&1\n' "$IM2" "$IM2" "$IM2" > "$IM2/state/bin/getssl"
+chmod +x "$IM2/stub/docker" "$IM2/stub/curl" "$IM2/state/bin/getssl"
+ci() { ( PATH="$IM2/stub:$PATH" ROOT_DIR="$IM2" "$REPO_DIR/platform/bin/certs.sh" "$@" ) 2>&1; }
+ci >/dev/null
+echo www.b.test > "$IM2/unreachable"
+out="$(ci --issue)"; rc=$?
+check "certs --issue: a reachable domain on a placeholder is issued" "$(printf '%s\n' "$out" | grep -c 'a.test — issued')" "1"
+check "and getssl ran from state/, renewal-only, for that domain alone" \
+  "$(grep -c "^$IM2/state -w ./getssl-config/ -U -q a.test\$" "$IM2/getssl.log")" "1"
+check "certs --issue: an alias that does not reach the machine stops the domain" \
+  "$(printf '%s\n' "$out" | grep -c 'b.test — not issued: http://www.b.test/')" "1"
+check "and Let's Encrypt is never asked for it" "$(grep -c ' b.test$' "$IM2/getssl.log")" "0"
+check "and the run says something is still on a placeholder" "$rc" "1"
+check "and the probe file does not stay in the webroot" "$(ls "$ACL2" | grep -c .)" "0"
+rm -f "$IM2/unreachable"
+out="$(ci --issue)"; rc=$?
+check "certs --issue: once it reaches the machine, it is issued too" "$rc" "0"
+check "and a domain already issued is not asked for again" "$(grep -c ' a.test$' "$IM2/getssl.log")" "1"
+rm -rf "$IM2"
+
 echo "== notify: a recovery is not lost to a failed send"
 
 # The alert's state file is what says a recovery is owed. It used to be removed
