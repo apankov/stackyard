@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify that the nginx logs are rotated and kept no longer than promised
+Documentation=file:@DEPLOY_DIR@/platform/bin/check-nginx-logs.sh
+# No path conditions, like every check: being unable to check must be visible,
+# which is why the script exits with code 2 rather than being skipped.
+@ONFAILURE@
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+# As the repository owner: the check only lists /var/log/nginx and the age of
+# the state directory, and neither needs root.
+User=@SERVICE_USER@
+ExecStart=@DEPLOY_DIR@/platform/bin/check-nginx-logs.sh
+TimeoutStartSec=5min

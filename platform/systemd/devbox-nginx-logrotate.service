@@ -1,0 +1,19 @@
+[Unit]
+Description=Rotate the platform nginx logs in /var/log/nginx
+Documentation=file:@DEPLOY_DIR@/platform/bin/nginx-logrotate.sh
+After=docker.service
+# There is deliberately no path condition: a skipped unit does not count as
+# failed, and a rotation that quietly does not happen is the failure this unit
+# exists to prevent. nginx-logrotate.sh says what is missing and exits non-zero.
+# Substituted by systemd.sh: an OnFailure line if notifications are configured
+# (.env-notify), otherwise nothing.
+@ONFAILURE@
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+# As root: the logs are written by the nginx container and belong to root, the
+# state is root's, and the signal to the container goes through docker.
+ExecStart=@DEPLOY_DIR@/platform/bin/nginx-logrotate.sh
+TimeoutStartSec=30min
+Nice=10

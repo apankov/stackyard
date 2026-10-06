@@ -84,8 +84,8 @@ step() { echo; echo "== $1"; }
 # The packages this script installs. Each one is a precondition for a specific
 # step rather than a "just in case": openssl produces the placeholder
 # certificates and dhparam, bzip2 compresses dumps, gnupg encrypts backups,
-# logrotate rotates the nginx logs (there is no nginx package on the host, so
-# there is no /etc/logrotate.d/nginx either).
+# logrotate rotates the nginx logs (nginx-logrotate.sh: there is no nginx
+# package on the host, so there is no /etc/logrotate.d/nginx either).
 #
 # The list is platform-level rather than per-stack on purpose: disabling a
 # stack must not remove a package someone else needs.
@@ -531,7 +531,7 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   # The renewal timers belong in the list only where getssl runs at all: with
   # every domain external, systemd.sh removes them, and demanding them back
   # here would be this check contradicting its own installer.
-  EXPECTED_TIMERS=()
+  EXPECTED_TIMERS=(devbox-nginx-logrotate.timer devbox-nginx-logrotate-check.timer)
   stacks_getssl_any && EXPECTED_TIMERS+=(getssl-renew.timer getssl-check.timer)
   while IFS= read -r stack; do
     [ -n "$stack" ] || continue

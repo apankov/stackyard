@@ -203,7 +203,8 @@ sudo ./host-setup      # packages, certificate placeholders, timers, stack host 
 Also on board: `backup.sh` (databases and declared files → GPG → S3, with
 `check-backups.sh` watching freshness), `watch-host.sh` and `notify.sh` (disk,
 containers and failed units → Telegram), `registry.sh` (logins, and moving
-tags pinned to digests), getssl renewals on a timer.
+tags pinned to digests), getssl renewals on a timer, and a nightly rotation of
+the nginx logs (`Platform_Nginx_Log_Days`, 14 by default) with its own check.
 
 ## Requirements
 

@@ -2520,8 +2520,13 @@ printf '#!/bin/sh\n' > "$SM/stacks/ext/scripts/job.sh"; chmod +x "$SM/stacks/ext
 printf '[Unit]\nDescription=ext job\n@ONFAILURE@\n[Service]\nType=oneshot\nUser=@SERVICE_USER@\nExecStart=@STACK_DIR@/scripts/job.sh\n' \
   > "$SM/stacks/ext/systemd/devbox-ext-job.service"
 printf '[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n' > "$SM/stacks/ext/systemd/devbox-ext-job.timer"
-for c in systemctl aws; do printf '#!/bin/sh\nexit 0\n' > "$WORK/sysstub/$c"; chmod +x "$WORK/sysstub/$c"; done
-sysd() { ( PATH="$WORK/sysstub:$PATH" ROOT_DIR="$SM" STACKYARD_UNIT_DIR="$SU" "$REPO_DIR/platform/bin/systemd.sh" "$@" ) 2>&1; }
+for c in systemctl aws logrotate; do printf '#!/bin/sh\nexit 0\n' > "$WORK/sysstub/$c"; chmod +x "$WORK/sysstub/$c"; done
+# systemctl keeps a record: what it was asked to start is part of the contract.
+printf '#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' "$WORK/sysstub" > "$WORK/sysstub/systemctl"
+mkdir -p "$SM/logrotate.d"
+sysd() { ( PATH="$WORK/sysstub:$PATH" ROOT_DIR="$SM" STACKYARD_UNIT_DIR="$SU" \
+           STACKYARD_LOGROTATE_D="$SM/logrotate.d" STACKYARD_NGINX_LOGROTATE_DIR="$SM/lr" \
+           "$REPO_DIR/platform/bin/systemd.sh" "$@" ) 2>&1; }
 # What the previous layout left behind on a real machine: an installed backup
 # unit running a script that no longer exists.
 printf '[Service]\nExecStart=%s/scripts/backup.sh\n' "$SM" > "$SU/devbox-backup.service"
@@ -2531,8 +2536,35 @@ out="$(sysd)"; rc=$?
 check "systemd.sh installs a stack's units" "$([ -f "$SU/devbox-ext-job.timer" ] && echo yes || echo no)" "yes"
 check "without .env-backup, installed backup units are removed" "$([ -e "$SU/devbox-backup.service" ] && echo kept || echo removed)" "removed"
 check "and the run succeeds" "$rc" "0"
+check "the nginx log rotation is installed on every machine" \
+  "$([ -f "$SU/devbox-nginx-logrotate.timer" ] && [ -f "$SU/devbox-nginx-logrotate-check.timer" ] && echo yes || echo no)" "yes"
+check "with its default retention" "$(printf '%s\n' "$out" | grep -c 'nginx logs: kept 14 days')" "1"
+check "and the first rotation is started at once, there being no state yet" \
+  "$(grep -c '^start --no-block devbox-nginx-logrotate.service' "$WORK/sysstub/systemctl.log")" "1"
+mkdir -p "$SM/lr"; : > "$SM/lr/state"; : > "$WORK/sysstub/systemctl.log"
+sysd >/dev/null
+check "but not again once the rotation has a state" \
+  "$(grep -c 'devbox-nginx-logrotate.service' "$WORK/sysstub/systemctl.log")" "0"
 out="$(sysd --check)"; rc=$?
 check "--check passes on what was just installed" "$rc" "0"
+
+# A retention that cannot work fails the run and --check, and the units stay:
+# a rotation failing every night is loud, one that is missing is not.
+printf 'Platform_Nginx_Log_Days=1\n' >> "$SM/.env"
+out="$(sysd)"; rc=$?
+check "an unusable Platform_Nginx_Log_Days fails the run" "$rc" "1"
+check "and says why" "$(printf '%s\n' "$out" | grep -c "FAILED: nginx log rotation — Platform_Nginx_Log_Days='1'")" "1"
+check "and the rotation units stay installed" "$([ -f "$SU/devbox-nginx-logrotate.service" ] && echo kept || echo removed)" "kept"
+out="$(sysd --check)"; rc=$?
+check "--check fails on it too" "$rc" "1"
+sed '/^Platform_Nginx_Log_Days=/d' "$SM/.env" > "$SM/.env.x" && mv "$SM/.env.x" "$SM/.env"
+
+# Another config rotating the same directory: the logs would be renamed twice.
+printf '/var/log/nginx/*.log {\n daily\n}\n' > "$SM/logrotate.d/nginx"
+out="$(sysd --check)"; rc=$?
+check "--check warns about a second rotation of /var/log/nginx" "$(printf '%s\n' "$out" | grep -c 'logrotate.d/nginx also rotates /var/log/nginx')" "1"
+check "as a warning, not a failure" "$rc" "0"
+rm -f "$SM/logrotate.d/nginx"
 
 # The key where backup.sh looks by default, Backup_GPG_Pubkey left empty: the
 # two defaults used to differ, and the timers were skipped "for want of a key".
@@ -2567,6 +2599,83 @@ check "--check warns about a unit this platform does not install" \
   "$(printf '%s\n' "$out" | grep -c 'devbox-old-thing.service is installed but not one this platform version installs')" "1"
 check "--check changes nothing" "$(tail -n 1 "$SU/devbox-ext-job.timer")" "# edited by hand"
 rm -rf "$SM" "$WORK/sysstub"
+
+echo "== nginx-logrotate: the config in force and the result check"
+
+LM="$WORK/logs-machine"; LL="$LM/log"; LS="$LM/lr"
+mkdir -p "$LL"
+ln -sfn "$REPO_DIR/platform" "$LM/platform"; ln -sfn "$REPO_DIR/profiles" "$LM/profile"
+printf 'Platform_Deploy_Dir=%s\n' "$LM" > "$LM/.env"
+lrc() { ( ROOT_DIR="$LM" "$REPO_DIR/platform/bin/nginx-logrotate.sh" --print-config ) 2>&1; }
+cnl() { ( ROOT_DIR="$LM" STACKYARD_NGINX_LOG_DIR="$LL" STACKYARD_NGINX_LOGROTATE_DIR="$LS" \
+          "$REPO_DIR/platform/bin/check-nginx-logs.sh" ) 2>&1; }
+# An age in days, without GNU date or touch -d.
+age() { python3 -c 'import os, sys, time; t = time.time() - float(sys.argv[1]) * 86400; [os.utime(f, (t, t)) for f in sys.argv[2:]]' "$@"; }
+
+out="$(lrc)"
+check "the default retention is 14 days: 13 generations and the live file" \
+  "$(printf '%s\n' "$out" | grep -cE '^ +(rotate 13|maxage 14)$')" "2"
+check "the rendered config carries no placeholder" "$(printf '%s\n' "$out" | grep -c '@')" "0"
+printf 'Platform_Nginx_Log_Days=30\n' >> "$LM/.env"
+check "Platform_Nginx_Log_Days sets both numbers" \
+  "$(lrc | grep -cE '^ +(rotate 29|maxage 30)$')" "2"
+for bad in 1 abc 7d; do
+  sed '/^Platform_Nginx_Log_Days=/d' "$LM/.env" > "$LM/.env.x"; printf 'Platform_Nginx_Log_Days=%s\n' "$bad" >> "$LM/.env.x"; mv "$LM/.env.x" "$LM/.env"
+  out="$(lrc)"; rc=$?
+  check "a retention of '$bad' is refused" "$rc:$(printf '%s\n' "$out" | grep -c 'a whole number of days, 2 or more')" "2:1"
+done
+printf 'Platform_Deploy_Dir=%s\nPlatform_Nginx_Log_Days=10\n' "$LM" > "$LM/.env"
+
+# A healthy machine: yesterday's generation, an older compressed one, the live
+# file being written, a state the last run touched.
+mkdir -p "$LS"
+printf 'GET /\n' > "$LL/a.example.com-access"
+printf 'GET /\n' > "$LL/a.example.com-access-20000102"
+printf 'x' > "$LL/a.example.com-access-20000101.gz"; age 5 "$LL/a.example.com-access-20000101.gz"
+: > "$LL/a.example.com-error"
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: a rotated machine passes" "$rc" "0"
+
+age 12 "$LL/a.example.com-access-20000101.gz"
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: a generation past the retention fails" "$rc" "1"
+check "and names it" "$(printf '%s\n' "$out" | grep -c 'a.example.com-access-20000101.gz')" "1"
+rm -f "$LL/a.example.com-access-20000101.gz"
+
+age 4 "$LL/a.example.com-access"
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: a live log not written for days, yet not rotated, fails" \
+  "$(printf '%s\n' "$out" | grep -c 'a nightly run passed them by')" "1"
+printf 'GET /\n' >> "$LL/a.example.com-access"
+
+age 4 "$LL/a.example.com-access-20000102"
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: a busy log with no recent generation fails" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'the rotation has stopped')" "1:1"
+rm -f "$LL/a.example.com-access-20000102"
+
+# A machine the platform has just taken over: content, no generation yet.
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: no generation yet is fine while the rotation runs" "$rc" "0"
+age 3 "$LS"
+out="$(cnl)"; rc=$?
+check "but not once the rotation has not run for days" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'has not run for 2 days')" "1:1"
+rmdir "$LS"
+out="$(cnl)"; rc=$?
+check "nor when it has never run" "$rc:$(printf '%s\n' "$out" | grep -c 'has never run')" "1:1"
+mkdir -p "$LS"
+
+printf 'x\n' > "$LL/b.example.com.access"
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: a log named outside the convention fails, by name" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'b.example.com.access')" "1:1"
+rm -f "$LL/b.example.com.access"
+
+rm -rf "$LL"
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: no log directory is 'could not check', not a pass" "$rc" "2"
+rm -rf "$LM"
 
 echo "== check-backups.sh: what it expects"
 

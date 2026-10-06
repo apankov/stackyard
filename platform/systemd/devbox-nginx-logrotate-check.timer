@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily verification of the nginx log rotation
+Documentation=file:@DEPLOY_DIR@/platform/bin/check-nginx-logs.sh
+
+[Timer]
+# Hours after the rotation window (00:05 UTC plus up to 10 minutes of jitter),
+# so the check sees the result of the last run rather than the run itself.
+OnCalendar=*-*-* 06:20:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

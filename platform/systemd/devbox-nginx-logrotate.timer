@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily rotation of the platform nginx logs
+Documentation=file:@DEPLOY_DIR@/platform/bin/nginx-logrotate.sh
+
+[Timer]
+# Daily: the retention is counted in days (Platform_Nginx_Log_Days). Just after
+# midnight UTC, so a generation dated YYYYMMDD holds that day's records.
+OnCalendar=*-*-* 00:05:00 UTC
+RandomizedDelaySec=10m
+# A run missed while the machine was off happens after boot; otherwise the
+# retention would stretch silently by the downtime.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

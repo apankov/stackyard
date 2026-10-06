@@ -107,6 +107,9 @@ Platform_Vhosts_Mount=/var/www/vhosts
 Platform_Network=$NAME-net
 # A separate data volume. Empty if there is no such volume.
 Platform_Data_Mount=/mnt/data
+# How many days of nginx logs to keep (2 or more; 14 if unset). Access logs
+# hold visitors' IPs: if a privacy note promises a number, this is it.
+# Platform_Nginx_Log_Days=14
 EOF
 
 cat > "$DEST/machine.conf" <<'EOF'

@@ -518,6 +518,35 @@ backup_pubkey_path() {
   printf '%s' "$p"
 }
 
+# How many days of nginx logs the machine keeps: Platform_Nginx_Log_Days, 14 by
+# default. The rotation renders it into its config and the result check
+# measures against it, so both read it here — a check with its own idea of the
+# number either screams every night or never notices a log kept too long. It
+# is a machine value because it is sometimes a published promise: access logs
+# hold the IP of every visitor, and a privacy note names how long.
+#
+# At least 2: one rotated generation plus the live file. With 1 there would be
+# no generation ever, and the check could not tell rotation from its absence.
+nginx_log_days() {
+  local d
+  d="$(env_get Platform_Nginx_Log_Days 14)"
+  case "$d" in
+    ''|*[!0-9]*) ;;
+    *) if [ "$d" -ge 2 ] 2>/dev/null; then printf '%s' "$((10#$d))"; return 0; fi ;;
+  esac
+  echo "Error: Platform_Nginx_Log_Days='$d' in .env — a whole number of days, 2 or more" >&2
+  return 1
+}
+
+# Where the logs are (the bind mount in platform/compose/nginx.yaml) and where
+# the rotation keeps its state. One place for the runner, the result check and
+# systemd.sh. Overridable only so the selftest can point them at a scratch
+# directory; a machine uses these.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+NGINX_LOG_DIR="${STACKYARD_NGINX_LOG_DIR:-/var/log/nginx}"
+# shellcheck disable=SC2034
+NGINX_LOGROTATE_DIR="${STACKYARD_NGINX_LOGROTATE_DIR:-/var/lib/devbox-nginx-logrotate}"
+
 # The S3 prefix for this file: sqlite/<name without extension>.
 sqlite_s3_subpath() {
   local base

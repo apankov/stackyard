@@ -2,8 +2,9 @@
 
 # Installing the systemd timers: certificate renewal through getssl, an expiry
 # check, a daily backup to S3 with its own independent check, notifications (an
-# OnFailure handler, host watching, a weekly digest) — plus the units the
-# stacks bring with them.
+# OnFailure handler, host watching, a weekly digest), the nightly rotation of
+# the nginx logs with its own check — plus the units the stacks bring with
+# them.
 #
 # systemd rather than cron because systemd is already present on the machine
 # and needs nothing installed.
@@ -330,6 +331,41 @@ else
   echo "      failures will be visible only in \`systemctl --failed\`." >&2
 fi
 
+# 2e. The nginx logs. Always: every machine runs the platform nginx, and its
+#     logs sit on a bind mount that no package's logrotate config covers.
+#     Nothing to configure, so nothing to skip — only two ways to be broken.
+#     Those are said, and the run fails at the end like a broken .env-backup,
+#     while the units are installed anyway: their own nightly failure through
+#     OnFailure is the loud kind, and a machine without rotation is the quiet
+#     kind this exists to end.
+NGINX_LOGS_UNITS=(devbox-nginx-logrotate.service devbox-nginx-logrotate.timer
+                  devbox-nginx-logrotate-check.service devbox-nginx-logrotate-check.timer)
+NGINX_LOGS_BROKEN=""
+if ! NGINX_LOG_DAYS=$(nginx_log_days 2>/dev/null); then
+  NGINX_LOGS_BROKEN="Platform_Nginx_Log_Days='$(env_get Platform_Nginx_Log_Days)' in .env is not a whole number of days, 2 or more"
+# /usr/sbin by name as well: --check runs as an ordinary user, whose PATH may
+# not have it, while the unit runs with systemd's, which does.
+elif ! command -v logrotate >/dev/null 2>&1 && [ ! -x /usr/sbin/logrotate ]; then
+  NGINX_LOGS_BROKEN="no logrotate command — sudo ./host-setup installs it"
+fi
+# A second rotation of the same files: the distribution's logrotate.timer runs
+# everything in /etc/logrotate.d, and a host nginx package (or a hand-written
+# file) put there rotates /var/log/nginx against a state of its own — renaming
+# files twice a night and signalling a host nginx that is not the one writing.
+# The directory is overridable only for the selftest.
+LOGROTATE_D="${STACKYARD_LOGROTATE_D:-/etc/logrotate.d}"
+other=$(grep -lsF "$NGINX_LOG_DIR" "$LOGROTATE_D"/* 2>/dev/null || true)
+if [ -n "$other" ]; then
+  echo "WARNING: $(echo "$other" | tr '\n' ' ')also rotates $NGINX_LOG_DIR, which the platform rotates itself." >&2
+  echo "  Remove it, or the logs are rotated twice." >&2
+  WARNINGS=$((WARNINGS + 1))
+fi
+if [ -n "$NGINX_LOGS_BROKEN" ] && [ "$CHECK" -eq 1 ]; then
+  problem "nginx log rotation — $NGINX_LOGS_BROKEN"
+fi
+UNITS+=("${NGINX_LOGS_UNITS[@]}")
+TIMERS+=(devbox-nginx-logrotate.timer devbox-nginx-logrotate-check.timer)
+
 if [ "$CHECK" -eq 1 ]; then
   echo "** Checking the units in $UNIT_DST against what would be installed"
 else
@@ -348,6 +384,7 @@ fi
 if [ "$INSTALL_NOTIFY" -eq 1 ]; then
   echo "   notify:     chat $NOTIFY_CHAT"
 fi
+[ -z "$NGINX_LOGS_BROKEN" ] && echo "   nginx logs: kept ${NGINX_LOG_DAYS} days"
 
 # 3. Path substitution. systemd units support no variables and require absolute
 #    paths, so in the repository they are templates carrying @DEPLOY_DIR@.
@@ -556,6 +593,16 @@ for timer in ${TIMERS[@]+"${TIMERS[@]}"}; do
   systemctl enable --now "$timer"
 done
 
+# The first rotation now rather than at the next 00:05: until it runs there is
+# no generation, which the check cannot tell from a rotation that never will,
+# and the history a machine's logs already hold stays outside the retention.
+# --no-block: a rotation is no reason to hold up host-setup, and its failure
+# goes to OnFailure like any other night's.
+if [ -z "$NGINX_LOGS_BROKEN" ] && [ ! -f "$NGINX_LOGROTATE_DIR/state" ]; then
+  echo "    first nginx log rotation started (devbox-nginx-logrotate.service)"
+  systemctl start --no-block devbox-nginx-logrotate.service
+fi
+
 echo
 echo "Done. Schedule:"
 systemctl list-timers --all 'getssl-*' 'devbox-*'
@@ -574,11 +621,21 @@ if [ "$INSTALL_BACKUP" -eq 1 ]; then
   echo "  sudo systemctl start devbox-backup.service && journalctl -u devbox-backup -n 50"
   echo "  $Platform_Deploy_Dir/platform/bin/check-backups.sh"
 fi
+echo "  sudo $Platform_Deploy_Dir/platform/bin/nginx-logrotate.sh -d   # the rotation plan, no changes"
+echo "  $Platform_Deploy_Dir/platform/bin/check-nginx-logs.sh"
 
 # Last, after everything else was installed: a broken backup config must not
 # cost the machine its certificate renewals, and must not pass for success.
+# Nor a broken log rotation.
+FAILED=0
 if [ "$BACKUP_BROKEN" -eq 1 ]; then
   echo >&2
   echo "FAILED: backups — $BACKUP_SKIP" >&2
-  exit 1
+  FAILED=1
 fi
+if [ -n "$NGINX_LOGS_BROKEN" ]; then
+  echo >&2
+  echo "FAILED: nginx log rotation — $NGINX_LOGS_BROKEN" >&2
+  FAILED=1
+fi
+exit "$FAILED"
