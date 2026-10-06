@@ -8,6 +8,23 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.38.0] — 2026-10-06
+
+### Added
+- `./stack enable` and `./stack sync` issue real certificates for the enabled
+  domains still served with the placeholder, right after the vhost goes live,
+  instead of leaving them to the nightly `getssl-renew`. `--no-issue` skips it;
+  a failure is a warning, not a failed sync.
+- `./certs --issue` does the same by hand. Let's Encrypt is asked only after a
+  probe file is fetched through `http://<name>/.well-known/acme-challenge/` for
+  every name of the certificate, so a domain whose DNS or port 80 is not ready
+  yet costs no rate-limited failed validation. getssl runs from `state/` and as
+  the repository's owner, as the timer runs it.
+
+### Fixed
+- `./certs` no longer says "no stack declares that domain" for a getssl config
+  whose stack is present but not enabled: it names that stack.
+
 ## [0.37.0] — 2026-09-30
 
 ### Added
