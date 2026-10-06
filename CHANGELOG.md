@@ -8,6 +8,28 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.39.0] — 2026-10-06
+
+### Added
+- The platform rotates the nginx logs in `/var/log/nginx` itself. Until now
+  `host-setup` installed `logrotate` and no config, so on every machine the
+  logs grew without bound. `devbox-nginx-logrotate.timer` runs
+  `platform/bin/nginx-logrotate.sh` nightly with a state of its own (not
+  through `/etc/logrotate.d`), and `devbox-nginx-logrotate-check.timer` checks
+  the result: files left unrotated, generations past the retention, logs named
+  outside `<name>-access`, `<name>-error`, `*.log`. The first run forces a
+  rotation, so the history a machine already holds comes under the retention
+  at once.
+- `Platform_Nginx_Log_Days` in the root `.env` sets the retention, 14 days by
+  default, 2 at least.
+- `systemd.sh` warns when a file in `/etc/logrotate.d` also rotates
+  `/var/log/nginx`.
+
+  **A machine that rotates these logs some other way** (a stack of its own, a
+  host nginx package): remove that before `sudo ./host-setup` installs the
+  platform's, or the logs are rotated twice a night — `./stack disable <stack>`
+  first. Set `Platform_Nginx_Log_Days` if it kept something other than 14 days.
+
 ## [0.38.0] — 2026-10-06
 
 ### Added
