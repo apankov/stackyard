@@ -2653,6 +2653,23 @@ out="$(cc)"
 check "check-certs: a chain that does not reach a trusted root fails" "$(printf '%s\n' "$out" | grep -c 'the chain does not verify')" "1"
 rm -rf "$CM" "$CA"
 
+echo "== certs: an orphaned getssl config names the disabled stack behind it"
+
+# A config left by a stack that was switched off used to be reported as "no
+# stack declares that domain", next to a stack.conf that plainly declares it.
+OM="$WORK/orphans"; mkdir -p "$OM/stacks/on" "$OM/stacks/off" "$OM/state/getssl-config"/{b.test,ghost.test}
+ln -sfn "$REPO_DIR/platform" "$OM/platform"; ln -sfn "$REPO_DIR/profiles" "$OM/profile"
+printf 'Platform_Deploy_Dir=%s\n' "$OM" > "$OM/.env"
+printf 'Enabled_Stacks="on"\n' > "$OM/machine.conf"
+printf 'Domains="a.test"\nContainers="no"\n' > "$OM/stacks/on/stack.conf"
+printf 'Domains="b.test+www.b.test"\nContainers="no"\n' > "$OM/stacks/off/stack.conf"
+out="$( ( ROOT_DIR="$OM" "$REPO_DIR/platform/bin/certs.sh" --check ) 2>&1 )"
+check "certs: a config of a disabled stack names that stack" \
+  "$(printf '%s\n' "$out" | grep -c 'b.test — a config exists, but it is declared only by a stack that is not enabled (off)')" "1"
+check "certs: a config nothing declares still says so" \
+  "$(printf '%s\n' "$out" | grep -c 'ghost.test — a config exists, but no stack declares that domain')" "1"
+rm -rf "$OM"
+
 echo "== notify: a recovery is not lost to a failed send"
 
 # The alert's state file is what says a recovery is owed. It used to be removed

@@ -162,6 +162,17 @@ done < <(stacks_domain_specs)
 # it is the reason --prune is reached for here at all.
 domains_now=" $(stacks_domains_getssl | tr '\n' ' ') "
 external_now=" $(stacks_domains_external | tr '\n' ' ') "
+# "domain stack" for EVERY stack, enabled or not. The common case of a config
+# with no enabled stack is a stack that was switched off and is still sitting in
+# stacks/ — and "no stack declares it" next to a stack.conf that plainly does
+# sends the reader grepping for a bug in the lookup instead.
+declared_any=$(
+  while IFS= read -r s; do
+    for dd in $(stack_conf_get "$s" Domains); do
+      printf '%s %s\n' "$(domain_primary "$dd")" "$s"
+    done
+  done < <(stacks_available)
+)
 for d in "$GETSSL_DIR"/*/; do
   [ -d "$d" ] || continue
   name=$(basename "$d")
@@ -173,7 +184,14 @@ for d in "$GETSSL_DIR"/*/; do
   # still declared; what it no longer has is a certificate this machine issues.
   case "$external_now" in
     *" $name "*) why="the stack declares it Certs=external" ;;
-    *)           why="no stack declares that domain" ;;
+    *)
+      owners=$(printf '%s\n' "$declared_any" | awk -v n="$name" '$1 == n { print $2 }' | paste -sd ' ' -)
+      if [ -n "$owners" ]; then
+        why="it is declared only by a stack that is not enabled ($owners)"
+      else
+        why="no stack declares that domain"
+      fi
+      ;;
   esac
   if [ "$PRUNE" -eq 1 ]; then
     rm -rf "$d" && printf '  [ok] %s — config removed, %s (the certificate in state/certs is untouched)\n' "$name" "$why"
