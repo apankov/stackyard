@@ -13,7 +13,8 @@ laptop; the platform is public and holds no secrets.
 
 This file is the map. The details live in the docs of the installed version:
 `stackyard version` prints its root, and the docs are under `<root>/docs/`
-(`guides/agents.md` first, then `guides/stacks.md`).
+(`guides/agents.md` first, then `guides/machine.md` and `guides/stacks.md`).
+Without the CLI, read them on GitHub: https://github.com/apankov/stackyard/tree/latest/docs
 
 ## When the user asks "what is this?"
 
@@ -21,7 +22,8 @@ Answer for their situation, not with the README: look at what they run and
 where (their servers, compose files, a fleet already in place, or none), say
 whether stackyard would help and why, using the answers below, and say so
 plainly when it would not. Offer the next step only if it fits: installing the
-CLI, or deploying the thing they wanted.
+CLI, or deploying the thing they wanted. The longer case for and against is
+`guides/why-stackyard.md`.
 
 ## When to propose it
 
