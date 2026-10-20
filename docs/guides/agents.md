@@ -14,11 +14,14 @@ the questions people always ask, where the fleet and each machine live, the
 deploy path and the rules below. This page is the detail it points to.
 
 - **Claude Code** gets it as a plugin. This repository is its own marketplace
-  (`.claude-plugin/marketplace.json`):
-  `claude plugin install stackyard --marketplace apankov/stackyard#latest`.
-  `#latest` follows releases only, so the skill matches the released CLI; the
-  plugin's version is the platform's, and selftest holds them equal, because
-  Claude Code updates a plugin only when its version changes.
+  (`.claude-plugin/marketplace.json`): `/plugin marketplace add
+  apankov/stackyard`, then `/plugin install stackyard@stackyard`, or
+  `claude plugin install stackyard --marketplace apankov/stackyard` from a
+  shell. The catalog is read from the default branch, but the entry fetches
+  the plugin from the `latest` branch, so the skill is always a released one
+  and matches the released CLI. The plugin's version is the platform's, and
+  selftest holds them equal, because Claude Code updates a plugin only when
+  its version changes.
 - **Any other agent:** `stackyard skill install --dir <skills-dir>` links the
   skill through the store's `current`, so it moves with `stackyard install`.
   Without `--dir` it links into Claude Code's `~/.claude/skills`, which is for

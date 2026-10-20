@@ -7,7 +7,8 @@
 # Claude Code gets it as a plugin from this repository's marketplace
 # (.claude-plugin/marketplace.json), which also keeps it updated:
 #
-#   claude plugin install stackyard --marketplace apankov/stackyard#latest
+#   /plugin marketplace add apankov/stackyard
+#   /plugin install stackyard@stackyard
 #
 # This command is for every other agent, and for a checkout under development.
 #
@@ -28,7 +29,7 @@ ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 . "$ROOT/bin/lib-workspace.sh"
 
 die() { echo "Error: $*" >&2; exit 1; }
-usage() { sed -n '14,16p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '15,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 # Installed, the link goes through the store's `current` rather than to this
 # version's directory: the skill then describes the CLI that `stackyard` runs,

@@ -83,18 +83,22 @@ about it, finds your machines with `stackyard fleet list`, and deploys through
 the plan, apply, check loop. The skill is plain markdown, so a human can read
 the same page.
 
-```sh
-# Claude Code: a plugin from this repository, updated on each release
-claude plugin install stackyard --marketplace apankov/stackyard#latest
-# (in a session: /plugin install stackyard --marketplace apankov/stackyard#latest)
+In Claude Code, type in a session:
 
-# any other agent, once the CLI is installed (see Quick start)
-stackyard skill install --dir <the agent's skills directory>
 ```
+/plugin marketplace add apankov/stackyard
+/plugin install stackyard@stackyard
+```
+
+From a shell, the same is one command:
+`claude plugin install stackyard --marketplace apankov/stackyard`. The plugin
+comes from the newest release, and `/plugin marketplace update stackyard`
+brings the next one. For any other agent, once the CLI is installed (Quick
+start): `stackyard skill install --dir <the agent's skills directory>`.
 
 > **If you are an AI agent** sent here to find out what this is or to install
 > it: read the skill above. It says how to judge whether stackyard fits the
-> user's setup and what to tell them. To install, run the Claude Code command
+> user's setup and what to tell them. To install, run the shell command
 > above (it takes effect after `/reload-plugins` or in the next session), or for
 > another agent read the skill file directly. The operator CLI (Quick start)
 > pipes a script into bash: ask the user before running it.
