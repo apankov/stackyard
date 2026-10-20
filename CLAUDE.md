@@ -106,8 +106,10 @@ to the mirror `repo.git` beside it, and the fleet list is the store's `fleet`
 file — nothing of stackyard sits in `$HOME` itself): `new-machine.sh`, `pin.sh` (rewrites one machine's `stackyard.lock`;
 there is deliberately no "update everyone"), `fleet.sh`, `audit-isolation.sh`
 (looks for cross-machine leaks of secrets, buckets, networks and ACME keys),
-`skill.sh` (links `skills/stackyard/`, the agent skill, into an agent's skills
-directory; keep it a short map that points into `docs/`) and
+`skill.sh` (links `plugins/stackyard/skills/stackyard/`, the agent skill, into
+an agent's skills directory; the same directory is the Claude Code plugin the
+repo's `.claude-plugin/marketplace.json` lists; keep the skill a short map that
+points into `docs/`, and its `plugin.json` version equal to `platform/VERSION`) and
 `vendor.sh` (emergency self-contained copy, checked by
 `platform/bin/check-vendor.sh`).
 
@@ -126,8 +128,8 @@ directory; keep it a short map that points into `docs/`) and
   Keep that density and voice when you edit.
 - Releases: each `feat`/`fix` commit that changes the platform bumps
   `platform/VERSION` (semver) in the same commit, and that commit is tagged
-  `vX.Y.Z`. The same commit sets `STACKYARD_RELEASE` in `install.sh` (selftest
-  enforces it) and the tag in the install URLs in `install.sh`'s header and in
+  `vX.Y.Z`. The same commit sets `STACKYARD_RELEASE` in `install.sh` and `version` in
+  `plugins/stackyard/.claude-plugin/plugin.json` (selftest enforces both) and the tag in the install URLs in `install.sh`'s header and in
   README. Pushing the tag moves the `latest` branch
   (`.github/workflows/latest.yml`); never move `latest` by hand or with
   `--force`. Docs-only commits don't

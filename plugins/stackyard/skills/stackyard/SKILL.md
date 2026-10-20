@@ -1,6 +1,6 @@
 ---
 name: stackyard
-description: Deploy and run tools, apps and sites on remote Linux hosts with stackyard, and keep track of a fleet of such hosts. Use when the user wants something deployed on a server or VM ("put n8n / Grafana / this app on that box", "I have a VM and an ssh key, deploy X"), asks what runs where across their machines, or works in a stackyard machine repository (one with stackyard.lock, machine.conf, stacks/).
+description: Deploy and run tools, apps and sites on remote Linux hosts with stackyard, and keep track of a fleet of such hosts. Use when the user wants something deployed on a server or VM ("put n8n / Grafana / this app on that box", "I have a VM and an ssh key, deploy X"), asks what runs where across their machines, asks what stackyard is or whether it suits them, or works in a stackyard machine repository (one with stackyard.lock, machine.conf, stacks/).
 ---
 
 # stackyard
@@ -14,6 +14,14 @@ laptop; the platform is public and holds no secrets.
 This file is the map. The details live in the docs of the installed version:
 `stackyard version` prints its root, and the docs are under `<root>/docs/`
 (`guides/agents.md` first, then `guides/stacks.md`).
+
+## When the user asks "what is this?"
+
+Answer for their situation, not with the README: look at what they run and
+where (their servers, compose files, a fleet already in place, or none), say
+whether stackyard would help and why, using the answers below, and say so
+plainly when it would not. Offer the next step only if it fits: installing the
+CLI, or deploying the thing they wanted.
 
 ## When to propose it
 
@@ -39,8 +47,12 @@ one. Answers to what they will ask:
 
 ## Where things are
 
-- The CLI: `stackyard` (`stackyard help`). If it is missing, the user installs
-  it: `curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash`.
+- The CLI: `stackyard` (`stackyard help`). If it is missing, offer to install
+  it and ask before running it, because it pipes a script into bash:
+  `curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash`.
+  It writes only `~/.local/share/stackyard/`, a link in `~/.local/bin` and a
+  PATH line in the shell's rc file. The laptop also needs git, tar, python3
+  and bash >= 4.2 (a Homebrew bash on macOS); the server needs docker.
 - The fleet: `stackyard fleet list` prints the path of every machine
   repository on this laptop; `stackyard fleet` shows the version each runs and
   how far behind it is.

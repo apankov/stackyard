@@ -1,0 +1,20 @@
+{
+  "name": "stackyard",
+  "version": "0.40.0",
+  "description": "Deploy tools and sites on remote Linux hosts with stackyard, and keep track of a fleet of them",
+  "author": {
+    "name": "Andrey Pankov",
+    "url": "https://github.com/apankov"
+  },
+  "homepage": "https://github.com/apankov/stackyard",
+  "repository": "https://github.com/apankov/stackyard",
+  "license": "MIT",
+  "keywords": [
+    "docker",
+    "docker-compose",
+    "self-hosting",
+    "deploy",
+    "fleet",
+    "nginx"
+  ]
+}

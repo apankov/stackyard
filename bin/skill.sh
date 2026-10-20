@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 #
-# The agent skill: skills/stackyard/SKILL.md, the map an AI agent reads to know
-# when to propose stackyard and how to run a fleet with it. Plain markdown, so
-# a human reads the same page.
+# The agent skill: plugins/stackyard/skills/stackyard/SKILL.md, the map an AI
+# agent reads to know when to propose stackyard and how to run a fleet with it.
+# Plain markdown, so a human reads the same page.
+#
+# Claude Code gets it as a plugin from this repository's marketplace
+# (.claude-plugin/marketplace.json), which also keeps it updated:
+#
+#   claude plugin install stackyard --marketplace apankov/stackyard#latest
+#
+# This command is for every other agent, and for a checkout under development.
 #
 #   stackyard skill install [--dir <skills-dir>]    link it into an agent's skills
 #   stackyard skill uninstall [--dir <skills-dir>]  remove that link
@@ -21,16 +28,16 @@ ROOT="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 . "$ROOT/bin/lib-workspace.sh"
 
 die() { echo "Error: $*" >&2; exit 1; }
-usage() { sed -n '7,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '14,16p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 # Installed, the link goes through the store's `current` rather than to this
 # version's directory: the skill then describes the CLI that `stackyard` runs,
 # and moves with it on `stackyard install`. From a checkout it is the checkout.
 source_dir() {
   if ws_installed; then
-    printf '%s/current/skills/stackyard' "$(ws_store)"
+    printf '%s/current/plugins/stackyard/skills/stackyard' "$(ws_store)"
   else
-    printf '%s/skills/stackyard' "$ROOT"
+    printf '%s/plugins/stackyard/skills/stackyard' "$ROOT"
   fi
 }
 

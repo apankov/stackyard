@@ -1,0 +1,15 @@
+{
+  "name": "stackyard",
+  "description": "stackyard: run a fleet of small docker hosts from git, safe for AI agents to operate",
+  "owner": {
+    "name": "Andrey Pankov",
+    "url": "https://github.com/apankov"
+  },
+  "plugins": [
+    {
+      "name": "stackyard",
+      "source": "./plugins/stackyard",
+      "description": "Teaches the agent when to propose stackyard, how to deploy tools and sites on remote hosts with it, and where your fleet of machines lives"
+    }
+  ]
+}

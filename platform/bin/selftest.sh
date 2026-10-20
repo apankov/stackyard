@@ -1714,6 +1714,10 @@ echo "== the operator CLI: install.sh and stackyard"
 # the previous one from a URL that names the new one.
 check "install.sh installs the release it belongs to" \
   "$(grep -E '^STACKYARD_RELEASE=' "$REPO_DIR/install.sh" | cut -d= -f2)" "v$(cat "$REPO_DIR/platform/VERSION")"
+# Claude Code updates an installed plugin only when its version changes: a
+# release that forgets this one leaves every agent on the previous skill.
+check "the Claude Code plugin's version is the release" \
+  "$(sed -n 's/^ *"version": "\(.*\)",$/\1/p' "$REPO_DIR/plugins/stackyard/.claude-plugin/plugin.json")" "$(cat "$REPO_DIR/platform/VERSION")"
 
 # A repository of THIS working tree, uncommitted edits included — the subject
 # is the code as it stands, and a mutation run edits files it never commits.
@@ -1824,12 +1828,12 @@ sk() { ( unset CLAUDE_CONFIG_DIR; sy skill "$@" ); }
 STP="$(cd -P "$ST" && pwd)"   # the store as the CLI resolves it: /private/var on macOS
 sk install >/dev/null
 check "skill install: linked into Claude Code's skills through current" \
-  "$(readlink "$H/.claude/skills/stackyard")" "$STP/current/skills/stackyard"
+  "$(readlink "$H/.claude/skills/stackyard")" "$STP/current/plugins/stackyard/skills/stackyard"
 check "skill install: the skill is readable through the link" \
   "$(sed -n 2p "$H/.claude/skills/stackyard/SKILL.md")" "name: stackyard"
 sk install --dir "$CL/agent-skills" >/dev/null
 check "skill install --dir: another agent's skills" \
-  "$(readlink "$CL/agent-skills/stackyard")" "$STP/current/skills/stackyard"
+  "$(readlink "$CL/agent-skills/stackyard")" "$STP/current/plugins/stackyard/skills/stackyard"
 sk uninstall >/dev/null
 check "skill uninstall: the link is gone" "$([ -L "$H/.claude/skills/stackyard" ] && echo there || echo gone)" "gone"
 # Someone's own skill of the same name is theirs; replacing it loses their work.
