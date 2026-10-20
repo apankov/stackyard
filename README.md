@@ -114,7 +114,7 @@ stackyard fleet add-dir ~/dev/machines     # every machine created there is in t
 stackyard skill install                    # optional: teach your AI agent the fleet
 ```
 
-`latest` is the newest release; `…/stackyard/v0.39.0/install.sh` pins one. The
+`latest` is the newest release; `…/stackyard/v0.40.0/install.sh` pins one. The
 script prints the tag and commit it installed and keeps everything in
 `~/.local/share/stackyard/`. A pipe into bash cannot be read first; to read it:
 `curl -o install.sh <url> && less install.sh && bash install.sh`.

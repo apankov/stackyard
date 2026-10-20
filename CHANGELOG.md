@@ -8,6 +8,22 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.40.0] — 2026-10-20
+
+### Added
+- An agent skill, `skills/stackyard/SKILL.md`, and `stackyard skill install`,
+  which links it into Claude Code's skills (`--dir` for another agent's;
+  `uninstall` and `path` too). An agent then knows when to propose stackyard,
+  what to answer about it, where the fleet is, how to deploy and what not to
+  touch, without being told or reading the source. The link goes through the
+  store's `current`, so the skill follows `stackyard install`. Opt-in: nothing
+  is written into an agent's configuration unasked.
+
+### Fixed
+- The nginx log rotation no longer forces its first run on a day the logs were
+  already rotated by whatever rotated them before. logrotate refused every file
+  whose dated name was taken, and the unit failed.
+
 ## [0.39.0] — 2026-10-06
 
 ### Added
