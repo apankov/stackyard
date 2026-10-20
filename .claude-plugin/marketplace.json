@@ -8,7 +8,12 @@
   "plugins": [
     {
       "name": "stackyard",
-      "source": "./plugins/stackyard",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/apankov/stackyard.git",
+        "path": "plugins/stackyard",
+        "ref": "latest"
+      },
       "description": "Teaches the agent when to propose stackyard, how to deploy tools and sites on remote hosts with it, and where your fleet of machines lives"
     }
   ]
