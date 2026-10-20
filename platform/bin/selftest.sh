@@ -1817,6 +1817,29 @@ check "versions: both installed, the current one marked" \
   "$(sy versions | awk '{ print ($1 == "*") ? "*" $2 : $1 }' | sort | tr '\n' ' ')" "*v9.9.10 v9.9.9 "
 check "a version switch leaves the rc file alone" "$(grep -c '# stackyard' "$H/.zshrc")" "1"
 
+# The agent skill is linked through `current`, so it describes the CLI that
+# runs and follows it on the next install, instead of staying at the version
+# it was installed from.
+sk() { ( unset CLAUDE_CONFIG_DIR; sy skill "$@" ); }
+STP="$(cd -P "$ST" && pwd)"   # the store as the CLI resolves it: /private/var on macOS
+sk install >/dev/null
+check "skill install: linked into Claude Code's skills through current" \
+  "$(readlink "$H/.claude/skills/stackyard")" "$STP/current/skills/stackyard"
+check "skill install: the skill is readable through the link" \
+  "$(sed -n 2p "$H/.claude/skills/stackyard/SKILL.md")" "name: stackyard"
+sk install --dir "$CL/agent-skills" >/dev/null
+check "skill install --dir: another agent's skills" \
+  "$(readlink "$CL/agent-skills/stackyard")" "$STP/current/skills/stackyard"
+sk uninstall >/dev/null
+check "skill uninstall: the link is gone" "$([ -L "$H/.claude/skills/stackyard" ] && echo there || echo gone)" "gone"
+# Someone's own skill of the same name is theirs; replacing it loses their work.
+mkdir -p "$H/.claude/skills/stackyard"; echo mine > "$H/.claude/skills/stackyard/SKILL.md"
+sk install >/dev/null 2>&1
+check "skill install refuses to replace a directory it did not make" "$?" "1"
+sk uninstall >/dev/null 2>&1
+check "and uninstall leaves it" "$(cat "$H/.claude/skills/stackyard/SKILL.md")" "mine"
+rm -rf "$H/.claude" "$CL/agent-skills"
+
 rm -rf "$H"; mkdir -p "$H"
 STACKYARD_VERSION=v9.9.9 cl_install --no-modify-path >/dev/null
 check "--no-modify-path leaves the rc file alone" "$([ -e "$H/.zshrc" ] && echo touched || echo untouched)" "untouched"

@@ -105,7 +105,9 @@ by `install.sh` into `~/.local/share/stackyard/versions/<commit>/`, a
 to the mirror `repo.git` beside it, and the fleet list is the store's `fleet`
 file — nothing of stackyard sits in `$HOME` itself): `new-machine.sh`, `pin.sh` (rewrites one machine's `stackyard.lock`;
 there is deliberately no "update everyone"), `fleet.sh`, `audit-isolation.sh`
-(looks for cross-machine leaks of secrets, buckets, networks and ACME keys) and
+(looks for cross-machine leaks of secrets, buckets, networks and ACME keys),
+`skill.sh` (links `skills/stackyard/`, the agent skill, into an agent's skills
+directory; keep it a short map that points into `docs/`) and
 `vendor.sh` (emergency self-contained copy, checked by
 `platform/bin/check-vendor.sh`).
 

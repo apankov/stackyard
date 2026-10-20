@@ -149,3 +149,4 @@ case ":$PATH:" in
     fi
     ;;
 esac
+echo "  for an AI agent: stackyard skill install"
