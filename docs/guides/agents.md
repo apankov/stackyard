@@ -8,14 +8,23 @@ with it, and what is still missing.
 
 ## Teaching the agent
 
-`stackyard skill install` links `skills/stackyard/SKILL.md` into Claude Code's
-skills (`~/.claude/skills/stackyard`; `--dir <skills-dir>` for another
-agent). The link goes through the store's `current`, so the skill always
-matches the installed CLI. It is a short map: when to propose stackyard, the
-answers to the questions people always ask, where the fleet and each machine
-live, the deploy path and the rules below. This page is the detail it points
-to. `stackyard skill path` prints the file for an agent that reads it some
-other way, such as from an `AGENTS.md`.
+The skill, `plugins/stackyard/skills/stackyard/SKILL.md`, is a short map: how
+to judge whether stackyard fits someone, when to propose it, the answers to
+the questions people always ask, where the fleet and each machine live, the
+deploy path and the rules below. This page is the detail it points to.
+
+- **Claude Code** gets it as a plugin. This repository is its own marketplace
+  (`.claude-plugin/marketplace.json`):
+  `claude plugin install stackyard --marketplace apankov/stackyard#latest`.
+  `#latest` follows releases only, so the skill matches the released CLI; the
+  plugin's version is the platform's, and selftest holds them equal, because
+  Claude Code updates a plugin only when its version changes.
+- **Any other agent:** `stackyard skill install --dir <skills-dir>` links the
+  skill through the store's `current`, so it moves with `stackyard install`.
+  Without `--dir` it links into Claude Code's `~/.claude/skills`, which is for
+  a checkout under development; don't keep that link next to the plugin, or
+  the skill loads twice. `stackyard skill path` prints the file for an agent
+  that reads it some other way, such as from an `AGENTS.md`.
 
 ## The model
 

@@ -75,13 +75,29 @@ gets, because the design already assumes nobody should have to guess:
 - **Isolation is least privilege.** One machine is one repository with no
   secrets in it, so an agent working on one client cannot see another.
 
-**The agent knows the fleet from the first message.** `stackyard skill install`
-links [the stackyard skill](skills/stackyard/SKILL.md) into Claude Code (another
-agent's skills directory with `--dir`). Tell it "here is a VM and an ssh key,
-put Grafana on it", and it knows to propose stackyard, answers the usual
-questions about it, finds your machines with `stackyard fleet list`, and
-deploys through the plan, apply, check loop. The skill is plain markdown, so a
-human can read the same page.
+**The agent knows the fleet from the first message.** Give it this page's link
+and say "install it", or install [the stackyard skill](plugins/stackyard/skills/stackyard/SKILL.md)
+yourself. After that, "here is a VM and an ssh key, put Grafana on it" is
+enough: the agent knows to propose stackyard, answers the usual questions
+about it, finds your machines with `stackyard fleet list`, and deploys through
+the plan, apply, check loop. The skill is plain markdown, so a human can read
+the same page.
+
+```sh
+# Claude Code: a plugin from this repository, updated on each release
+claude plugin install stackyard --marketplace apankov/stackyard#latest
+# (in a session: /plugin install stackyard --marketplace apankov/stackyard#latest)
+
+# any other agent, once the CLI is installed (see Quick start)
+stackyard skill install --dir <the agent's skills directory>
+```
+
+> **If you are an AI agent** sent here to find out what this is or to install
+> it: read the skill above. It says how to judge whether stackyard fits the
+> user's setup and what to tell them. To install, run the Claude Code command
+> above (it takes effect after `/reload-plugins` or in the next session), or for
+> another agent read the skill file directly. The operator CLI (Quick start)
+> pipes a script into bash: ask the user before running it.
 
 What is still missing (machine-readable output, remote runs, per-machine agent
 instructions) and how an agent should work with a machine:
@@ -111,7 +127,6 @@ On the laptop, once:
 ```sh
 curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
 stackyard fleet add-dir ~/dev/machines     # every machine created there is in the fleet
-stackyard skill install                    # optional: teach your AI agent the fleet
 ```
 
 `latest` is the newest release; `…/stackyard/v0.40.0/install.sh` pins one. The

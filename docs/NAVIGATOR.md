@@ -21,8 +21,10 @@ quick start, the commands. Then the guide for whatever you are about to do.
 - [guides/stacks.md](guides/stacks.md) — writing stacks: what a directory
   declares, every `stack.conf` key, copy or link, the database provider role,
   external certificates, foreign containers.
-- [../skills/stackyard/SKILL.md](../skills/stackyard/SKILL.md) — the agent skill
-  (`stackyard skill install`): the short map an agent loads.
+- [../plugins/stackyard/skills/stackyard/SKILL.md](../plugins/stackyard/skills/stackyard/SKILL.md)
+  — the agent skill, shipped as a Claude Code plugin from this repository's
+  marketplace or linked by `stackyard skill install`: the short map an agent
+  loads.
 - [guides/agents.md](guides/agents.md) — how an AI agent should work with a
   fleet: plan, apply, check by exit code; the rules; what is still missing.
 - [guides/isolation.md](guides/isolation.md) — what keeps clients apart,
