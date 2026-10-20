@@ -75,6 +75,14 @@ gets, because the design already assumes nobody should have to guess:
 - **Isolation is least privilege.** One machine is one repository with no
   secrets in it, so an agent working on one client cannot see another.
 
+**The agent knows the fleet from the first message.** `stackyard skill install`
+links [the stackyard skill](skills/stackyard/SKILL.md) into Claude Code (another
+agent's skills directory with `--dir`). Tell it "here is a VM and an ssh key,
+put Grafana on it", and it knows to propose stackyard, answers the usual
+questions about it, finds your machines with `stackyard fleet list`, and
+deploys through the plan, apply, check loop. The skill is plain markdown, so a
+human can read the same page.
+
 What is still missing (machine-readable output, remote runs, per-machine agent
 instructions) and how an agent should work with a machine:
 [docs/guides/agents.md](docs/guides/agents.md).
@@ -103,6 +111,7 @@ On the laptop, once:
 ```sh
 curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
 stackyard fleet add-dir ~/dev/machines     # every machine created there is in the fleet
+stackyard skill install                    # optional: teach your AI agent the fleet
 ```
 
 `latest` is the newest release; `…/stackyard/v0.39.0/install.sh` pins one. The

@@ -6,6 +6,17 @@ an exit code. That makes it a good ground for an agent that deploys, monitors
 and maintains a fleet of small hosts. This page is how an agent should work
 with it, and what is still missing.
 
+## Teaching the agent
+
+`stackyard skill install` links `skills/stackyard/SKILL.md` into Claude Code's
+skills (`~/.claude/skills/stackyard`; `--dir <skills-dir>` for another
+agent). The link goes through the store's `current`, so the skill always
+matches the installed CLI. It is a short map: when to propose stackyard, the
+answers to the questions people always ask, where the fleet and each machine
+live, the deploy path and the rules below. This page is the detail it points
+to. `stackyard skill path` prints the file for an agent that reads it some
+other way, such as from an `AGENTS.md`.
+
 ## The model
 
 Two places, never mixed up:
