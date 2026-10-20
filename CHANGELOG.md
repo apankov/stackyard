@@ -8,6 +8,24 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.41.0] — 2026-10-20
+
+### Added
+- The repository is a Claude Code plugin marketplace. The skill installs and
+  stays updated with
+  `claude plugin install stackyard --marketplace apankov/stackyard#latest`.
+  `#latest` follows releases, and the plugin's version is the platform's.
+- The skill covers someone who has not installed anything yet. Sent to this
+  repository with "what is this?", an agent judges whether stackyard fits that
+  user's setup, and before installing the CLI it asks, because the install
+  pipes a script into bash.
+
+### Changed
+- The skill moved to `plugins/stackyard/skills/stackyard/`.
+  **If you ran `stackyard skill install`:** run it again after
+  `stackyard install`, or the old link points at nothing. In Claude Code,
+  prefer the plugin: run `stackyard skill uninstall`, then install the plugin.
+
 ## [0.40.0] — 2026-10-20
 
 ### Added
