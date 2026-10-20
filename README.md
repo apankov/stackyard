@@ -7,81 +7,44 @@
 
 [![selftest](https://github.com/apankov/stackyard/actions/workflows/selftest.yml/badge.svg)](https://github.com/apankov/stackyard/actions/workflows/selftest.yml)
 
-Run several independent docker-compose projects on one host — one nginx in
-front, TLS for every domain, a shared database, backups, alerts and systemd
-timers — and keep a fleet of such hosts on known, pinned versions. Plain bash;
-the server needs nothing but docker.
+Run a fleet of small Docker hosts from git: several docker-compose projects
+per host, one nginx in front, TLS, backups and alerts. Your AI agent knows
+what runs where.
 
-- **One list decides.** `Enabled_Stacks` in a machine's `machine.conf` is the only
-  place that says what runs. Compose files, vhost includes, certificate domains,
-  systemd units and database grants are derived from it.
-- **Nothing half-enabled.** `./stack enable` starts the containers before the
-  vhost and `disable` removes the vhost first, so nginx never points at a dead
-  upstream and takes every site down with it.
-- **Pinned, one machine at a time.** A machine records the commit it runs in
-  `stackyard.lock`. Updating a client is a two-line diff in its repository, and
-  there is deliberately no "update everyone".
-- **Clients share nothing.** The platform is public and holds no secrets; each
-  machine is a private repository, and `stackyard audit` catches a key, bucket
-  or network that two of them share.
-- **Checked, not assumed.** `./stack --check` asks the running host: upstreams,
-  certificates, mounts, units, databases. The engine's own tests include a
-  mutation run and a real `nginx -t` on every commit.
+Plain bash. The server needs nothing but docker.
 
-## Who it's for
+- [How it works](#how-it-works)
+- [Install](#install)
+- [Safe to hand to an agent](#safe-to-hand-to-an-agent)
+- [By hand](#by-hand)
+- [Who it's for](#whos-it-for)
+- [Documentation](#documentation)
 
-Anyone keeping several small hosts, each running a handful of unrelated
-projects: client sites and APIs on a VPS per client, a pile of side projects,
-a team's internal tools (n8n, Metabase, Grafana, an admin panel), staging and
-demo environments that come and go, an isolated installation per customer —
-and, increasingly, the many small apps that AI agents build and that need
-somewhere safe and cheap to live.
+## How it works
 
-The pains it removes are the silent ones, because a fleet's state lives in
-someone's head and in hand edits on the servers:
+You have a fresh VM and an ssh key. You tell your agent: "put Onyx on this
+box, at chat.example.com".
 
-- a certificate expires while its renewal timer stays green → `Certs="external"`
-  for names terminated elsewhere, and `check-certs.sh` for the rest;
-- switching one project off takes every site on the host down with it, because
-  its vhost still points at the removed container → `./stack disable` removes
-  the vhost first, `--check` verifies every upstream;
-- a fix reaches some hosts and not others, and a month later nobody knows which
-  → one pinned commit per machine, `stackyard fleet` shows who is behind;
-- a new host is built from a neighbour's `.env`, and two clients now share a
-  backup bucket, an alert chat and an ACME key → `stackyard audit`;
-- backups stop without a word, a 1 GB host is killed by OOM → `check-backups.sh`
-  and `watch-host` alert, `./memory` shows what each project costs.
+The agent doesn't start typing `docker run`. It proposes stackyard, says what
+you get from it, and asks the few things it can't know.
 
-Not for you if you need high availability or a cluster (Kubernetes, Nomad), a
-`git push` deploy (Dokku, Kamal) or a web UI (Coolify, CapRover), or if one
-host with one compose project is all there is.
+It creates a repository for the machine on your laptop. One file in it lists
+what runs on the box. One directory per project describes it: the compose
+file, the vhost, the certificate. Secrets stay on the server.
 
-## Built for agents
+On the server it pulls that repository and goes through the loop every change
+goes through: plan, apply, check. `./stack --check` asks the live host about
+upstreams, certificates, containers and timers, and answers with an exit code.
 
-An AI agent can run a stackyard fleet with the same guarantees a careful human
-gets, because the design already assumes nobody should have to guess:
+Before it stops, it writes down what the code doesn't say: how to reach the
+box, where the machine is deployed, why Onyx runs in its Lite mode on a VM
+this size.
 
-- **The whole state is text in git.** A machine is `stack.conf`, `machine.conf`
-  and `stackyard.lock`: no control plane, no UI, no API token to a panel. Every
-  change an agent makes is a diff a human can read before it is pushed.
-- **Commands reconcile, and are safe to repeat.** `enable`, `disable`, `sync`
-  and `init` bring the host in line with the manifest; the ones that change it
-  take `--dry-run`.
-- **Outcomes are checked by exit code**, one `[ok]` / `[!]` / `[FAIL]` line per
-  finding, and failures name the command that fixes them.
-- **Mistakes stay small.** Data and databases are never dropped, `purge` asks for
-  the stack's name, `nginx -t` runs before every reload, there is no "update
-  everyone", and a rollback is one command.
-- **Isolation is least privilege.** One machine is one repository with no
-  secrets in it, so an agent working on one client cannot see another.
+A week later, another agent, or you, opens that repository and knows what runs
+there, how to reach it and how to change it. Five machines later,
+`stackyard fleet` lists them all and shows which are behind on updates.
 
-**The agent knows the fleet from the first message.** Give it this page's link
-and say "install it", or install [the stackyard skill](plugins/stackyard/skills/stackyard/SKILL.md)
-yourself. After that, "here is a VM and an ssh key, put Grafana on it" is
-enough: the agent knows to propose stackyard, answers the usual questions
-about it, finds your machines with `stackyard fleet list`, and deploys through
-the plan, apply, check loop. The skill is plain markdown, so a human can read
-the same page.
+## Install
 
 In Claude Code, type in a session:
 
@@ -90,24 +53,66 @@ In Claude Code, type in a session:
 /plugin install stackyard@stackyard
 ```
 
-From a shell, the same is one command:
-`claude plugin install stackyard --marketplace apankov/stackyard`. The plugin
-comes from the newest release, and `/plugin marketplace update stackyard`
-brings the next one. For any other agent, once the CLI is installed (Quick
-start): `stackyard skill install --dir <the agent's skills directory>`.
+That is the skill: your agent now knows when to propose stackyard and how to
+run it. When it first needs the stackyard CLI, it asks you and installs it.
 
-> **If you are an AI agent** sent here to find out what this is or to install
-> it: read the skill above. It says how to judge whether stackyard fits the
-> user's setup and what to tell them. To install, run the shell command
-> above (it takes effect after `/reload-plugins` or in the next session), or for
-> another agent read the skill file directly. The operator CLI (Quick start)
-> pipes a script into bash: ask the user before running it.
+Another agent, or no agent at all: install the CLI, then link the skill into
+your agent's skills directory.
 
-What is still missing (machine-readable output, remote runs, per-machine agent
-instructions) and how an agent should work with a machine:
-[docs/guides/agents.md](docs/guides/agents.md).
+```sh
+curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
+stackyard skill install --dir <your agent's skills directory>
+```
 
-## How it fits together
+`latest` is the newest release; `…/stackyard/v0.41.0/install.sh` pins one. To
+read the script before it runs:
+`curl -o install.sh <url> && less install.sh && bash install.sh`.
+
+> **If you are an AI agent** sent here to find out what this is, or to install
+> it: read [the skill](plugins/stackyard/skills/stackyard/SKILL.md). It says
+> how to judge whether stackyard fits the user's setup. To install it, run
+> `claude plugin install stackyard --marketplace apankov/stackyard`; it loads
+> after `/reload-plugins` or in the next session. The CLI install pipes a
+> script into bash: ask the user first.
+
+## Safe to hand to an agent
+
+- **The state is text in git.** Every change is a diff you can read before it
+  is pushed.
+- **Commands reconcile.** Running one twice is safe, and the ones that change
+  things take `--dry-run`.
+- **Checks answer with exit codes.** A failure names the command that fixes it.
+- **Mistakes stay small.** Data is never dropped, `nginx -t` runs before every
+  reload, and there is no "update everyone".
+- **One machine, one repository, no secrets in it.** An agent working for one
+  client cannot see another.
+
+More: [why stackyard](docs/guides/why-stackyard.md) and
+[how an agent works with a fleet](docs/guides/agents.md).
+
+## By hand
+
+Everything the agent does, you can do yourself. On the laptop:
+
+```sh
+stackyard new ~/dev/machines/acme        # a machine: its own git repository
+cd ~/dev/machines/acme && ./bootstrap
+# describe a project in stacks/site/, then:
+./stack enable site --manifest-only      # add it to machine.conf
+git add -A && git commit -m site && git push
+```
+
+On the server:
+
+```sh
+git clone <the machine's repository> /mnt/data/acme && cd /mnt/data/acme
+./bootstrap && ./stack init              # fill in the secrets it names
+sudo ./host-setup && ./stack sync && ./stack --check
+```
+
+The full walkthrough, with updates, rollbacks and the everyday commands, is in
+[running a machine](docs/guides/machine.md). How to describe a project is in
+[writing stacks](docs/guides/stacks.md).
 
 ```
 laptop                               GitHub                      server
@@ -118,144 +123,30 @@ stackyard CLI                        apankov/stackyard  ──────▶  /
 ~/dev/machines/acme/ ────── push ──▶                                stacks/  .env*  state/
 ```
 
-| Layer | What it is | Where it lives |
-|---|---|---|
-| `platform/` | the engine: stacks, dependencies, nginx, TLS, backups, systemd. Knows no machine, no DBMS, no secret | this repository |
-| `profiles/` | reusable stacks: `mysql`, `pg`, `redis`, `php-fpm` | this repository |
-| machine | its own stacks, `.env` files, generated state | a private repository per host |
+## Who it's for
 
-## Quick start
+Anyone with several small hosts, each running a handful of unrelated projects:
+client sites and APIs, internal tools like n8n, Metabase or Grafana, staging
+and demo environments, and the small apps AI agents build.
 
-On the laptop, once:
-
-```sh
-curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh | bash
-stackyard fleet add-dir ~/dev/machines     # every machine created there is in the fleet
-```
-
-`latest` is the newest release; `…/stackyard/v0.41.0/install.sh` pins one. The
-script prints the tag and commit it installed and keeps everything in
-`~/.local/share/stackyard/`. A pipe into bash cannot be read first; to read it:
-`curl -o install.sh <url> && less install.sh && bash install.sh`.
-
-A new machine:
-
-```sh
-stackyard new ~/dev/machines/acme          # skeleton, pinned to the CLI's commit; a git repository
-cd ~/dev/machines/acme
-./bootstrap                                # the pinned platform here too, for ./stack on the laptop
-$EDITOR .env.example                       # paths, network (no secrets: this is committed)
-# describe your own stacks in stacks/, then list what runs:
-./stack enable site --manifest-only        # writes machine.conf: site, and mysql and php-fpm it requires
-git add -A && git commit -m acme && git push   # to a private repository
-```
-
-The secrets are never on the laptop: `.env.example` and `machine.conf` are
-committed, and the real `.env` files are made on the server.
-
-On the server:
-
-```sh
-git clone <the machine's repository> /mnt/data/acme && cd /mnt/data/acme
-./bootstrap                        # the platform, at the commit in stackyard.lock
-./stack init                       # .env files for what machine.conf lists; rerun until it passes
-$EDITOR .env stacks/*/.env         # the secrets, here and only here
-sudo ./host-setup                  # packages, placeholder certificates, timers
-./stack sync                       # start what machine.conf lists, nginx last
-./stack --check
-```
-
-Changing what runs is a commit: `./stack enable|disable <stack> --manifest-only`
-on the laptop (or an edit of `machine.conf`), push, and on the server
-`git pull && ./stack sync --dry-run && ./stack sync`. `sync` starts what the
-manifest lists and reports, without stopping it, what it no longer lists.
-
-Updating a machine:
-
-```sh
-stackyard install latest                   # the CLI itself; older versions stay installed
-stackyard pin ~/dev/machines/acme          # shows the platform diff, rewrites the lock
-git -C ~/dev/machines/acme commit -am "platform <tag>" && git -C ~/dev/machines/acme push
-# on the server: git pull && ./bootstrap && ./stack sync && ./stack --check
-stackyard fleet                            # who runs what, and how far behind
-```
-
-Rolling back is `stackyard pin <machine> --version <tag>`; to the version the
-machine ran just before, `./bootstrap` switches back without a download.
-
-## A stack is a directory
-
-```
-stacks/site/
-  stack.conf                  what the stack is and needs
-  .env.example                its variables; ./stack init makes .env from it
-  compose.yaml                its containers (none here: Containers="no")
-  nginx/01-app.example.com.conf
-```
-
-```sh
-# stacks/site/stack.conf
-Requires="mysql php-fpm"
-Domains="app.example.com"
-Containers="no"
-Mysql_DB="${Site_DB_Name}"
-Mysql_User="${Site_DB_User}"
-Mysql_Password="${Site_DB_Password}"
-Mysql_Grants="SELECT,INSERT,UPDATE,DELETE"
-```
-
-This site runs on the shared nginx and php-fpm, and its database is created in
-the shared MySQL by the provider. The engine knows the provider only as a
-role: a Postgres machine enables `pg` instead, and nothing in the platform
-changes. Subdirectories are declarations too — `systemd/` installs units,
-`scripts/health.sh` answers `--check`. Every key and why each one is explicit:
-[docs/guides/stacks.md](docs/guides/stacks.md).
-
-## On a machine
-
-```sh
-./stack list           # what is enabled and what is actually alive
-./stack --check        # declarations, domains, databases, upstreams, vhosts, units
-./stack sync           # apply machine.conf: start what it lists, rebuild vhosts (nginx -t, then reload),
-                       # issue certificates for domains still on a placeholder (--no-issue skips that)
-./stack enable <stack> # add to machine.conf and bring up: containers first, then the vhost
-./stack disable <stack> # remove from machine.conf: the vhost first, then the containers; data stays
-./stack init           # missing .env files from their examples; names what is still CHANGE_ME
-./dc <compose args>    # the only path to docker compose
-sudo ./host-setup      # packages, certificate placeholders, timers, stack host parts
-./certs --issue        # the same issuance by hand; Let's Encrypt is asked only once
-                       # http://<name>/.well-known/acme-challenge/ reaches this machine
-./memory               # where the memory went: by container, by stack, by role
-```
-
-Also on board: `backup.sh` (databases and declared files → GPG → S3, with
-`check-backups.sh` watching freshness), `watch-host.sh` and `notify.sh` (disk,
-containers and failed units → Telegram), `registry.sh` (logins, and moving
-tags pinned to digests), getssl renewals on a timer, and a nightly rotation of
-the nginx logs (`Platform_Nginx_Log_Days`, 14 by default) with its own check.
-
-## Requirements
-
-- **Server:** Linux with systemd, docker with the compose plugin, bash ≥ 4.2.
-  `host-setup` installs the rest (openssl, gnupg, sqlite, logrotate, …) with
-  apt, dnf, yum, apk or zypper.
-- **Laptop:** macOS or Linux, git, tar, python3, and bash ≥ 4.2 — on macOS that
-  means a Homebrew bash; `/bin/bash` 3.2 is refused.
+Not for you if you need high availability or a cluster, a `git push` deploy
+(Dokku, Kamal), a web UI (Coolify, CapRover), or if one host with one compose
+project is all there is.
 
 ## Documentation
 
-- [docs/guides/stacks.md](docs/guides/stacks.md) — writing stacks: every
-  `stack.conf` key, copy or link, database providers, external certificates.
-- [docs/architecture/platform-delivery.md](docs/architecture/platform-delivery.md)
-  — the lock, `bootstrap`, versions side by side, rollback, offline and
-  vendored installs.
-- [docs/guides/agents.md](docs/guides/agents.md) — working with a fleet as an
-  AI agent: the check loop, the rules, the gaps.
-- [docs/guides/isolation.md](docs/guides/isolation.md) — what keeps clients
-  apart, `audit`, machine state, pinned getssl.
-- [SECURITY.md](SECURITY.md) — the threat model (what is isolated and what is
-  not), and how to report a vulnerability.
-- [docs/NAVIGATOR.md](docs/NAVIGATOR.md) — everything else: decisions, plans.
+- [Why stackyard](docs/guides/why-stackyard.md): what it promises, the
+  failures it prevents, when to use something else.
+- [Running a machine](docs/guides/machine.md): from a new machine to updates,
+  the everyday commands, requirements.
+- [Writing stacks](docs/guides/stacks.md): every `stack.conf` key, database
+  providers, certificates.
+- [Agents](docs/guides/agents.md): the check loop, the rules, the gaps.
+- [Isolation](docs/guides/isolation.md): what keeps clients apart.
+- [Platform delivery](docs/architecture/platform-delivery.md): the lock,
+  `bootstrap`, versions, rollback.
+- [SECURITY.md](SECURITY.md): the threat model. Everything else is in
+  [docs/NAVIGATOR.md](docs/NAVIGATOR.md).
 
 ## Development
 
@@ -264,10 +155,7 @@ the nginx logs (`Platform_Nginx_Log_Days`, 14 by default) with its own check.
 ./tests/mutate.sh            # breaks the engine one mutation at a time; each must be caught
 ```
 
-Releases follow semver: every change to the platform is a tagged release, and
-the `latest` branch follows the newest tag. The fixtures in `tests/machines/`
-are synthetic, `alpha` on MySQL and `beta` on Postgres: the platform counts as
-shared only while both run on it unchanged. How to contribute, and what a
-change is expected to carry: [CONTRIBUTING.md](CONTRIBUTING.md).
+Every change to the platform is a tagged release, and `latest` follows the
+newest tag. How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 MIT licensed.

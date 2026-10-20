@@ -1,12 +1,13 @@
 # Documentation navigator
 
-Reading order for someone new: [README.md](../README.md) — what this is, the
-quick start, the commands. Then the guide for whatever you are about to do.
+Reading order for someone new: [README.md](../README.md) — what this is and
+how to start. Then the guide for whatever you are about to do.
 
 ## Root
 
-- [README.md](../README.md) — what stackyard is, how the pieces fit, installing
-  the CLI, deploying and updating a machine, requirements.
+- [README.md](../README.md) — the front page: what stackyard is, the story of
+  an agent deploying with it, installing the skill and the CLI, the short
+  by-hand path.
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — how to report, suggest and
   contribute; the tests and conventions a change is expected to pass.
@@ -18,6 +19,12 @@ quick start, the commands. Then the guide for whatever you are about to do.
 
 ## Guides
 
+- [guides/why-stackyard.md](guides/why-stackyard.md) — what it promises, the
+  failures it prevents, who it is for, when to use something else. What an
+  agent reads when asked whether stackyard fits.
+- [guides/machine.md](guides/machine.md) — running a machine by hand: the
+  layers, a new machine, the first deploy, changing what runs, updating and
+  rolling back, the everyday commands, requirements.
 - [guides/stacks.md](guides/stacks.md) — writing stacks: what a directory
   declares, every `stack.conf` key, copy or link, the database provider role,
   external certificates, foreign containers.

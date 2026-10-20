@@ -24,6 +24,31 @@ Its subdirectories are declarations too:
 | `scripts/backup-dump.sh` | a provider's dump hook, used by `backup.sh` |
 | `.env.example` | the stack's variables; `./stack init` makes `stacks/<name>/.env` from it |
 
+A site on the shared nginx and php-fpm, with its database in the shared MySQL:
+
+```
+stacks/site/
+  stack.conf                  what the stack is and needs
+  .env.example                its variables; ./stack init makes .env from it
+  compose.yaml                its containers (none here: Containers="no")
+  nginx/01-app.example.com.conf
+```
+
+```sh
+# stacks/site/stack.conf
+Requires="mysql php-fpm"
+Domains="app.example.com"
+Containers="no"
+Mysql_DB="${Site_DB_Name}"
+Mysql_User="${Site_DB_User}"
+Mysql_Password="${Site_DB_Password}"
+Mysql_Grants="SELECT,INSERT,UPDATE,DELETE"
+```
+
+The database is created by the provider. The engine knows the provider only
+as a role: a Postgres machine enables `pg` instead, and nothing in the
+platform changes.
+
 Everything runs through the machine's `./dc`, and the composition is one
 `Enabled_Stacks` line in its `machine.conf`. Compose files, vhost includes,
 certificate domains, systemd units and database orders all follow from that

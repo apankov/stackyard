@@ -24,6 +24,9 @@ shellcheck -S warning platform/bin/*.sh platform/lib/*.sh bin/*.sh bin/stackyard
 CI runs the same on Ubuntu with docker, plus a live Postgres for the database
 initializers (`STACKYARD_LIVE_DB=1`).
 
+The fixtures in `tests/machines/` are synthetic, `alpha` on MySQL and `beta` on
+Postgres: the platform counts as shared only while both run on it unchanged.
+
 What a change is expected to carry:
 
 - **A fix comes with a selftest check that fails without it.** If the bug is
