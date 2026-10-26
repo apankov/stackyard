@@ -1394,7 +1394,7 @@ check_limit_zones() {
 # machine that overrides the image, a second copy would mean the password file
 # is prepared by a DIFFERENT nginx from the one that later reads it — and file
 # ownership depends on the image.
-nginx_image() { env_get Platform_Nginx_Image "nginx:1.30-alpine"; }
+nginx_image() { env_get Platform_Nginx_Image "nginx:1.30.6-alpine"; }
 
 # check_vhost_dir <directory>
 #

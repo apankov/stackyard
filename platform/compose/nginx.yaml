@@ -1,6 +1,11 @@
 services:
   nginx:
-    image: ${Platform_Nginx_Image:-nginx:1.30-alpine}
+    # A patch release, not the floating 1.30: a floating tag runs whatever was
+    # last pulled, so two machines on one platform version can run different
+    # nginx, and a security release reaches a machine only by chance. Raising
+    # it recreates nginx -- see `stack --check`, "Upstreams of the enabled
+    # vhosts", before `up -d`.
+    image: ${Platform_Nginx_Image:-nginx:1.30.6-alpine}
     container_name: nginx
     restart: always
     # The platform's directories are LINKED into /etc/nginx at start rather
