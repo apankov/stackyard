@@ -1325,6 +1325,13 @@ ENV_VARS=(); ENV_VARS[Platform_Nginx_Image]='nginx:1.19-alpine'
 check "an old nginx image is reported" "$(check_nginx_image | grep -c 'older than 1.25.1')" "1"
 ENV_VARS[Platform_Nginx_Image]='nginx:1.25.1-alpine'
 check "1.25.1 raises nothing" "$(check_nginx_image)" ""
+check "nginx 1.30.5 is reported as unpatched" "$(nginx_version_unpatched 1.30.5 | grep -c 'security fixes missing')" "1"
+check "nginx 1.31.6 is reported as unpatched" "$(nginx_version_unpatched 1.31.6 | grep -c 'security fixes missing')" "1"
+check "nginx 1.29.8 is reported as unpatched" "$(nginx_version_unpatched 1.29.8 | grep -c 'security fixes missing')" "1"
+check "nginx 1.30.6 raises nothing" "$(nginx_version_unpatched 1.30.6)" ""
+check "nginx 1.31.7 raises nothing" "$(nginx_version_unpatched 1.31.7)" ""
+check "nginx 1.32.0 raises nothing" "$(nginx_version_unpatched 1.32.0)" ""
+check "an unreadable nginx version is reported" "$(nginx_version_unpatched '' | grep -c 'cannot read')" "1"
 ENV_VARS=()
 
 echo "== the include file: generator vs reader"

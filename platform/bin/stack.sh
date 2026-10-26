@@ -1154,6 +1154,12 @@ verb_check() {
   img_problem="$(check_nginx_image)"
   if [ -n "$img_problem" ]; then bad "$img_problem"; else ok "the image supports the platform's directives"; fi
 
+  if nginx_running; then
+    live_v="$(docker exec nginx nginx -v 2>&1 | sed -n 's|^nginx version: nginx/||p')"
+    v_problem="$(nginx_version_unpatched "$live_v")"
+    if [ -n "$v_problem" ]; then bad "$v_problem"; else ok "running nginx $live_v has the published security fixes"; fi
+  fi
+
   zone_problem="$(check_limit_zones)"
   if [ -n "$zone_problem" ]; then
     printf '%s\n' "$zone_problem" | while IFS= read -r l; do [ -n "$l" ] && bad "$l"; done

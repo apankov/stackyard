@@ -1449,6 +1449,34 @@ check_nginx_image() {
   esac
 }
 
+# nginx_version_unpatched <version>
+#
+# The floors are the fixed releases of the latest nginx.org security advisories
+# (2026-10: CVE-2026-15176, -93479, -95101, -97629, -97205; earlier ones are
+# fixed below them): 1.30.6 on stable, 1.31.7 on mainline. Raise them with the
+# next advisory, together with the default in nginx_image.
+#
+# The version is the running process's, not the image tag's: a floating tag, a
+# machine's own Platform_Nginx_Image and a container never recreated after a
+# pull all leave a correct-looking spec in front of an old binary.
+#
+# Prints one line when the version is below its branch's floor, nothing
+# otherwise.
+nginx_version_unpatched() {
+  local v="${1-}" major minor patch floor
+  case "$v" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) printf 'cannot read the running nginx version (%s) -- check by hand that it is 1.30.6+ or 1.31.7+\n' "$v"; return 0 ;;
+  esac
+  major="${v%%.*}"; minor="${v#*.}"; patch="${minor#*.}"; minor="${minor%%.*}"; patch="${patch%%[!0-9]*}"
+  [ "$major" -gt 1 ] && return 0
+  [ "$major" -eq 1 ] && [ "$minor" -gt 31 ] && return 0
+  case "$minor" in 30) floor=6 ;; 31) floor=7 ;; *) floor="" ;; esac
+  if [ -z "$floor" ] || [ "$patch" -lt "$floor" ]; then
+    printf 'running nginx %s has known security fixes missing (need 1.30.6+ or 1.31.7+, see nginx.org/en/security_advisories.html) -- raise the image and recreate nginx\n' "$v"
+  fi
+}
+
 # -------------------------------------------- the live nginx vs its spec
 
 # "source<TAB>target" for every bind mount in a `docker compose config` render.
