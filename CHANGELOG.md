@@ -8,6 +8,25 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.43.0] — 2026-10-26
+
+### Security
+- The nginx image is pinned to `nginx:1.30.6-alpine` instead of the floating
+  `nginx:1.30-alpine`. 1.30.6 carries the fixes for the October 2026 nginx.org
+  advisories (CVE-2026-15176, -93479, -95101, -97629, -97205) and the earlier
+  ones, among them the major CVE-2026-42533 in `map` with a regex, which a
+  machine's login rate limit typically uses. The floating tag ran whatever a
+  machine had last pulled.
+
+  **After pinning:** the spec of nginx changes, so the next `./dc up -d`
+  recreates it. Run `./stack --check` first and make sure "Upstreams of the
+  enabled vhosts" is clean: nginx resolves every upstream when it starts. A
+  machine that sets its own `Platform_Nginx_Image` keeps it; raise it there.
+
+### Added
+- `./stack --check` asks the running nginx for its version and fails below
+  1.30.6 (stable) or 1.31.7 (mainline), whatever the image tag says.
+
 ## [0.42.0] — 2026-10-26
 
 ### Security
