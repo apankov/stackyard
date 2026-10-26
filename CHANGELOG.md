@@ -8,6 +8,29 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.42.0] — 2026-10-26
+
+### Security
+- The `php-fpm` profile (profiles 0.1.3) sets
+  `session.upload_progress.enabled = Off`. CVE-2026-109618 and CVE-2026-109619
+  are unauthenticated remote code execution in every PHP since 5.4, exploited
+  in the wild since 2026-10-17, and the known full exploit chain runs through
+  the upload-progress tracker. The 5.x branch gets no fix, so for this image the
+  setting is the remedy.
+
+  **After pinning:** the setting is baked into the image, so the container
+  must be rebuilt, not just restarted: `./dc up -d --build php-fpm`. A site
+  that shows an upload progress bar fed from `$_SESSION` loses it.
+
+### Added
+- `php-fpm` has a `scripts/health.sh`: `./stack --check` asks the running
+  container whether upload progress is off and fails while it is on, so a
+  correct file behind a container that was never rebuilt does not pass.
+
+### Fixed
+- The plugin is fetched from the `latest` branch, so the skill is always a
+  released one.
+
 ## [0.41.0] — 2026-10-20
 
 ### Added

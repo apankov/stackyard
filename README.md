@@ -64,7 +64,7 @@ curl -o- https://raw.githubusercontent.com/apankov/stackyard/latest/install.sh |
 stackyard skill install --dir <your agent's skills directory>
 ```
 
-`latest` is the newest release; `…/stackyard/v0.41.0/install.sh` pins one. To
+`latest` is the newest release; `…/stackyard/v0.42.0/install.sh` pins one. To
 read the script before it runs:
 `curl -o install.sh <url> && less install.sh && bash install.sh`.
 
