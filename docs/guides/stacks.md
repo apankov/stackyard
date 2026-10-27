@@ -73,6 +73,7 @@ copies. The file is parsed line by line and never sourced.
 | `<Prefix>_DB`, `_User`, `_Password` | `Mysql_DB="${Site_DB_Name}"` | a database order from a consumer |
 | `<Prefix>_Grants` and others | `Mysql_Grants="SELECT,INSERT"` | provider-specific; validated by the provider's `check-decl.sh` |
 | `Backup_Sqlite`, `Backup_Files`, `Backup_Volume` | `"${App_Dir}/db.sqlite"` | what `backup.sh` takes from this stack besides its databases; all `Backup_Files` paths of a stack go into one archive, each under its base name, so two paths with the same base name are refused |
+| `Access_Export` | `"yes"` | export this stack's access logs every night, anonymised, and keep them; see below |
 | `Image_Tag` | `"registry.example.com/app:main"` | the moving tag `./registry pin <stack>` resolves to a digest |
 
 ## The profile's stacks
@@ -235,3 +236,40 @@ Then those containers are watched while the stack is enabled, and
 `./stack --check` fails when none of them is running. Without the line, a
 machine whose whole point is that application would raise no alert when it
 crash-loops.
+
+## Keeping the access logs as numbers
+
+The platform keeps nginx's access logs `Platform_Nginx_Log_Days` (14 by
+default) and no longer: they hold the IP of every visitor. A stack whose
+owner wants to know, a year later, how many came, from where and how often,
+asks for an export:
+
+```sh
+# stacks/site/stack.conf
+Access_Export="yes"
+```
+
+Every night `devbox-access-export.timer` runs `platform/bin/access-export.sh`,
+which writes each finished day of each of the stack's domains to
+`state/access-export/<stack>/<domain>/<YYYY-MM-DD>.tsv.gz`, once:
+
+- the IP becomes a client hash, SHA-256 of a per-machine salt and the address.
+  The salt lives in `/var/lib/devbox-access-export`, root's alone and in no
+  backup, so a client is the same client on every day while the files alone
+  do not lead back to an address. `sudo ./platform/bin/access-export.sh --hash
+  <IP>` gives an address's hash, to tell your own visits apart;
+- the country and the network (AS) are looked up on the machine first, in
+  [DB-IP](https://db-ip.com)'s free databases (CC BY 4.0), fetched monthly;
+- query strings go, and so does any long token in a path.
+
+The directory's `FORMAT` names the columns. The exports are kept for good and
+backed up as an archive of their own, `files/<stack>-access-export`. Only
+`yes` and `no` are values: `Access_Export="Yes"` fails `host-setup` instead of
+quietly exporting nothing. The vhost must log to
+`/var/log/nginx/<domain>-access`, as the rotation expects.
+
+A new salt (a rebuilt machine) starts new clients: the hashes before and after
+cannot be matched. Whether keeping these files needs a word in a site's
+privacy note is the site owner's call: they are pseudonymous while the salt
+exists, not anonymous.
+

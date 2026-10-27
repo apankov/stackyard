@@ -196,6 +196,8 @@ MUTATIONS=(
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
   'nginx logs: the live file not counted against the retention@@platform/bin/nginx-logrotate.sh@@s#@ROTATE@#$((DAYS - 1))#g@@s#@ROTATE@#${DAYS}#g'
   'nginx logs: compressed generations escape the check@@platform/bin/check-nginx-logs.sh@@\( -name "$GEN" -o -name "$GEN.gz" \) "$@"@@-name "$GEN" "$@"'
+  'access export: the oldest day, maybe cut by the rotation, is exported as whole@@platform/bin/access-export.sh@@      [ "$day" = "$oldest" ] && continue@@      :'
+  'access export: the query string is kept@@platform/bin/access-export.sh@@      sub(/[?#].*/, "", path)@@      :'
 )
 
 # The baseline first: the selftest must pass on an UNMUTATED copy made the way

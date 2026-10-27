@@ -366,6 +366,26 @@ fi
 UNITS+=("${NGINX_LOGS_UNITS[@]}")
 TIMERS+=(devbox-nginx-logrotate.timer devbox-nginx-logrotate-check.timer)
 
+# 2f. The access-log export: only while some enabled stack declares
+#     Access_Export="yes" (access-export.sh). A value that is neither yes nor
+#     no fails the run like a broken retention, with the units installed for
+#     the stacks that are right: the stack with the typo asked for its
+#     numbers, and finding out a month later means the days are gone.
+ACCESS_EXPORT_UNITS=(devbox-access-export.service devbox-access-export.timer)
+ACCESS_EXPORT_STACKS="$(stacks_access_export | tr '\n' ' ')"
+ACCESS_EXPORT_BROKEN=""
+invalid="$(stacks_access_export_invalid | tr '\n' ' ')"
+if [ -n "$invalid" ]; then
+  ACCESS_EXPORT_BROKEN="Access_Export must be yes or no: ${invalid% }"
+  [ "$CHECK" -eq 1 ] && problem "access-log export — $ACCESS_EXPORT_BROKEN"
+fi
+INSTALL_ACCESS_EXPORT=0
+if [ -n "$ACCESS_EXPORT_STACKS" ]; then
+  INSTALL_ACCESS_EXPORT=1
+  UNITS+=("${ACCESS_EXPORT_UNITS[@]}")
+  TIMERS+=(devbox-access-export.timer)
+fi
+
 if [ "$CHECK" -eq 1 ]; then
   echo "** Checking the units in $UNIT_DST against what would be installed"
 else
@@ -385,6 +405,9 @@ if [ "$INSTALL_NOTIFY" -eq 1 ]; then
   echo "   notify:     chat $NOTIFY_CHAT"
 fi
 [ -z "$NGINX_LOGS_BROKEN" ] && echo "   nginx logs: kept ${NGINX_LOG_DAYS} days"
+if [ "$INSTALL_ACCESS_EXPORT" -eq 1 ]; then
+  echo "   access export: ${ACCESS_EXPORT_STACKS% }"
+fi
 
 # 3. Path substitution. systemd units support no variables and require absolute
 #    paths, so in the repository they are templates carrying @DEPLOY_DIR@.
@@ -554,6 +577,21 @@ if [ "$INSTALL_BACKUP" -eq 0 ] && [ "$BACKUP_BROKEN" -eq 0 ]; then
 fi
 [ "$BACKUP_BROKEN" -eq 1 ] && EXPECTED_UNITS="$EXPECTED_UNITS${BACKUP_UNITS[*]} "
 
+# 4e. Removing the access-export units when no enabled stack exports. The
+# exports already made stay in state/access-export: they are kept for good.
+if [ "$INSTALL_ACCESS_EXPORT" -eq 0 ]; then
+  for name in "${ACCESS_EXPORT_UNITS[@]}"; do
+    [ -f "$UNIT_DST/$name" ] || continue
+    if [ "$CHECK" -eq 1 ]; then
+      problem "$name is installed, but no enabled stack has Access_Export=\"yes\" — sudo $0 removes it"
+      continue
+    fi
+    systemctl disable --now "$name" >/dev/null 2>&1 || true
+    rm -f "$UNIT_DST/$name"
+    echo "    removed $name (no enabled stack has Access_Export=\"yes\")"
+  done
+fi
+
 # 6. --check only: what the installed units would actually run. A unit whose
 # ExecStart names a file that is not there fails with 203/EXEC the moment it
 # fires, and nothing before that moment shows it. And a devbox-* or getssl-*
@@ -602,6 +640,13 @@ if [ -z "$NGINX_LOGS_BROKEN" ] && [ ! -f "$NGINX_LOGROTATE_DIR/state" ]; then
   echo "    first nginx log rotation started (devbox-nginx-logrotate.service)"
   systemctl start --no-block devbox-nginx-logrotate.service
 fi
+# The first export now, for the same reason: the days the logs already hold
+# are exported while they are still there, and backup.sh has a directory to
+# keep from tonight on.
+if [ "$INSTALL_ACCESS_EXPORT" -eq 1 ] && [ ! -s "$ACCESS_EXPORT_STATE_DIR/salt" ]; then
+  echo "    first access-log export started (devbox-access-export.service)"
+  systemctl start --no-block devbox-access-export.service
+fi
 
 echo
 echo "Done. Schedule:"
@@ -623,6 +668,9 @@ if [ "$INSTALL_BACKUP" -eq 1 ]; then
 fi
 echo "  sudo $Platform_Deploy_Dir/platform/bin/nginx-logrotate.sh -d   # the rotation plan, no changes"
 echo "  $Platform_Deploy_Dir/platform/bin/check-nginx-logs.sh"
+if [ "$INSTALL_ACCESS_EXPORT" -eq 1 ]; then
+  echo "  $Platform_Deploy_Dir/platform/bin/access-export.sh --dry-run   # the days still to export"
+fi
 
 # Last, after everything else was installed: a broken backup config must not
 # cost the machine its certificate renewals, and must not pass for success.
@@ -636,6 +684,11 @@ fi
 if [ -n "$NGINX_LOGS_BROKEN" ]; then
   echo >&2
   echo "FAILED: nginx log rotation — $NGINX_LOGS_BROKEN" >&2
+  FAILED=1
+fi
+if [ -n "$ACCESS_EXPORT_BROKEN" ]; then
+  echo >&2
+  echo "FAILED: access-log export — $ACCESS_EXPORT_BROKEN" >&2
   FAILED=1
 fi
 exit "$FAILED"

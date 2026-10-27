@@ -1537,3 +1537,44 @@ stack_units_installed() {
 # vhosts, units or logrotate.
 stack_health_script() { printf '%s/scripts/health.sh' "$(stack_dir "$1")"; }
 
+
+# --------------------------------------------------- access-log export
+#
+# Access_Export="yes" in a stack's stack.conf: every night access-export.sh
+# turns the finished days of its vhosts' access logs into anonymised files
+# under state/access-export/<stack>/, kept for good and backed up. Per stack
+# rather than per machine: the logs are visitors' data, and a machine runs
+# sites whose owners want the numbers next to sites whose owners do not.
+#
+# Only yes and no. Anything else — "Yes", "true", a typo — is an error and not
+# a no: a stack whose owner asked for the numbers and gets none finds out a
+# month later, when the days are gone from the logs.
+
+# The stack's value, or "no" when it declares nothing.
+stack_access_export_value() { stack_conf_get "$1" Access_Export no; }
+stack_access_export() { [ "$(stack_access_export_value "$1")" = yes ]; }
+
+# The enabled stacks that export, one per line.
+stacks_access_export() {
+  local s
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    stack_access_export "$s" && printf '%s\n' "$s"
+  done < <(stacks_enabled 2>/dev/null)
+  return 0
+}
+
+# Enabled stacks whose Access_Export is neither yes nor no, as "stack=value".
+stacks_access_export_invalid() {
+  local s v
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    v="$(stack_access_export_value "$s")"
+    case "$v" in yes|no) ;; *) printf '%s=%s\n' "$s" "$v" ;; esac
+  done < <(stacks_enabled 2>/dev/null)
+  return 0
+}
+
+# Where the exports of all stacks live: the machine's state, owned by the
+# repository's user so it can be read and copied without root.
+access_export_root() { printf '%s/state/access-export' "$(stacks_root)"; }

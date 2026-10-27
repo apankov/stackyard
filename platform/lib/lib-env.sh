@@ -425,6 +425,15 @@ backup_sources_enabled() {
     while IFS= read -r src; do
       [ -n "$src" ] && printf '%s|%s\n' "$stack" "$src"
     done <<< "$srcs"
+    # A stack's access-log exports (Access_Export, access-export.sh), as an
+    # archive of their own, files/<stack>-access-export: a fault in them must
+    # not cost the stack the backup of its own files. Only once the directory
+    # exists — before the first export there is nothing to keep, and backup.sh
+    # refuses a path that is not there. From then on it always holds FORMAT, so
+    # a directory emptied later fails as an empty source, loudly.
+    if stack_access_export "$stack" && [ -d "$(access_export_root)/$stack" ]; then
+      printf '%s|files:%s/%s\n' "$stack-access-export" "$(access_export_root)" "$stack"
+    fi
   done <<< "$(stacks_enabled 2>/dev/null)"
   return "$rc"
 }
@@ -582,6 +591,12 @@ nginx_log_days() {
 NGINX_LOG_DIR="${STACKYARD_NGINX_LOG_DIR:-/var/log/nginx}"
 # shellcheck disable=SC2034
 NGINX_LOGROTATE_DIR="${STACKYARD_NGINX_LOGROTATE_DIR:-/var/lib/devbox-nginx-logrotate}"
+# The access-log export's own state: the salt the client hashes are made with
+# and the cached country and network databases. In /var/lib and root's alone,
+# never in the repository and never in a backup — with the salt, a hash of an
+# IPv4 address is one brute force away from the address.
+# shellcheck disable=SC2034
+ACCESS_EXPORT_STATE_DIR="${STACKYARD_ACCESS_EXPORT_STATE_DIR:-/var/lib/devbox-access-export}"
 
 # The S3 prefix for this file: sqlite/<name without extension>.
 sqlite_s3_subpath() {
@@ -613,6 +628,21 @@ sha256_file() {
     sha256sum "$f" | cut -d' ' -f1  # portable-ok
   elif command -v shasum >/dev/null 2>&1; then  # portable-ok
     shasum -a 256 "$f" | cut -d' ' -f1  # portable-ok
+  else
+    echo "Error: neither sha256sum nor shasum is available — cannot compute checksums." >&2  # portable-ok
+    return 2
+  fi
+}
+
+# sha256_stdin -> hex digest of standard input, the same two tools in the same
+# order as sha256_file. Standard input rather than an argument for the access
+# export: what it hashes is a salt and an address, and a command line is
+# readable by every user on the machine through ps.
+sha256_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then  # portable-ok
+    sha256sum | cut -d' ' -f1  # portable-ok
+  elif command -v shasum >/dev/null 2>&1; then  # portable-ok
+    shasum -a 256 | cut -d' ' -f1  # portable-ok
   else
     echo "Error: neither sha256sum nor shasum is available — cannot compute checksums." >&2  # portable-ok
     return 2

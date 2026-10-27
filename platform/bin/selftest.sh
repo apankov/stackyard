@@ -2654,6 +2654,29 @@ check "--check names an ExecStart that runs a missing file" \
 check "--check warns about a unit this platform does not install" \
   "$(printf '%s\n' "$out" | grep -c 'devbox-old-thing.service is installed but not one this platform version installs')" "1"
 check "--check changes nothing" "$(tail -n 1 "$SU/devbox-ext-job.timer")" "# edited by hand"
+
+# The access-log export: installed while a stack asks for it, removed when none
+# does, and a value that is neither yes nor no fails the run.
+rm -f "$SU/devbox-old-thing.service"
+check "no stack exports: no access-export units" "$([ -e "$SU/devbox-access-export.timer" ] && echo yes || echo no)" "no"
+printf 'Access_Export="yes"\n' >> "$SM/stacks/ext/stack.conf"
+: > "$WORK/sysstub/systemctl.log"
+out="$(STACKYARD_ACCESS_EXPORT_STATE_DIR="$SM/ax" sysd)"; rc=$?
+check "Access_Export=yes installs the export units" \
+  "$rc:$([ -f "$SU/devbox-access-export.timer" ] && [ -f "$SU/devbox-access-export.service" ] && echo yes || echo no)" "0:yes"
+check "and names the stacks" "$(printf '%s\n' "$out" | grep -c 'access export: ext')" "1"
+check "and starts the first export at once" \
+  "$(grep -c '^start --no-block devbox-access-export.service' "$WORK/sysstub/systemctl.log")" "1"
+sed 's/^Access_Export=.*/Access_Export="Yes"/' "$SM/stacks/ext/stack.conf" > "$SM/x" && mv "$SM/x" "$SM/stacks/ext/stack.conf"
+out="$(STACKYARD_ACCESS_EXPORT_STATE_DIR="$SM/ax" sysd)"; rc=$?
+check "Access_Export=\"Yes\" fails the run rather than meaning no" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'FAILED: access-log export — Access_Export must be yes or no: ext=Yes')" "1:1"
+out="$(STACKYARD_ACCESS_EXPORT_STATE_DIR="$SM/ax" sysd --check)"; rc=$?
+check "--check fails on it too" "$rc" "1"
+sed '/^Access_Export=/d' "$SM/stacks/ext/stack.conf" > "$SM/x" && mv "$SM/x" "$SM/stacks/ext/stack.conf"
+out="$(STACKYARD_ACCESS_EXPORT_STATE_DIR="$SM/ax" sysd)"; rc=$?
+check "with no stack exporting, the units are removed" \
+  "$rc:$([ -e "$SU/devbox-access-export.timer" ] && echo kept || echo removed)" "0:removed"
 rm -rf "$SM" "$WORK/sysstub"
 
 echo "== nginx-logrotate: the config in force and the result check"
@@ -2781,6 +2804,95 @@ printf 'Enabled_Stacks=""\n' > "$BM/machine.conf"
 out="$(cb)"; rc=$?
 check "check-backups: nothing expected at all is not a green result" "$rc" "2"
 rm -rf "$BM" "$WORK/awsstub"
+
+echo "== access-export: anonymised days of the access logs"
+
+# A machine with one exporting stack and one that does not, logs in a scratch
+# directory, and fixture databases served from a directory.
+XM="$WORK/export-machine"; XL="$XM/logs"; XS="$XM/st"; XG="$XM/geo"
+XE="$XM/state/access-export"
+mkdir -p "$XM/stacks/web" "$XM/stacks/other" "$XL" "$XG"
+ln -sfn "$REPO_DIR/platform" "$XM/platform"; ln -sfn "$REPO_DIR/profiles" "$XM/profile"
+printf 'Platform_Deploy_Dir=%s\n' "$XM" > "$XM/.env"
+printf 'Enabled_Stacks="web other"\n' > "$XM/machine.conf"
+printf 'Domains="web.example.com+www.web.example.com"\nContainers="no"\nAccess_Export="yes"\n' > "$XM/stacks/web/stack.conf"
+printf 'Domains="other.example.com"\nContainers="no"\n' > "$XM/stacks/other/stack.conf"
+xmonth=$(date -u +%Y-%m)
+printf '192.0.2.0,192.0.2.255,AU\n198.51.100.0,198.51.100.255,US\n2001:db8::,2001:db8:ffff:ffff:ffff:ffff:ffff:ffff,DE\n' \
+  | gzip > "$XG/dbip-country-lite-$xmonth.csv.gz"
+printf '192.0.2.0,192.0.2.255,64500,"Example, Inc."\n2001:db8::,2001:db8:ffff:ffff:ffff:ffff:ffff:ffff,64501,"Six ""Net"""\n' \
+  | gzip > "$XG/dbip-asn-lite-$xmonth.csv.gz"
+UA='"Mozilla/5.0 obsidian/1.14.4"'
+{ printf '192.0.2.7 - - [20/Oct/2000:23:59:00 +0000] "GET /old HTTP/1.1" 200 1 "-" %s\n' "$UA"
+  printf '192.0.2.7 - - [21/Oct/2000:10:00:01 +0000] "GET /v1/ws?invite=secret HTTP/1.1" 101 12 "https://search.example.org/q?x" %s\n' "$UA"
+  printf '2001:db8::1 - - [21/Oct/2000:11:00:01 +0000] "POST /bot123456:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/x HTTP/1.1" 200 5 "-" "curl/8"\n'
+} | gzip > "$XL/web.example.com-access-20001021.gz"
+{ printf '203.0.113.9 - - [22/Oct/2000:00:01:00 +0000] "\\x16\\x03\\x01" 400 157 "-" "-"\n'
+  printf '::ffff:198.51.100.4 - - [22/Oct/2000:05:00:00 +0000] "GET /p/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/q HTTP/1.1" 404 3 "-" "x"\n'
+  printf '192.0.2.7 - - [%s:01:00:00 +0000] "GET /today HTTP/1.1" 200 1 "-" %s\n' "$(date -u +%d/%b/%Y)" "$UA"
+} > "$XL/web.example.com-access"
+printf '192.0.2.8 - - [21/Oct/2000:10:00:01 +0000] "GET / HTTP/1.1" 200 1 "-" "z"\n' > "$XL/other.example.com-access"
+ax() { ( ROOT_DIR="$XM" STACKYARD_NGINX_LOG_DIR="$XL" STACKYARD_ACCESS_EXPORT_STATE_DIR="$XS" \
+         STACKYARD_ACCESS_EXPORT_GEO_URL="file://$XG" "$REPO_DIR/platform/bin/access-export.sh" "$@" ) 2>&1; }
+xrow() { gzip -dc "$XE/web/web.example.com/$1.tsv.gz" | awk -F '\t' -v c="$2" -v r="$3" 'NR == r + 1 { print $c }'; }
+
+out="$(ax --dry-run)"; rc=$?
+check "access-export --dry-run: the finished days, not the oldest and not today" \
+  "$rc:$(printf '%s\n' "$out" | grep '^would export' | tr '\n' ' ')" \
+  "0:would export web web.example.com 2000-10-21 would export web web.example.com 2000-10-22 "
+check "and writes nothing" "$([ -e "$XE" ] || [ -e "$XS" ] && echo wrote || echo nothing)" "nothing"
+
+out="$(ax)"; rc=$?
+check "access-export: one file per vhost and day" \
+  "$rc:$(cd "$XE" 2>/dev/null && find . -name '*.tsv.gz' | sort | tr '\n' ' ')" \
+  "0:./web/web.example.com/2000-10-21.tsv.gz ./web/web.example.com/2000-10-22.tsv.gz "
+check "a stack without Access_Export is not exported" "$([ -e "$XE/other" ] && echo yes || echo no)" "no"
+check "the header names the columns" "$(gzip -dc "$XE/web/web.example.com/2000-10-21.tsv.gz" | head -n 1 | tr '\t' ' ')" \
+  "date time client country as method path status bytes referrer ua"
+check "no address is left in a file" \
+  "$(gzip -dc "$XE"/web/web.example.com/*.tsv.gz | grep -cE '192\.0\.2\.|2001:db8|198\.51\.100|203\.0\.113')" "0"
+check "the client is the salted hash, the same one --hash gives" "$(xrow 2000-10-21 3 1)" "$(ax --hash 192.0.2.7)"
+check "country and network of an IPv4 client" "$(xrow 2000-10-21 4 1) $(xrow 2000-10-21 5 1)" "AU AS64500 Example, Inc."
+check "and of an IPv6 one, quotes in the name unescaped" "$(xrow 2000-10-21 4 2) $(xrow 2000-10-21 5 2)" 'DE AS64501 Six "Net"'
+check "an IPv4 address logged as IPv6 is looked up as IPv4" "$(xrow 2000-10-22 4 2)" "US"
+check "an address in no range is -" "$(xrow 2000-10-22 4 1)" "-"
+check "the query string goes" "$(xrow 2000-10-21 7 1)" "/v1/ws"
+check "a bot token in a path goes" "$(xrow 2000-10-21 7 2)" "/bot<tok>/x"
+check "a long id in a path goes" "$(xrow 2000-10-22 7 2)" "/p/<tok>/q"
+check "the referrer is its host only" "$(xrow 2000-10-21 10 1)" "search.example.org"
+check "a request that was not HTTP is said so" "$(xrow 2000-10-22 6 1) $(xrow 2000-10-22 7 1)" "- <not http>"
+check "the time is to the minute" "$(xrow 2000-10-21 2 1)" "10:00"
+check "FORMAT documents the files" "$(grep -c 'DB-IP Lite' "$XE/web/FORMAT")" "1"
+check "the salt is root's alone" "$(ls -l "$XS/salt" | cut -c1-10)" "-rw-------"
+
+h1="$(xrow 2000-10-21 3 1)"
+out="$(ax)"; rc=$?
+check "a second run exports nothing again" "$rc:$(printf '%s\n' "$out" | grep -c '^  exported')" "0:0"
+check "and the salt stays: a client keeps its hash" "$(ax --hash 192.0.2.7)" "$h1"
+
+# A database that cannot be had fails the run and exports nothing: a day
+# without countries could not be redone.
+rm -f "$XE/web/web.example.com/2000-10-22.tsv.gz" "$XS"/geo/*
+mv "$XG" "$XG.gone"
+out="$(ax)"; rc=$?
+check "access-export: no database at all fails the run" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'no country database')" "1:1"
+check "and leaves the day to the next night" "$([ -e "$XE/web/web.example.com/2000-10-22.tsv.gz" ] && echo yes || echo no)" "no"
+mv "$XG.gone" "$XG"
+
+printf 'Domains="web.example.com"\nContainers="no"\nAccess_Export="true"\n' > "$XM/stacks/web/stack.conf"
+out="$(ax)"; rc=$?
+check "access-export: Access_Export=\"true\" is an error, not a no" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'Access_Export must be yes or no: web=true')" "1:1"
+
+# The exports are backed up as an archive of their own, once there are any.
+printf 'Domains="web.example.com"\nContainers="no"\nAccess_Export="yes"\nBackup_Files="/data/id"\n' > "$XM/stacks/web/stack.conf"
+bse() { ( ROOT_DIR="$XM"; . "$REPO_DIR/platform/lib/lib-env.sh"; . "$REPO_DIR/platform/lib/lib-stacks.sh"; backup_sources_enabled ) 2>&1; }
+check "backup: the exports are an archive of their own, beside the stack's files" \
+  "$(bse | tr '\n' ' ')" "web|files:/data/id web-access-export|files:$XE/web "
+mv "$XE" "$XE.x"
+check "backup: no export directory yet, no source" "$(bse | tr '\n' ' ')" "web|files:/data/id "
+rm -rf "$XM"
 
 echo "== check-certs: the right certificate, not only a fresh one"
 

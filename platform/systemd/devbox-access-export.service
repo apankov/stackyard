@@ -1,0 +1,15 @@
+[Unit]
+Description=Export the finished days of the access logs, anonymised (Access_Export)
+Documentation=file:@DEPLOY_DIR@/platform/bin/access-export.sh
+# No path condition, like the rotation: a skipped unit does not count as
+# failed, and a day not exported is lost once the rotation removes it.
+@ONFAILURE@
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+# As root: the logs are root's, and so is the salt in /var/lib. The exports
+# are handed to the repository's user.
+ExecStart=@DEPLOY_DIR@/platform/bin/access-export.sh
+TimeoutStartSec=2h
+Nice=10

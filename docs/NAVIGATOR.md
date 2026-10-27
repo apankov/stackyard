@@ -27,7 +27,7 @@ how to start. Then the guide for whatever you are about to do.
   rolling back, the everyday commands, requirements.
 - [guides/stacks.md](guides/stacks.md) — writing stacks: what a directory
   declares, every `stack.conf` key, copy or link, the database provider role,
-  external certificates, foreign containers.
+  external certificates, foreign containers, the access-log export.
 - [../plugins/stackyard/skills/stackyard/SKILL.md](../plugins/stackyard/skills/stackyard/SKILL.md)
   — the agent skill, shipped as a Claude Code plugin from this repository's
   marketplace or linked by `stackyard skill install`: the short map an agent
