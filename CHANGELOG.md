@@ -8,6 +8,28 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.43.1] — 2026-10-27
+
+### Fixed
+- A stack listing several paths in `Backup_Files` lost all but the last one.
+  Each path became its own archive, every one written to the same
+  `files/<stack>/<timestamp>` key, so each upload replaced the previous one
+  while the log reported all of them as `[ok]` and `check-backups.sh` listed
+  the stack twice as fresh. A stack's paths now go into one archive, each under
+  its base name; two paths with the same base name are refused before the run.
+- A `Backup_Files` source of a few dozen bytes (a key, a server ID) was never
+  backed up: its encrypted archive is well under the 1 KiB data-dump floor, so
+  the run failed it every night and the check said `NO BACKUP AT ALL`. A files
+  archive now has its own floor, `Backup_Min_Files_Bytes` (default 128), and
+  emptiness is judged by the source instead: a path with no non-empty file in
+  it fails the run by name.
+
+  **After updating:** run the backup by hand (`sudo systemctl start
+  devbox-backup`) rather than waiting for the timer. A machine with a
+  multi-path `Backup_Files` has had only its last path in S3, and its first
+  complete archive arrives with that run. Archives already in S3 are left as
+  they are.
+
 ## [0.43.0] — 2026-10-26
 
 ### Security
