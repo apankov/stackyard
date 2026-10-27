@@ -8,6 +8,17 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.44.1] — 2026-10-27
+
+### Fixed
+- Two access exports at once — the first one `host-setup` starts in the
+  background and one run by hand — shared a work directory, and the first to
+  finish deleted it under the other (`work/hash: No such file or directory`).
+  A run now holds a lock and works in a directory of its own; a second run is
+  refused with a message. Days already exported are whole: a day is written
+  under a temporary name and renamed, and a day cut short is exported by the
+  next run. Run without `sudo`, the export now says so in one line.
+
 ## [0.44.0] — 2026-10-27
 
 ### Added

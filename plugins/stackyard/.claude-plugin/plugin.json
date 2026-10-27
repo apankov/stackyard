@@ -1,6 +1,6 @@
 {
   "name": "stackyard",
-  "version": "0.44.0",
+  "version": "0.44.1",
   "description": "Deploy tools and sites on remote Linux hosts with stackyard, and keep track of a fleet of them",
   "author": {
     "name": "Andrey Pankov",
