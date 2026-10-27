@@ -8,6 +8,22 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.44.0] — 2026-10-27
+
+### Added
+- `Access_Export="yes"` in a stack's `stack.conf`: every night
+  `devbox-access-export.timer` writes each finished day of the stack's access
+  logs to `state/access-export/<stack>/<domain>/<YYYY-MM-DD>.tsv.gz`, kept for
+  good and backed up as `files/<stack>-access-export`. The IP becomes a salted
+  hash, with its country and network looked up first (DB-IP Lite); query
+  strings and long path tokens are dropped. `access-export.sh --dry-run` lists
+  the days still to export, `--hash <IP>` gives an address's hash. See
+  docs/guides/stacks.md, "Keeping the access logs as numbers".
+
+  **After updating:** a stack that wants it adds the line, then `sudo
+  ./host-setup` installs the timer and runs the first export at once, while
+  the logs still hold the last `Platform_Nginx_Log_Days` days.
+
 ## [0.43.1] — 2026-10-27
 
 ### Fixed
