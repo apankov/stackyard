@@ -78,10 +78,10 @@ salt() {
     ( umask 077
       mkdir -p "$ACCESS_EXPORT_STATE_DIR"
       head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$SALT_FILE.new"
-      mv -f "$SALT_FILE.new" "$SALT_FILE" ) \
+      mv -f "$SALT_FILE.new" "$SALT_FILE" ) 2>/dev/null \
       || die "cannot create $SALT_FILE — run as root (sudo $0)"
   fi
-  cat "$SALT_FILE" 2>/dev/null || die "cannot read $SALT_FILE — run as root (sudo $0)"
+  [ -r "$SALT_FILE" ] && cat "$SALT_FILE" || die "cannot read $SALT_FILE — run as root (sudo $0)"
 }
 
 # The client hash: 12 hex digits of SHA-256 over salt and address, through
@@ -176,6 +176,20 @@ if [ "$MODE" = dry ]; then
   exit 0
 fi
 
+# Root, asked here and said plainly: on a machine the state directory is
+# root's, and a run without sudo used to end in two raw shell errors first.
+( umask 077; mkdir -p "$ACCESS_EXPORT_STATE_DIR" ) 2>/dev/null && [ -w "$ACCESS_EXPORT_STATE_DIR" ] \
+  || die "cannot write $ACCESS_EXPORT_STATE_DIR — run as root (sudo $0)"
+
+# One run at a time, before anything is written. host-setup starts the first
+# export in the background, and a run by hand beside it once deleted the
+# other's work directory mid-day. flock is util-linux: every machine has it, a
+# laptop running the selftest may not, and there nothing runs beside the test.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$ACCESS_EXPORT_STATE_DIR/lock"
+  flock -n 9 || die "another export is already running (lock $ACCESS_EXPORT_STATE_DIR/lock)"
+fi
+
 # The stack directories and their FORMAT, every run: backup.sh keeps them as
 # an archive of their own, and FORMAT is what makes an emptied directory an
 # empty source rather than a quiet one (see backup_sources_enabled).
@@ -210,6 +224,7 @@ if [ ${#PLAN[@]} -eq 0 ]; then
   echo "Nothing to export: every finished day is exported."
   exit 0
 fi
+
 
 SALT="$(salt)"
 command -v curl >/dev/null 2>&1 || die "no curl command (sudo ./host-setup installs it)"
@@ -319,9 +334,9 @@ geo_lookup() {
 
 # ------------------------------------------------------- 3. the days
 
-WORK="$ACCESS_EXPORT_STATE_DIR/work"
-rm -rf "$WORK"
-( umask 077; mkdir -p "$WORK" )
+# A directory of this run's own, on disk rather than in /tmp (a tmpfs the size
+# of half the memory on a small machine): a day of a busy site is large.
+WORK="$(mktemp -d "$ACCESS_EXPORT_STATE_DIR/work.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 # Tokens in paths, as regular expressions without interval expressions: mawk,

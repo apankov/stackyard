@@ -2869,6 +2869,28 @@ h1="$(xrow 2000-10-21 3 1)"
 out="$(ax)"; rc=$?
 check "a second run exports nothing again" "$rc:$(printf '%s\n' "$out" | grep -c '^  exported')" "0:0"
 check "and the salt stays: a client keeps its hash" "$(ax --hash 192.0.2.7)" "$h1"
+check "and leaves no work directory behind" "$(find "$XS" -maxdepth 1 -name 'work*' | wc -l | tr -d ' ')" "0"
+
+# Without the rights to its state, one plain sentence and no shell noise
+# (a run without sudo used to print two raw errors first).
+rm -f "$XE/web/web.example.com/2000-10-22.tsv.gz"
+chmod 500 "$XS"
+out="$(ax)"; rc=$?
+check "access-export: no write access to its state says so, and only that" \
+  "$rc:$(printf '%s\n' "$out" | grep -c .):$(printf '%s\n' "$out" | grep -c 'run as root')" "1:1:1"
+chmod 700 "$XS"
+
+# One run at a time: a second one beside it once deleted the first one's work
+# directory mid-day. Only where flock exists, as on every machine.
+if command -v flock >/dev/null 2>&1; then
+  exec 8>"$XS/lock"; flock -n 8
+  out="$(ax)"; rc=$?
+  check "access-export: a second run beside a running one is refused" \
+    "$rc:$(printf '%s\n' "$out" | grep -c 'another export is already running')" "1:1"
+  exec 8>&-
+fi
+out="$(ax)"; rc=$?
+check "and the next run exports the day" "$rc:$([ -e "$XE/web/web.example.com/2000-10-22.tsv.gz" ] && echo yes || echo no)" "0:yes"
 
 # A database that cannot be had fails the run and exports nothing: a day
 # without countries could not be redone.
