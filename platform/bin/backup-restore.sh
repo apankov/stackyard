@@ -255,6 +255,9 @@ case "$KIND" in
     echo "This is an archive of a directory or volume. Not unpacking it automatically."
     echo
     echo "  1. stop whatever writes to '$TARGET' (./stack disable <stack> or ./dc stop <service>)"
+    # The archive holds each source path under its base name, and a files:
+    # archive holds every path its stack declares: unpacking next to the
+    # target restores them all.
     echo "  2. tar -xzf $FILE -C $(dirname "$TARGET")"
     echo "  3. bring it back up"
     echo

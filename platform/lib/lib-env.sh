@@ -498,6 +498,42 @@ backup_s3_prefix() {
 # stops being read at all, taking the real findings with it.
 backup_min_globals_bytes() { env_get Backup_Min_Globals_Bytes 128; }
 
+# The floor for a files: archive, for the same reason.
+#
+# A files: source is often a key or an ID of a few dozen bytes, and its whole
+# archive, encryption included, is well under a kilobyte. The data-dump floor
+# rejected it on every run, so such a source was never backed up at all.
+# Emptiness is caught by backup_path_has_content instead, before the dump.
+backup_min_files_bytes() { env_get Backup_Min_Files_Bytes 128; }
+
+# backup_path_has_content <path> — is there at least one non-empty regular file
+# at or under the path? Symlinks are not followed: tar stores the link, not
+# what it points to, and a source that is only links backs up nothing.
+backup_path_has_content() {
+  [ -n "$(find "$1" -type f -size +0c -print 2>/dev/null | head -n 1)" ]
+}
+
+# backup_files_by_stack — "stack|kind:value" lines on stdin (as
+# backup_sources_enabled prints them), one "stack|path path ..." line out per
+# stack with files: sources, in the order the stacks first appear.
+#
+# A stack's paths make ONE archive under files/<stack>. One archive per path
+# wrote each of them to that same key in turn: only the last path survived,
+# while the log reported every one as uploaded.
+backup_files_by_stack() {
+  local entry stack src order=()
+  local -A paths=()
+  while IFS= read -r entry; do
+    stack="${entry%%|*}"; src="${entry#*|}"
+    case "$src" in files:*) ;; *) continue ;; esac
+    [ -n "${paths[$stack]:-}" ] || order+=("$stack")
+    paths[$stack]+="${paths[$stack]:+ }${src#files:}"
+  done
+  for stack in ${order[@]+"${order[@]}"}; do
+    printf '%s|%s\n' "$stack" "${paths[$stack]}"
+  done
+}
+
 # The prefix for shared-DBMS dumps inside the machine's prefix.
 #
 # Defaults to the provider stack's name. It is overridable because changing the

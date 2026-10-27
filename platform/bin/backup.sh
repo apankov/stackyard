@@ -117,6 +117,7 @@ LOCAL_KEEP=$(env_get Backup_Local_Keep 1)
 MIN_FREE_MB=$(env_get Backup_Min_Free_MB 1024)
 MIN_OBJ_BYTES=$(env_get Backup_Min_Object_Bytes 1024)
 MIN_GLOBALS_BYTES=$(backup_min_globals_bytes)
+MIN_FILES_BYTES=$(backup_min_files_bytes)
 
 # Numeric settings are validated up front. A non-numeric value would otherwise
 # blow up mid-run, inside `[ "$x" -gt 0 ]` — that is, after some dumps have
@@ -245,10 +246,19 @@ dump_sqlite() {
 # A directory or file on the host. Via `-C` rather than an absolute path: tar
 # given an absolute path warns and strips the leading slash, and restoring such
 # an archive later has to be done blind.
+#
+# All of a stack's paths go into one archive (see backup_files_by_stack), each
+# under its base name; two paths with the same base name are refused before
+# any dump is taken. Each -C is made absolute: GNU tar resolves a relative -C
+# against the previous one.
 dump_files() {
-  local path="$1"
-  [ -e "$path" ] || return 1
-  tar -czf - -C "$(dirname "$path")" "$(basename "$path")"
+  local args=() path dir
+  for path in "$@"; do
+    [ -e "$path" ] || return 1
+    dir="$(cd "$(dirname "$path")" && pwd)" || return 1
+    args+=(-C "$dir" "$(basename "$path")")
+  done
+  tar -czf - "${args[@]}"
 }
 
 # A named volume is read through a throwaway container: the volume's contents
@@ -302,9 +312,13 @@ run_job() {
   fi
 
   bytes=$(file_size "$part")
-  # A globals dump is judged by its own floor: see backup_min_globals_bytes.
+  # A globals dump and a files archive are judged by their own floors: see
+  # backup_min_globals_bytes and backup_min_files_bytes.
   floor="$MIN_OBJ_BYTES"
-  case "$label" in *_globals) floor="$MIN_GLOBALS_BYTES" ;; esac
+  case "$label" in
+    *_globals) floor="$MIN_GLOBALS_BYTES" ;;
+    files/*)   floor="$MIN_FILES_BYTES" ;;
+  esac
   if [ "$bytes" -lt "$floor" ]; then
     rm -f "$part"
     fail_source "$label" "the dump is suspiciously small ($bytes B < $floor B)"
@@ -391,6 +405,7 @@ while IFS= read -r entry; do
   [ -n "$entry" ] && STACK_SOURCES+=("$entry")
 done <<< "$all_sources"
 
+declare -A FILES_NAMES=()
 for entry in "${STACK_SOURCES[@]}"; do
   src="${entry#*|}"
   case "${src%%:*}" in
@@ -403,6 +418,12 @@ for entry in "${STACK_SOURCES[@]}"; do
     files)
       [ -e "${src#*:}" ] \
         || die "no such path '${src#*:}' — check Backup_Files in the stack.conf of '${entry%%|*}'"
+      # One archive per stack, each path under its base name: two paths with
+      # the same name would land on top of each other on restore.
+      name="${entry%%|*}|$(basename "${src#*:}")"
+      [ -z "${FILES_NAMES[$name]:-}" ] \
+        || die "two paths named '$(basename "${src#*:}")' in Backup_Files of '${entry%%|*}': ${FILES_NAMES[$name]} and ${src#*:} — one archive cannot hold both"
+      FILES_NAMES[$name]="${src#*:}"
       ;;
     volume)
       docker volume inspect "${src#*:}" >/dev/null 2>&1 \
@@ -553,7 +574,8 @@ if [ -n "$DATABASES" ]; then
   done <<< "$DATABASES"
 fi
 
-# Sources declared by stacks. Collected and validated above.
+# Sources declared by stacks. Collected and validated above. files: paths are
+# archived per stack after this loop: see dump_files.
 for entry in "${STACK_SOURCES[@]}"; do
   stack="${entry%%|*}"; src="${entry#*|}"
   kind="${src%%:*}"; val="${src#*:}"
@@ -561,9 +583,33 @@ for entry in "${STACK_SOURCES[@]}"; do
     db)       run_job "$DB_PREFIX/$val" "$DB_PREFIX/$val" "$TS$DB_EXT.gpg" dump_db "$val" || true ;;
     sqlite)   sub=$(sqlite_s3_subpath "$val")
               run_job "$sub" "$sub" "$TS.db.gz.gpg" dump_sqlite "$val" || true ;;
-    files)    run_job "files/$stack" "files/$stack" "$TS.tar.gz.gpg" dump_files "$val" || true ;;
     volume)   run_job "volume/$val" "volume/$val" "$TS.tar.gz.gpg" dump_volume "$val" || true ;;
   esac
+done
+
+# Read whole before the loop: the jobs inside must not inherit a here-string
+# as their stdin.
+FILES_GROUPS=()
+if [ ${#STACK_SOURCES[@]} -gt 0 ]; then
+  mapfile -t FILES_GROUPS < <(printf '%s\n' "${STACK_SOURCES[@]}" | backup_files_by_stack)
+fi
+for group in ${FILES_GROUPS[@]+"${FILES_GROUPS[@]}"}; do
+  stack="${group%%|*}"
+  # Backup_Files is split on whitespace when it is read, so a path holds none.
+  read -ra paths <<< "${group#*|}"
+  empty=()
+  for p in "${paths[@]}"; do
+    backup_path_has_content "$p" || empty+=("$p")
+  done
+  # The size floor cannot tell a 32-byte key file from an empty directory: both
+  # archive to a few hundred bytes. So the source is judged instead: a path
+  # with no non-empty file in it is an unmounted disk or a wiped directory, not
+  # a backup.
+  if [ ${#empty[@]} -gt 0 ]; then
+    fail_source "files/$stack" "no non-empty file under: ${empty[*]}"
+    continue
+  fi
+  run_job "files/$stack" "files/$stack" "$TS.tar.gz.gpg" dump_files "${paths[@]}" || true
 done
 
 # --------------------------------------------------------------- 4. summary

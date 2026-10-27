@@ -406,6 +406,28 @@ check "a readable list succeeds, stack by stack" \
   "$(backup_sources_enabled | grep '^golf|' | tr '\n' ' ')" "golf|db:golfdb golf|sqlite:/mnt/data/golf/g.db "
 printf 'Enabled_Stacks="foxtrot bravo"\n' > "$WORK/machine.conf"
 
+# A stack's files: paths make one archive under files/<stack>. One archive per
+# path wrote them all to the same key, and only the last path survived.
+check "a stack's files: paths are grouped into one archive" \
+  "$(printf 'hotel|files:/d/raw\nhotel|sqlite:/d/h.db\nindia|files:/e/id\nhotel|files:/d/machine\n' \
+       | backup_files_by_stack | tr '\n' ' ')" "hotel|/d/raw /d/machine india|/e/id "
+check "a list without files: sources yields no archive" \
+  "$(printf 'hotel|db:h\n' | backup_files_by_stack)" ""
+
+# The size floor cannot tell a 32-byte key file from an empty directory, so
+# the source itself is judged.
+FC="$WORK/files-content"
+mkdir -p "$FC/full" "$FC/hollow/sub" "$FC/blank"
+printf '%032d' 0 > "$FC/full/server-id"
+: > "$FC/blank/empty-file"
+ln -s "$FC/full/server-id" "$FC/link"
+check "a 32-byte file is content" "$(backup_path_has_content "$FC/full/server-id" && echo yes)" "yes"
+check "a directory holding one is content" "$(backup_path_has_content "$FC/full" && echo yes)" "yes"
+check "an empty directory tree is not" "$(backup_path_has_content "$FC/hollow" || echo no)" "no"
+check "nor a directory of empty files" "$(backup_path_has_content "$FC/blank" || echo no)" "no"
+check "nor a symlink, which tar stores as a link" "$(backup_path_has_content "$FC/link" || echo no)" "no"
+rm -rf "$FC"
+
 echo "== unfilled values"
 
 # host-setup and stack init both decide by this what is left to fill in. A
@@ -2725,9 +2747,11 @@ printf 'Provides_DB="Prov"\nContainers="no"\n' > "$BM/stacks/prov/stack.conf"
 printf '#!/bin/sh\ncase "$1" in\n  list) echo appdb ;;\n  globals) [ -f "$ROOT_DIR/globals-fail" ] && exit 1; echo GRANT ;;\n  ext) echo .sql ;;\nesac\n' \
   > "$BM/stacks/prov/scripts/backup-dump.sh"
 chmod +x "$BM/stacks/prov/scripts/backup-dump.sh"
-printf 'Containers="no"\nBackup_DB="${App_Extra_Db}"\nBackup_Sqlite="${App_Dir}/a.db"\n' > "$BM/stacks/app/stack.conf"
+printf 'Containers="no"\nBackup_DB="${App_Extra_Db}"\nBackup_Sqlite="${App_Dir}/a.db"\nBackup_Files="${App_Dir}/raw ${App_Dir}/id"\n' > "$BM/stacks/app/stack.conf"
 printf 'App_Extra_Db=extradb\nApp_Dir=/data\n' > "$BM/stacks/app/.env"
-printf '#!/bin/sh\nwhile [ "$1" = --region ]; do shift 2; done\ncase "$1 $2" in\n  "s3api list-objects-v2") printf "4096\\t%%s\\n" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S+00:00)" ;;\nesac\nexit 0\n' \
+# An object under files/ is the size of a real archive of one key file: under
+# the data-dump floor, over the files one.
+printf '#!/bin/sh\nwhile [ "$1" = --region ]; do shift 2; done\nsize=4096; case "$*" in *"/files/"*) size=751 ;; esac\ncase "$1 $2" in\n  "s3api list-objects-v2") printf "%%s\\t%%s\\n" "$size" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S+00:00)" ;;\nesac\nexit 0\n' \
   > "$WORK/awsstub/aws"
 chmod +x "$WORK/awsstub/aws"
 cb() { ( PATH="$WORK/awsstub:$PATH" ROOT_DIR="$BM" "$REPO_DIR/platform/bin/check-backups.sh" ) 2>&1; }
@@ -2737,6 +2761,10 @@ check "check-backups: a machine whose every object is fresh passes" "$rc" "0"
 check "check-backups: a Backup_DB source is expected too" "$(printf '%s\n' "$out" | grep -c '^prov/extradb .*ok')" "1"
 check "check-backups: the provider's databases and roles are expected" \
   "$(printf '%s\n' "$out" | grep -cE '^prov/(appdb|_globals) .*ok')" "2"
+check "check-backups: a stack's files: paths are one archive, expected once" \
+  "$(printf '%s\n' "$out" | grep -c '^files/app ')" "1"
+check "check-backups: a small files archive is judged by its own floor" \
+  "$(printf '%s\n' "$out" | grep -c '^files/app .*ok')" "1"
 
 touch "$BM/globals-fail"
 out="$(cb)"; rc=$?

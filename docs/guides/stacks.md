@@ -72,7 +72,7 @@ copies. The file is parsed line by line and never sourced.
 | `DB_Init_Service` | `"mysql-initializer"` | the provider's one-shot container that creates users and databases |
 | `<Prefix>_DB`, `_User`, `_Password` | `Mysql_DB="${Site_DB_Name}"` | a database order from a consumer |
 | `<Prefix>_Grants` and others | `Mysql_Grants="SELECT,INSERT"` | provider-specific; validated by the provider's `check-decl.sh` |
-| `Backup_Sqlite`, `Backup_Files`, `Backup_Volume` | `"${App_Dir}/db.sqlite"` | what `backup.sh` takes from this stack besides its databases |
+| `Backup_Sqlite`, `Backup_Files`, `Backup_Volume` | `"${App_Dir}/db.sqlite"` | what `backup.sh` takes from this stack besides its databases; all `Backup_Files` paths of a stack go into one archive, each under its base name, so two paths with the same base name are refused |
 | `Image_Tag` | `"registry.example.com/app:main"` | the moving tag `./registry pin <stack>` resolves to a digest |
 
 ## The profile's stacks

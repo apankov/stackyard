@@ -59,6 +59,7 @@ DB_PREFIX=$(backup_db_prefix)
 MAX_AGE_HOURS=$(env_get Backup_Max_Age_Hours 26)
 MIN_OBJ_BYTES=$(env_get Backup_Min_Object_Bytes 1024)
 MIN_GLOBALS_BYTES=$(backup_min_globals_bytes)
+MIN_FILES_BYTES=$(backup_min_files_bytes)
 
 aws_cli() {
   if [ -n "$AWS_KEY" ]; then
@@ -152,7 +153,12 @@ while IFS= read -r entry; do
               *) EXPECTED+=("$DB_PREFIX/${src#*:}") ;;
             esac ;;
     sqlite) EXPECTED+=("$(sqlite_s3_subpath "${src#*:}")") ;;
-    files)  EXPECTED+=("files/$stack") ;;
+    # One archive per stack however many paths it lists: see dump_files in
+    # backup.sh.
+    files)  case " ${EXPECTED[*]+${EXPECTED[*]}} " in
+              *" files/$stack "*) ;;
+              *) EXPECTED+=("files/$stack") ;;
+            esac ;;
     volume) EXPECTED+=("volume/${src#*:}") ;;
   esac
 done <<< "$all_sources"
@@ -194,11 +200,14 @@ for src in ${EXPECTED[@]+"${EXPECTED[@]}"}; do
 
   age_h=$(( (now - ts) / 3600 ))
 
-  # The same two floors as in backup.sh, for the same reason: one threshold
-  # for a database dump and for a list of grants makes the second one red
+  # The same floors as in backup.sh, for the same reason: one threshold for a
+  # database dump, a list of grants and a key file makes the last two red
   # forever.
   floor="$MIN_OBJ_BYTES"
-  case "$src" in *_globals) floor="$MIN_GLOBALS_BYTES" ;; esac
+  case "$src" in
+    *_globals) floor="$MIN_GLOBALS_BYTES" ;;
+    files/*)   floor="$MIN_FILES_BYTES" ;;
+  esac
   if [ "$size" -lt "$floor" ]; then
     # A truncated dump is almost always tiny. Without this check "a file
     # exists" is indistinguishable from "a backup exists".

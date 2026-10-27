@@ -173,6 +173,9 @@ MUTATIONS=(
   'sources: a stack that cannot be read is forgotten@@platform/lib/lib-env.sh@@      rc=1\n      continue@@      continue'
   'check-backups: a Backup_DB source is not expected@@platform/bin/check-backups.sh@@    db)     case " ${EXPECTED@@    NEVER)  case " ${EXPECTED'
   'check-backups: a failed globals hook reads as empty@@platform/bin/check-backups.sh@@"$hook" globals 2>/dev/null); then@@"$hook" globals 2>/dev/null || true); then'
+  'backup: each files path overwrites the last in one archive key@@platform/lib/lib-env.sh@@    paths[$stack]+="${paths[$stack]:+ }${src#files:}"@@    paths[$stack]="${src#files:}"'
+  'backup: an empty file passes for content@@platform/lib/lib-env.sh@@-type f -size +0c -print@@-type f -print'
+  'check-backups: a files archive is judged by the data-dump floor@@platform/bin/check-backups.sh@@    files/*)   floor="$MIN_FILES_BYTES" ;;@@    files/*)   ;;'
   'check-backups: nothing expected passes as fresh@@platform/bin/check-backups.sh@@if [ ${#EXPECTED[@]} -eq 0 ] \&\& [ "$problems" -eq 0 ]; then@@if false; then'
   # --- the Postgres initializer (run with the live-database block).
   'pg init: a failed statement does not stop it@@profiles/stacks/pg/db-init/initializer.sh@@-v ON_ERROR_STOP=1 "$@"@@-v ON_ERROR_STOP=0 "$@"'
