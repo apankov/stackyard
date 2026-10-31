@@ -2751,9 +2751,38 @@ check "check-nginx-logs: a log named outside the convention fails, by name" \
   "$rc:$(printf '%s\n' "$out" | grep -c 'b.example.com.access')" "1:1"
 rm -f "$LL/b.example.com.access"
 
+# A disabled stack: its live logs are empty, so logrotate never rotates them
+# and never applies maxage to their generations. The sweep does, without root.
+lrp() { ( ROOT_DIR="$LM" STACKYARD_NGINX_LOG_DIR="$LL" STACKYARD_NGINX_LOGROTATE_DIR="$LS" \
+          "$REPO_DIR/platform/bin/nginx-logrotate.sh" --prune "$@" ) 2>&1; }
+: > "$LL/c.example.com-access"; : > "$LL/c.example.com-error"
+printf 'GET /\n' > "$LL/a.example.com-access-20000201"   # the busy vhost rotates on
+printf 'GET /\n' > "$LL/c.example.com-access-20000101"
+printf 'x' > "$LL/c.example.com-error-20000101.gz"
+printf 'GET /\n' > "$LL/c.example.com-access-20000110"
+age 10.2 "$LL/c.example.com-access-20000101" "$LL/c.example.com-error-20000101.gz" \
+  "$LL/c.example.com-access" "$LL/c.example.com-error"
+age 8.5 "$LL/c.example.com-access-20000110"
+out="$(cnl)"; rc=$?
+check "check-nginx-logs: a disabled stack's generations a day short of the line pass" "$rc" "0"
+out="$(lrp -d)"; rc=$?
+check "nginx-logrotate --prune -d names what it would remove and keeps it" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'would be removed: c.example.com-')":"$(ls "$LL" | grep -c '^c\.example\.com-.*-2000')" "0:2:3"
+out="$(lrp)"; rc=$?
+check "nginx-logrotate --prune removes the generations a day before the check fails them" \
+  "$rc:$(printf '%s\n' "$out" | grep -c 'removed: c.example.com-')" "0:2"
+check "and keeps the younger generation and the live logs, however old" \
+  "$(ls "$LL" | grep -c '^c\.example\.com-')" "3"
+age 11.5 "$LL/c.example.com-access-20000110"
+check "a generation the check would fail is swept before it gets there" \
+  "$(lrp >/dev/null; cnl >/dev/null; echo $?)" "0"
+rm -f "$LL"/c.example.com-* "$LL/a.example.com-access-20000201"
+
 rm -rf "$LL"
 out="$(cnl)"; rc=$?
 check "check-nginx-logs: no log directory is 'could not check', not a pass" "$rc" "2"
+out="$(lrp)"; rc=$?
+check "nginx-logrotate --prune: no log directory is nothing to sweep" "$rc" "0"
 rm -rf "$LM"
 
 echo "== check-backups.sh: what it expects"

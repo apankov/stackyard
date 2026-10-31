@@ -14,6 +14,7 @@
 #   sudo ./platform/bin/nginx-logrotate.sh -f     # force a rotation now
 #   sudo ./platform/bin/nginx-logrotate.sh -d     # logrotate's plan, no changes
 #   ./platform/bin/nginx-logrotate.sh --print-config   # the config in force; no root
+#   ./platform/bin/nginx-logrotate.sh --prune          # only the retention sweep
 #
 # Any other arguments go to logrotate as they are.
 
@@ -52,6 +53,47 @@ render() {
 if [ "${1-}" = "--print-config" ]; then
   render
   exit 0
+fi
+
+# The retention, enforced apart from the rotation. logrotate's `rotate` and
+# `maxage` act on a file's generations only when it rotates that file, and
+# `notifempty` / `missingok` skip a live log that is empty or gone: the log of a
+# disabled stack, or an error log nothing is written to. Its generations would
+# then stay forever, past the days the access logs promise to be kept.
+#
+# A generation goes once its last record is Platform_Nginx_Log_Days old: one
+# day stricter than check-nginx-logs.sh, which runs hours after this and would
+# otherwise see a file that crossed its line in between. The patterns are the
+# check's: a name plus dateext's -YYYYMMDD, maybe .gz; a live log never matches.
+GEN='*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+prune() {
+  [ -d "$NGINX_LOG_DIR" ] || return 0
+  find "$NGINX_LOG_DIR" -maxdepth 1 -type f \( -name "$GEN" -o -name "$GEN.gz" \) \
+    -mtime +"$((DAYS - 1))"
+}
+# Named rather than deleted when logrotate is asked only for its plan.
+dry_run=no
+for a in "$@"; do case "$a" in -d|--debug) dry_run=yes ;; esac; done
+# Each removed file is named: a deletion without a trace in the journal would
+# look like a log that never existed. (-printf is GNU's; macOS runs selftest.)
+sweep() {
+  local f failed=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$dry_run" = yes ]; then
+      echo "  past the retention, would be removed: ${f##*/}"
+    elif rm -f -- "$f"; then
+      echo "  past the retention, removed: ${f##*/}"
+    else
+      failed=1
+    fi
+  done < <(prune)
+  return "$failed"
+}
+
+if [ "${1-}" = "--prune" ]; then
+  sweep
+  exit
 fi
 
 [ "$(id -u)" -eq 0 ] || { echo "Error: root is required (sudo $0 $*)" >&2; exit 2; }
@@ -100,4 +142,9 @@ render > "$conf.tmp"
 chmod 644 "$conf.tmp"
 mv -f "$conf.tmp" "$conf"
 
-exec logrotate ${FORCE[@]+"${FORCE[@]}"} "$@" --state "$NGINX_LOGROTATE_DIR/state" "$conf"
+# The sweep runs even when logrotate failed: the retention does not depend on
+# the rotation, and logrotate's exit code is still the unit's.
+rc=0
+logrotate ${FORCE[@]+"${FORCE[@]}"} "$@" --state "$NGINX_LOGROTATE_DIR/state" "$conf" || rc=$?
+if ! sweep && [ "$rc" -eq 0 ]; then rc=1; fi
+exit "$rc"

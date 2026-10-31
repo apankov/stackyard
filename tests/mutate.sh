@@ -195,6 +195,8 @@ MUTATIONS=(
   'upstreams: a loopback-only port reads as reachable@@platform/lib/lib-stacks.sh@@          127.0.0.1|"[::1]")   local_only="$local_only $name" ;;@@          127.0.0.1|"[::1]")   other="$other $name" ;;'
   'install: PATH is appended on every run@@install.sh@@    elif grep -qF "$line" "$rc" 2>/dev/null; then@@    elif false; then'
   'nginx logs: the live file not counted against the retention@@platform/bin/nginx-logrotate.sh@@s#@ROTATE@#$((DAYS - 1))#g@@s#@ROTATE@#${DAYS}#g'
+  'nginx logs: the sweep waits for the line the check fails on@@platform/bin/nginx-logrotate.sh@@    -mtime +"$((DAYS - 1))"@@    -mtime +"$DAYS"'
+  'nginx logs: compressed generations escape the sweep@@platform/bin/nginx-logrotate.sh@@  find "$NGINX_LOG_DIR" -maxdepth 1 -type f \( -name "$GEN" -o -name "$GEN.gz" \) \@@  find "$NGINX_LOG_DIR" -maxdepth 1 -type f -name "$GEN" \'
   'nginx logs: compressed generations escape the check@@platform/bin/check-nginx-logs.sh@@\( -name "$GEN" -o -name "$GEN.gz" \) "$@"@@-name "$GEN" "$@"'
   'access export: the oldest day, maybe cut by the rotation, is exported as whole@@platform/bin/access-export.sh@@      [ "$day" = "$oldest" ] && continue@@      :'
   'access export: the query string is kept@@platform/bin/access-export.sh@@      sub(/[?#].*/, "", path)@@      :'
