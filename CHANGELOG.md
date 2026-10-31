@@ -8,6 +8,18 @@ version may break things, and when it does the entry says what to do.
 
 Releases before 0.27.0 are recorded only in the tags and the git history.
 
+## [0.44.2] — 2026-10-31
+
+### Fixed
+- The nginx logs of a disabled stack, and an error log nothing is written to,
+  kept their rotated generations forever: logrotate applies `rotate` and
+  `maxage` only to a file it rotates, and skips an empty one. Past
+  `Platform_Nginx_Log_Days`, `devbox-nginx-logrotate-check` then failed every
+  day. `nginx-logrotate.sh` now removes every generation past the retention
+  after logrotate runs, naming each one in the journal; `-d` only lists them,
+  and `--prune` runs the sweep alone. Nothing to do: the next nightly run
+  clears what has piled up, or run `sudo ./platform/bin/nginx-logrotate.sh --prune`.
+
 ## [0.44.1] — 2026-10-27
 
 ### Fixed
